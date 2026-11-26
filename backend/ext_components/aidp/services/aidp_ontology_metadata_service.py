@@ -77,6 +77,7 @@ def create_ontology_metadata_field_impl(
         f"{_get_ontology_path(tenant_id)}/{_domain_id_value(domain_id)}/Metadata",
         operation="create-ontology-metadata-field",
         json_body={"fieldName": field_name, "fieldType": field_type},
+        retry=False,
     )
     _log_business_failure(payload, "create-ontology-metadata-field")
     data = payload.get("data") if isinstance(payload, dict) else None

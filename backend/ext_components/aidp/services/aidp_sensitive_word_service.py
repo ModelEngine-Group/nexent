@@ -39,19 +39,9 @@ AIDP_SENSITIVE_WORD_MAX_PAGE_SIZE = 100
 _WORD_MODES = {"BLACK", "WHITE"}
 
 
-def _validate_kds_id(kds_id: str) -> str:
-    value = (kds_id or "").strip()
-    if not value:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            "Knowledge base id is required",
-        )
-    return value
-
-
 def _collection_path(kds_id: str) -> str:
     return _get_sensitive_words_path(
-        _validate_kds_id(kds_id),
+        kds_id,
         tenant_id=AIDP_SENSITIVE_WORD_TENANT,
     )
 
@@ -67,19 +57,6 @@ def _build_list_path(
     keyword: str | None,
     mode: str | None,
 ) -> str:
-    if page < 1:
-        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "page must be at least 1")
-    if page_size < 1 or page_size > AIDP_SENSITIVE_WORD_MAX_PAGE_SIZE:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            f"page_size must be between 1 and {AIDP_SENSITIVE_WORD_MAX_PAGE_SIZE}",
-        )
-    if mode is not None and mode not in _WORD_MODES:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            "mode must be BLACK or WHITE",
-        )
-
     query = f"?page={page}&page_size={page_size}"
     normalized_keyword = (keyword or "").strip()
     if normalized_keyword:

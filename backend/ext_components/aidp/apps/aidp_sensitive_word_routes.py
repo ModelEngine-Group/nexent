@@ -15,7 +15,13 @@ from typing import Annotated, Literal, NoReturn
 from fastapi import APIRouter, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
@@ -83,7 +89,11 @@ def _raise_sensitive_word_upstream_error(exc: AidpSensitiveWordError) -> NoRetur
 @aidp_sensitive_word_router.get("/knowledge-bases/{kds_id}/sensitive-words")
 async def list_sensitive_words(
     request: Request,
-    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    kds_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1),
+        Path(description="Knowledge base ID"),
+    ],
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
     keyword: Annotated[
@@ -121,7 +131,11 @@ async def list_sensitive_words(
 @aidp_sensitive_word_router.post("/knowledge-bases/{kds_id}/sensitive-words")
 async def create_sensitive_word(
     request: Request,
-    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    kds_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1),
+        Path(description="Knowledge base ID"),
+    ],
     body: CreateSensitiveWordRequest,
 ) -> JSONResponse:
     """Create one custom word in the knowledge base dictionary."""
@@ -149,7 +163,11 @@ async def create_sensitive_word(
 @aidp_sensitive_word_router.get("/knowledge-bases/{kds_id}/sensitive-words/{word_id}")
 async def get_sensitive_word(
     request: Request,
-    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    kds_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1),
+        Path(description="Knowledge base ID"),
+    ],
     word_id: Annotated[str, Path(min_length=1, description="AIDP sensitive word ID")],
 ) -> JSONResponse:
     """Read the latest value of one word before editing it."""
@@ -175,7 +193,11 @@ async def get_sensitive_word(
 @aidp_sensitive_word_router.patch("/knowledge-bases/{kds_id}/sensitive-words/{word_id}")
 async def update_sensitive_word(
     request: Request,
-    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    kds_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1),
+        Path(description="Knowledge base ID"),
+    ],
     word_id: Annotated[str, Path(min_length=1, description="AIDP sensitive word ID")],
     body: UpdateSensitiveWordRequest,
 ) -> JSONResponse:
@@ -203,7 +225,11 @@ async def update_sensitive_word(
 @aidp_sensitive_word_router.delete("/knowledge-bases/{kds_id}/sensitive-words/{word_id}")
 async def delete_sensitive_word(
     request: Request,
-    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    kds_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1),
+        Path(description="Knowledge base ID"),
+    ],
     word_id: Annotated[str, Path(min_length=1, description="AIDP sensitive word ID")],
 ) -> Response:
     """Delete one custom word; AIDP confirms with an empty 204 response."""

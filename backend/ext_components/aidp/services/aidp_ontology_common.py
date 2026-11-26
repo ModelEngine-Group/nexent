@@ -83,6 +83,7 @@ def _ontology_request(
     params: dict[str, Any] | None = None,
     json_body: dict[str, Any] | None = None,
     timeout: float = _ONTOLOGY_TIMEOUT_SECONDS,
+    retry: bool = True,
 ) -> Any:
     """Execute one authenticated AIDP request and return its JSON body."""
     base_url = _validate_params(server_url, api_key)
@@ -91,16 +92,18 @@ def _ontology_request(
     client = http_client_manager.get_sync_client(
         base_url=base_url, timeout=timeout, verify_ssl=False
     )
+    request_fn = lambda: client.request(
+        method,
+        url,
+        headers=headers,
+        params=params,
+        json=json_body,
+    )
     try:
-        response = _request_with_retry(
-            lambda: client.request(
-                method,
-                url,
-                headers=headers,
-                params=params,
-                json=json_body,
-            ),
-            context=operation,
+        response = (
+            _request_with_retry(request_fn, context=operation)
+            if retry
+            else request_fn()
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as error:

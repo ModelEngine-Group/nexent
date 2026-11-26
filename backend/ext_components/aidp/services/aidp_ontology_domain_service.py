@@ -86,6 +86,7 @@ def create_ontology_domain_impl(
         _get_ontology_path(tenant_id),
         operation="create-ontology-domain",
         json_body=body,
+        retry=False,
     )
     _log_business_failure(payload, "create-ontology-domain")
     data = payload.get("data") if isinstance(payload, dict) else None
@@ -243,6 +244,7 @@ def create_ontology_entity_impl(
         f"{_get_ontology_path(tenant_id)}/{_domain_id_value(domain_id)}/Entities",
         operation="create-ontology-entity",
         json_body=body,
+        retry=False,
     )
     _log_business_failure(payload, "create-ontology-entity")
     data = payload.get("data") if isinstance(payload, dict) else None
@@ -379,6 +381,7 @@ def create_ontology_relation_impl(
         _get_relations_path(domain_id, tenant_id),
         operation="create-ontology-relation",
         json_body=body,
+        retry=False,
     )
     _log_business_failure(payload, "create-ontology-relation")
     data = payload.get("data") if isinstance(payload, dict) else None

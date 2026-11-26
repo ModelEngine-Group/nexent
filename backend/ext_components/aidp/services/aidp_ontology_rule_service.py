@@ -147,6 +147,7 @@ def create_ontology_rule_impl(
         f"{_get_ontology_path(tenant_id)}/{_domain_id_value(domain_id)}/Rules",
         operation="create-ontology-rule",
         json_body=body,
+        retry=False,
     )
     _log_business_failure(payload, "create-ontology-rule")
     data = payload.get("data") if isinstance(payload, dict) else None

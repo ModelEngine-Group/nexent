@@ -21,8 +21,6 @@ SERVICE_PATH = os.path.join(
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException
 from ext_components.aidp.consts.aidp_exceptions import AidpSensitiveWordError
 
 
@@ -122,29 +120,6 @@ def test_list_uses_the_knowledge_base_path_and_returns_the_upstream_shape(
         "source": "CUSTOM",
     }
 
-
-def test_list_rejects_an_out_of_range_page_size_without_calling_aidp(service_module):
-    client = _configure_client(service_module, httpx.Response(200, json={}))
-
-    with pytest.raises(AppException) as exc_info:
-        service_module.list_sensitive_words_impl(
-            "http://aidp.example.com", "api-key", "kb-1", 1, 101
-        )
-
-    assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
-    client.request.assert_not_called()
-
-
-def test_list_rejects_a_blank_knowledge_base_id(service_module):
-    client = _configure_client(service_module, httpx.Response(200, json={}))
-
-    with pytest.raises(AppException) as exc_info:
-        service_module.list_sensitive_words_impl(
-            "http://aidp.example.com", "api-key", "  ", 1, 10
-        )
-
-    assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
-    client.request.assert_not_called()
 
 
 def test_create_returns_only_the_upstream_id(service_module):
