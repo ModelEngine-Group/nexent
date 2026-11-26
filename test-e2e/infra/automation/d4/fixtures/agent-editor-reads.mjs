@@ -84,7 +84,7 @@ export async function fulfillEditorReadFixture(route, endpoint) {
           auth_provider: "local",
           group_ids: [],
           permissions: [],
-          accessibleRoutes: [
+          accessiblePages: [
             "/agents",
             "/mcp-space",
             "/knowledges",

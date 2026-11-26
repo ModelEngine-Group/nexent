@@ -18,8 +18,9 @@ feature:
       one persisted Agent, with exactly two requested attempts and no automatic extra
       creation.
   - rule_id: AGENT-EDITOR-RULE-003
-    description: Description and greeting persist through the real editor/autosave
-      chain and reload, while Agent identity and resource associations are retained.
+    description: Description, greeting and manual prompt edits autosave and survive
+      reload while preserving Agent identity and resource associations. Changes in the
+      expanded prompt editor autosave while the dialog remains open.
   - rule_id: AGENT-EDITOR-RULE-004
     description: Cancelling all five resource drawers preserves original associations
       and leaves no blocking overlay or business mutation.
