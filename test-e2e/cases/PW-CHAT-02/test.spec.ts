@@ -16,8 +16,8 @@ journey("PW-CHAT-02", async (context) => {
   const wirePath = process.env.NEXENT_TEST_MCP_WIRE_LOG || "";
   const chat = new ChatPage(page);
   const waitForVisibleAnswer = (message: ReturnType<ChatPage["assistantMessages"]>) =>
-    expect(message.locator('[data-slot="aui_assistant-message-completion-indicator"]'))
-      .toHaveText(/^(已完成|Completed?)$/, { timeout: 90_000 });
+    expect(message.locator('[data-slot="aui_assistant-message-completion-indicator"]')
+      .getByText(/^(已完成|Completed?)$/)).toBeVisible({ timeout: 90_000 });
   let agentDisplay = "";
   let wireOffset = 0;
   let toolAnswer = "";
