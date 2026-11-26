@@ -17,6 +17,8 @@ import sys
 import os
 import asyncio
 
+import pytest
+
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 boto3_module = types.ModuleType("boto3")
@@ -2708,6 +2710,74 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
 # ============================================================================
 # delete_mcp_service - mark MCP tools unavailable
 # ============================================================================
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reenable", [False, True])
+@patch_import_context('management.services.mcp.service.delete_mcp_record_by_id')
+@patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+@patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
+@patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+@patch_import_context('management.services.mcp.service.update_mcp_record_container_fields_by_id')
+@patch_import_context('management.services.mcp.service.mcp_server_health', return_value=True)
+@patch_import_context('management.services.mcp.service.MCPContainerManager')
+@patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant', return_value=[])
+@patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+async def test_uploaded_mcp_remains_deletable_after_disable(
+    mock_get, mock_list, mock_manager, mock_health, mock_fields,
+    mock_enabled, mock_status, mock_tools, mock_delete, reenable,
+):
+    target = {"tenant_id": "tid", "user_id": "uid", "mcp_id": 1}
+    url = "http://mcp-echo:8080/mcp"
+    mock_get.return_value = {
+        "mcp_name": "echo", "mcp_server": url, "container_id": "pod-uid",
+        "container_port": 8080, "config_json": None,
+    }
+    mock_stop = mock_manager.return_value.stop_mcp_container = AsyncMock(return_value=True)
+
+    await update_mcp_service_enabled(**target, enabled=False)
+
+    mock_enabled.assert_called_once_with(**target, enabled=False)
+    mock_fields.assert_not_called()
+    mock_manager.assert_not_called()
+    if reenable:
+        await update_mcp_service_enabled(**target, enabled=True)
+        mock_health.assert_awaited_once_with(remote_mcp_server=url, authorization_token=None, custom_headers=None)
+        mock_enabled.assert_called_with(**target, enabled=True)
+        mock_fields.assert_not_called()
+        mock_manager.assert_not_called()
+
+    await delete_mcp_service(**target)
+
+    mock_stop.assert_awaited_once_with(container_id="pod-uid")
+    mock_delete.assert_called_once_with(**target)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_result", [True, False, RuntimeError("cleanup failed")])
+@patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+@patch_import_context('management.services.mcp.service.update_mcp_record_container_fields_by_id')
+@patch_import_context('management.services.mcp.service.MCPContainerManager')
+@patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+async def test_configured_mcp_disable_retains_id_if_cleanup_fails(
+    mock_get, mock_manager, mock_fields, mock_enabled, stop_result,
+):
+    target = {"tenant_id": "tid", "user_id": "uid", "mcp_id": 1}
+    mock_get.return_value = {
+        "mcp_name": "echo", "mcp_server": "http://mcp-echo:8080/mcp", "container_id": "pod-uid",
+        "container_port": 8080, "config_json": {"mcpServers": {"echo": {"command": "uvx"}}},
+    }
+    mock_stop = mock_manager.return_value.stop_mcp_container = AsyncMock()
+    if isinstance(stop_result, Exception):
+        mock_stop.side_effect = stop_result
+    else:
+        mock_stop.return_value = stop_result
+
+    await update_mcp_service_enabled(**target, enabled=False)
+
+    mock_stop.assert_awaited_once_with("pod-uid")
+    assert mock_fields.call_args.kwargs["container_id"] == (None if stop_result is True else "pod-uid")
+    mock_enabled.assert_called_once_with(**target, enabled=False)
+
 
 class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
     """Test delete_mcp_service hides the deleted MCP's tools."""

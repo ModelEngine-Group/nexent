@@ -170,7 +170,7 @@ def update_mcp_record_manage_fields_by_id(
     tenant_id: str,
     user_id: str,
     name: str,
-    server_url: str,
+    server_url: str | None,
     description: str | None,
     tags: List[str] | None,
     source: str | None,

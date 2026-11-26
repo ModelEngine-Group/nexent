@@ -148,7 +148,7 @@ def update_mcp_service(
     mcp_id: int,
     new_name: str,
     description: str | None,
-    server_url: str,
+    server_url: str | None,
     authorization_token: str | None,
     custom_headers: dict | None,
     config_json: dict | None,
@@ -182,7 +182,7 @@ def update_mcp_service(
     if not current_record:
         raise McpNotFoundError("MCP record not found")
 
-    if not server_url.strip() and _is_container_record(current_record):
+    if _is_container_record(current_record) and not (server_url or "").strip():
         server_url = current_record.get("mcp_server") or server_url
 
     # Check name uniqueness (exclude the current record itself)
@@ -267,7 +267,10 @@ async def update_mcp_service_enabled(
         else None
     )
 
-    if _is_container_record(current_record):
+    config_json = current_record.get("config_json")
+    # Uploaded images have no rebuild configuration. Toggle their availability
+    # and retain the running container ID for deletion.
+    if _is_container_record(current_record) and config_json:
         if enabled:
             port = current_record.get("container_port")
             if port is None:
@@ -321,7 +324,6 @@ async def update_mcp_service_enabled(
                 if not check_runtime_host_port_available(port):
                     raise McpPortConflictError(f"Port {port} is already in use")
 
-            config_json = current_record.get("config_json")
             if not isinstance(config_json, dict):
                 raise McpValidationError(
                     "Container configuration is missing, cannot rebuild container"
@@ -423,10 +425,11 @@ async def update_mcp_service_enabled(
             )
         else:
             current_container_id = current_record.get("container_id")
-            if current_container_id and current_record.get("config_json"):
+            if current_container_id:
                 try:
                     manager = MCPContainerManager()
-                    await manager.stop_mcp_container(current_container_id)
+                    if await manager.stop_mcp_container(current_container_id):
+                        current_container_id = None
                 except Exception as exc:
                     logger.warning(
                         f"Failed to stop container {current_container_id}: {exc}"
@@ -435,7 +438,7 @@ async def update_mcp_service_enabled(
                 mcp_id=mcp_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                container_id=None,
+                container_id=current_container_id,
                 container_port=current_record.get("container_port"),
                 mcp_server=current_record.get("mcp_server"),
                 status=None,
@@ -443,7 +446,6 @@ async def update_mcp_service_enabled(
     elif enabled:
         server_url = current_record.get("mcp_server")
         # Skip MCP protocol check for API-type MCPs
-        config_json = current_record.get("config_json")
         api_type = isinstance(config_json, dict) and "openapi" in config_json
         if api_type:
             update_mcp_record_status_by_id(

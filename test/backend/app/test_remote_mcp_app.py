@@ -12,6 +12,8 @@ import types
 import importlib.machinery
 from unittest.mock import patch, MagicMock, AsyncMock
 
+import pytest
+
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 boto3_module = types.ModuleType("boto3")
@@ -493,6 +495,22 @@ class TestUpdateMcpService:
             "mcp_id": 1, "name": "new-name", "server_url": "http://new.url",
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
+
+    @pytest.mark.parametrize("url_field", [{}, {"server_url": None}, {"server_url": ""}])
+    @pytest.mark.parametrize("container_id", ["pod-uid", None])
+    @patch('management.api.mcp.remote_mcp.get_current_user_info', return_value=("uid", "tid", "en"))
+    @patch('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    def test_update_with_blank_url(self, mock_get, mock_update, mock_auth, url_field, container_id):
+        existing_url = "http://mcp-echo:8080/mcp"
+        mock_get.return_value = {"mcp_name": "echo", "container_id": container_id, "mcp_server": existing_url}
+
+        resp = client.put("/mcp/update", json={"mcp_id": 1, "name": "echo", **url_field}, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert mock_update.call_args.kwargs["server_url"] == (
+            existing_url if container_id else url_field.get("server_url")
+        )
 
     @patch('management.api.mcp.remote_mcp.get_current_user_info')
     @patch('management.api.mcp.remote_mcp.update_mcp_service')
