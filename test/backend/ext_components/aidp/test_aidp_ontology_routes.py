@@ -852,3 +852,149 @@ def test_kb_summary_and_chunk_request_validators():
         mgmt.UpdateKbRequest(summary_enable=True, summary_model="")
     with pytest.raises(ValidationError):
         mgmt.UpdateKbRequest(chunk_token_num=512, chunk_overlap_num=300)
+
+
+def test_kb_toggle_normalizers_and_batch_models():
+    from ext_components.aidp.apps import aidp_mgmt_app as mgmt
+
+    assert mgmt._coerce_optional_bool(True) is True
+    assert mgmt._coerce_optional_bool(1) is True
+    assert mgmt._coerce_optional_bool("yes") is True
+    assert mgmt._coerce_optional_bool("no") is False
+    assert mgmt._coerce_optional_bool("bad") is None
+    assert mgmt._normalize_int_toggle(True) == 1
+    assert mgmt._normalize_int_toggle(2) == 1
+    assert mgmt._normalize_int_toggle("1") == 1
+    assert mgmt._normalize_int_toggle("0") == 0
+
+    model = mgmt.KnowledgeBaseBatchReadRequest(kds_ids=[" a ", "a", "b"])
+    assert model.kds_ids == ["a", "b"]
+    with pytest.raises(ValidationError):
+        mgmt.KnowledgeBaseBatchReadRequest(kds_ids=[" ", ""])
+
+
+def test_batch_read_and_bound_agents_routes(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as mgmt
+
+    monkeypatch.setattr(
+        mgmt,
+        "_current_accessible_rows",
+        lambda *_a, **_kw: [
+            {"kb_id": "kb1", "kds_name": "KB1", "description": "d"},
+        ],
+    )
+    monkeypatch.setattr(mgmt, "_has_kb_card_metadata", lambda row: False)
+    monkeypatch.setattr(
+        mgmt,
+        "_load_cached_kb_detail",
+        lambda *_a, **_kw: {"kds_name": "KB1", "description": "d"},
+    )
+    response = _client().post(
+        "/aidp-mgmt/knowledge-bases/batch-read",
+        headers=_bearer(),
+        json={"kds_ids": ["kb1", "missing"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["value"][0]["kds_id"] == "kb1"
+
+    monkeypatch.setattr(mgmt.perms, "require_permission", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        mgmt, "get_bound_agents", lambda *_a, **kw: {"agents": [{"id": 1}]}
+    )
+    bound = _client().get(
+        "/aidp-mgmt/knowledge-bases/kb1/bound_agents", headers=_bearer()
+    )
+    assert bound.status_code == 200
+
+
+def test_metadata_search_and_error_branches(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_metadata_routes as routes
+
+    _allow_manager(monkeypatch)
+    monkeypatch.setattr(routes.perms, "require_permission", lambda *a, **kw: None)
+
+    async def load_fields(*_a, **_kw):
+        return [{"id": 2, "field_name": "f", "field_type": "string"}]
+
+    monkeypatch.setattr(routes, "_load_metadata_fields", load_fields)
+    monkeypatch.setattr(
+        routes,
+        "_find_metadata_field",
+        lambda fields, ref: fields[0] if str(ref) in ("2", "f") else None,
+    )
+    monkeypatch.setattr(
+        routes,
+        "list_ontology_metadata_fields_impl",
+        lambda *a, **kw: {
+            "value": [{"id": 2, "field_name": "f", "field_type": "string"}],
+            "total_count": 1,
+        },
+    )
+    client = _client()
+    listed = client.get(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields?page=1&page_size=10&search=f",
+        headers=_bearer(),
+    )
+    assert listed.status_code == 200
+    assert listed.json()["total_count"] == 1
+
+    assert client.post(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields",
+        headers=_bearer(),
+        json={"field_name": "f", "field_type": "string"},
+    ).status_code == 400
+    assert client.patch(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields/2",
+        headers=_bearer(),
+        json={"new_field_name": "f"},
+    ).status_code == 400
+    assert client.patch(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields/missing",
+        headers=_bearer(),
+        json={"new_field_name": "g"},
+    ).status_code == 400
+
+
+def test_metadata_limit_and_async_acknowledgements(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_metadata_routes as routes
+
+    _allow_manager(monkeypatch)
+    monkeypatch.setattr(routes.perms, "require_permission", lambda *a, **kw: None)
+
+    async def full_fields(*_a, **_kw):
+        return [{"id": i, "field_name": f"f{i}", "field_type": "string"} for i in range(20)]
+
+    monkeypatch.setattr(routes, "_load_metadata_fields", full_fields)
+    assert _client().post(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields",
+        headers=_bearer(),
+        json={"field_name": "new", "field_type": "string"},
+    ).status_code == 400
+
+    async def one_field(*_a, **_kw):
+        return [{"id": 2, "field_name": "f", "field_type": "string"}]
+
+    monkeypatch.setattr(routes, "_load_metadata_fields", one_field)
+    monkeypatch.setattr(
+        routes,
+        "_find_metadata_field",
+        lambda fields, ref: fields[0],
+    )
+    monkeypatch.setattr(
+        routes,
+        "rename_ontology_metadata_field_impl",
+        lambda *a, **kw: {"data": {"task_id": "1"}},
+    )
+    monkeypatch.setattr(
+        routes,
+        "delete_ontology_metadata_field_impl",
+        lambda *a, **kw: {"data": {"task_id": "1"}},
+    )
+    assert _client().patch(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields/2",
+        headers=_bearer(),
+        json={"new_field_name": "g"},
+    ).status_code == 200
+    assert _client().delete(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields/2", headers=_bearer()
+    ).status_code == 200
