@@ -28,8 +28,10 @@ import {
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { aidpRelationName } from "@/ext_components/aidp/shared/utils/aidpRelationDisplay";
 import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import { AIDP_ONTOLOGY_MANAGER_ROLES } from "@/ext_components/aidp/shared/utils/aidpOntologyRoles";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
@@ -50,24 +52,7 @@ interface AidpOntologyEntityTabProps {
 }
 
 const SEARCH_DEBOUNCE_MS = 300;
-const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
 const DEFAULT_PAGE_SIZE = 10;
-
-const relationName = (value: unknown): string => {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return String(
-      record.display_name ??
-        record.displayName ??
-        record.api_name ??
-        record.name ??
-        record.id ??
-        "—"
-    );
-  }
-  return "—";
-};
 
 const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
   domainId,
@@ -78,7 +63,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
   const { user, isAuthzReady } = useAuthorizationContext();
-  const canManage = !!user && MANAGER_ROLES.has(user.role) && isAuthzReady;
+  const canManage = !!user && AIDP_ONTOLOGY_MANAGER_ROLES.has(user.role) && isAuthzReady;
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
@@ -210,6 +195,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       width: 500,
       okText: t("aidpKnowledge.ontologyDelete"),
       cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
       centered: true,
       onOk: async () => {
         try {
@@ -246,7 +232,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
     if (!values || values.length === 0) {
       return <span className={entityStyles.muted}>—</span>;
     }
-    const names = values.map(relationName);
+    const names = values.map((item) => aidpRelationName(item));
     const visible = names.slice(0, 1);
     const hidden = names.slice(1);
     return (
@@ -294,6 +280,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       ),
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
       centered: true,
       onOk: async () => {
         const outcomes = await Promise.allSettled(

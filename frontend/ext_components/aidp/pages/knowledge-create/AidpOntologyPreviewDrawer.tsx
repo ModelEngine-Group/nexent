@@ -22,6 +22,7 @@ import {
 } from "@ant-design/icons";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { aidpRelationName } from "@/ext_components/aidp/shared/utils/aidpRelationDisplay";
 import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
@@ -56,22 +57,6 @@ const formatAuditTime = (value?: string | number | null): string => {
     return text.slice(0, 16).replace("T", " ");
   }
   return text || "—";
-};
-
-const relationName = (value: unknown): string => {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return String(
-      record.display_name ??
-        record.displayName ??
-        record.api_name ??
-        record.name ??
-        record.id ??
-        "—"
-    );
-  }
-  return "—";
 };
 
 /**
@@ -170,7 +155,7 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
       key: "parent",
       width: 140,
       render: (_value, record) =>
-        (record.parent_entities ?? []).map(relationName).join("、") || "—",
+        (record.parent_entities ?? []).map((item) => aidpRelationName(item)).join("、") || "—",
     },
   ];
   const ruleColumns: TableColumnsType<AidpOntologyRule> = [
@@ -187,7 +172,9 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
       width: 120,
       render: (value: boolean) => (
         <Tag color={value ? "green" : "default"}>
-          {value ? t("aidpKnowledge.ontologyRulesFilterEnabled") : "—"}
+          {value
+            ? t("aidpKnowledge.ontologyRulesEnabled")
+            : t("aidpKnowledge.ontologyRulesDisabled")}
         </Tag>
       ),
     },

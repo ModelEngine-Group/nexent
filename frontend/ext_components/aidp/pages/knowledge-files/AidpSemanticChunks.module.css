@@ -634,10 +634,10 @@
   color: #595959;
   font-weight: 500;
 }
-.chunkTableScroll [contenteditable="true"] {
+.chunkTableScroll [contenteditable="plaintext-only"] {
   cursor: text;
 }
-.chunkTableScroll [contenteditable="true"]:focus {
+.chunkTableScroll [contenteditable="plaintext-only"]:focus {
   outline: 2px solid var(--chunk-primary, #0067d1);
   outline-offset: -2px;
   background: #ffffff;

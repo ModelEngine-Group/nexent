@@ -29,6 +29,7 @@ import {
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import { AIDP_ONTOLOGY_MANAGER_ROLES } from "@/ext_components/aidp/shared/utils/aidpOntologyRoles";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import { ruleOperatorLabel } from "@/ext_components/aidp/shared/utils/aidpOntologyRule";
 import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
@@ -51,7 +52,6 @@ interface AidpOntologyRulesTabProps {
   domainId: string;
 }
 
-const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
 const RULE_LIMIT = 100;
 
 const toPayload = (rule: AidpOntologyRule): AidpOntologyRulePayload => ({
@@ -70,7 +70,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
   const { user, isAuthzReady } = useAuthorizationContext();
-  const canManage = !!user && MANAGER_ROLES.has(user.role) && isAuthzReady;
+  const canManage = !!user && AIDP_ONTOLOGY_MANAGER_ROLES.has(user.role) && isAuthzReady;
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
@@ -97,17 +97,9 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
     staleTime: 0,
     retry: false,
   });
-  const countQuery = useQuery({
-    queryKey: [...scope.key, "ontology-rule-count", domainId],
-    queryFn: () => aidpOntologyService.countRules(domainId),
-    enabled: scope.enabled && !!domainId,
-    staleTime: 0,
-    retry: false,
-  });
-
   const rules = useMemo(() => query.data?.value ?? [], [query.data?.value]);
-  const count = countQuery.data?.count;
-  const atLimit = (count ?? 0) >= RULE_LIMIT;
+  const count = query.data?.total_count ?? rules.length;
+  const atLimit = count >= RULE_LIMIT;
   const filteredRules = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rules;
@@ -137,9 +129,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   const refresh = () => {
     void queryClient.invalidateQueries({
       queryKey: [...scope.key, "ontology-rules", domainId],
-    });
-    void queryClient.invalidateQueries({
-      queryKey: [...scope.key, "ontology-rule-count", domainId],
     });
   };
 
@@ -260,7 +249,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   };
 
   const renderConditions = (rule: AidpOntologyRule) => {
-    const conditions = rule.condition?.value?.conditions ?? [];
+    const conditions = rule.condition.value.conditions;
     if (conditions.length === 0) {
       return <span className={ruleStyles.muted}>—</span>;
     }
@@ -364,7 +353,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       key: "aggregation",
       width: 120,
       render: (_value: unknown, record) =>
-        record.action?.value?.effect_mode === "add"
+        record.action.value.effect_mode === "add"
           ? t("aidpKnowledge.ontologyRulesAddShort")
           : t("aidpKnowledge.ontologyRulesMultiplyShort"),
     },
@@ -376,8 +365,8 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       key: "coefficient",
       width: 130,
       render: (_value: unknown, record) =>
-        record.action?.value?.coefficient !== undefined &&
-        record.action?.value?.coefficient !== null
+        record.action.value.coefficient !== undefined &&
+        record.action.value.coefficient !== null
           ? t("aidpKnowledge.ontologyRulesFixedCoefficientShort")
           : t("aidpKnowledge.ontologyRulesFieldDerivedShort"),
     },
@@ -563,7 +552,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
           </Button>
           <Tooltip
             title={
-              atLimit ? t("aidpKnowledge.ontologyRulesLimitReached") : undefined
+              atLimit ? t("aidpKnowledge.ontologyRulesLimitReached", { limit: RULE_LIMIT }) : undefined
             }
           >
             <Button

@@ -88,10 +88,7 @@ export const sanitizeAidpTableHtml = (raw: string): AidpTableHtml | null => {
     // recreates only table tags, integer spans and text nodes. CodeQL cannot
     // follow that DOM rebuild, so the query reports the parse call itself.
     // codeql[js/xss-through-dom]
-    doc = new DOMParser().parseFromString(
-      trimmed.slice(tableStart),
-      "text/html"
-    );
+    doc = new DOMParser().parseFromString(trimmed.slice(tableStart), "text/html");
   } catch {
     return null;
   }

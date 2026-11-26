@@ -15,18 +15,17 @@ import {
   InputNumber,
   Segmented,
   Select,
-  Tooltip,
 } from "antd";
 import {
   DeleteOutlined,
   DownOutlined,
   PlusOutlined,
-  QuestionCircleOutlined,
   UpOutlined,
 } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { aidpRelationName, aidpRelationId } from "@/ext_components/aidp/shared/utils/aidpRelationDisplay";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
   ENTITY_API_NAME_MAX_CHARS,
@@ -42,6 +41,7 @@ import type {
   AidpOntologyEntityProperty,
 } from "@/ext_components/aidp/shared/types/ontology";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
+import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import styles from "./AidpOntologyEntityDrawer.module.css";
 
@@ -91,43 +91,12 @@ const DATA_TYPE_OPTIONS: PropertyDataType[] = [
   "list[str]",
 ];
 
-const FieldLabel: React.FC<{ label: string; help: string }> = ({
-  label,
-  help,
-}) => (
-  <span className={styles.fieldLabel}>
-    {label}
-    <Tooltip title={help}>
-      <QuestionCircleOutlined className={styles.helpIcon} aria-label={help} />
-    </Tooltip>
-  </span>
-);
-
-const relationName = (value: unknown): string => {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return String(
-      record.display_name ??
-        record.displayName ??
-        record.api_name ??
-        record.name ??
-        record.id ??
-        ""
-    );
-  }
-  return "";
-};
-
-/** AIDP relations and first-class entities are addressed by numeric id. */
-const relationId = (value: unknown): string => {
-  if (typeof value === "string" || typeof value === "number")
-    return String(value);
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return String(record.entity_id ?? record.id ?? "");
-  }
-  return "";
+const DATA_TYPE_LABEL_KEYS: Record<PropertyDataType, string> = {
+  str: "aidpKnowledge.ontologyMetadataTypeText",
+  string: "aidpKnowledge.ontologyMetadataTypeText",
+  float: "aidpKnowledge.ontologyMetadataTypeNumber",
+  datetime: "aidpKnowledge.ontologyMetadataTypeDate",
+  "list[str]": "aidpKnowledge.ontologyEntityPropertyTypeMultiText",
 };
 
 const propertyValueToText = (
@@ -299,7 +268,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             (item.api_name !== entity?.api_name || item.kind !== entity?.kind)
         )
         .map((item) => ({
-          value: relationId(item.entity_id),
+          value: aidpRelationId(item.entity_id),
           label: item.display_name || item.api_name,
         }))
         .filter((item) => item.value),
@@ -325,11 +294,11 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
 
   const initialParentIds = useMemo(
     () =>
-      (entity?.parent_entities ?? []).map(relationId).filter(Boolean).sort(),
+      (entity?.parent_entities ?? []).map((item) => aidpRelationId(item)).filter(Boolean).sort(),
     [entity?.parent_entities]
   );
   const initialChildIds = useMemo(
-    () => (entity?.child_entities ?? []).map(relationId).filter(Boolean).sort(),
+    () => (entity?.child_entities ?? []).map((item) => aidpRelationId(item)).filter(Boolean).sort(),
     [entity?.child_entities]
   );
 
@@ -370,13 +339,13 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
       description: entity?.description ?? "",
       properties: initialProperties,
       demo_parents: (entity?.parent_entities ?? [])
-        .map(relationId)
+        .map((item) => aidpRelationId(item))
         .filter(Boolean),
       demo_synonyms: (entity?.synonym_entities ?? [])
-        .map(relationName)
+        .map((item) => aidpRelationName(item))
         .filter(Boolean),
       demo_children: (entity?.child_entities ?? [])
-        .map(relationId)
+        .map((item) => aidpRelationId(item))
         .filter(Boolean),
     });
   }, [entity, form, initialProperties, open]);
@@ -430,7 +399,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     }
     const parentIds = (values.demo_parents ?? []).filter(Boolean);
     const childIds = (values.demo_children ?? []).filter(Boolean);
-    const detailsLoaded = entity?.detail_loaded !== false;
 
     setSaving(true);
     setErrorMessage(null);
@@ -442,13 +410,10 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         const childIdsChanged =
           JSON.stringify([...childIds].sort()) !==
           JSON.stringify(initialChildIds);
-        if (!detailsLoaded) {
-          message.warning(t("aidpKnowledge.ontologyEntityDetailIncomplete"));
-        }
         await aidpOntologyService.updateEntity(domainId, entity.entity_id, {
           display_name: displayNameValue,
           description: values.description?.trim() ?? "",
-          ...(detailsLoaded ? { properties } : {}),
+          properties,
           // Only send relation fields that actually changed so a plain edit
           // does not trigger an extra Relations read/write round trip.
           ...(parentIdsChanged ? { parent_entities: parentIds } : {}),
@@ -529,13 +494,13 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           description: entity?.description ?? "",
           properties: initialProperties,
           demo_parents: (entity?.parent_entities ?? [])
-            .map(relationId)
+            .map((item) => aidpRelationId(item))
             .filter(Boolean),
           demo_synonyms: (entity?.synonym_entities ?? [])
-            .map(relationName)
+            .map((item) => aidpRelationName(item))
             .filter(Boolean),
           demo_children: (entity?.child_entities ?? [])
-            .map(relationId)
+            .map((item) => aidpRelationId(item))
             .filter(Boolean),
         }}
       >
@@ -543,7 +508,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           <Form.Item
             name="kind"
             label={
-              <FieldLabel
+              <AidpOntologyFieldLabel
                 label={t("aidpKnowledge.ontologyEntityObjectKind")}
                 help={t("aidpKnowledge.ontologyEntityKindHint")}
               />
@@ -570,7 +535,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         <Form.Item
           name="display_name"
           label={
-            <FieldLabel
+            <AidpOntologyFieldLabel
               label={t("aidpKnowledge.ontologyEntityNameLabel")}
               help={t("aidpKnowledge.ontologyEntityNameHelp")}
             />
@@ -601,7 +566,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         <Form.Item
           name="api_name"
           label={
-            <FieldLabel
+            <AidpOntologyFieldLabel
               label={t("aidpKnowledge.ontologyEntityApiName")}
               help={t("aidpKnowledge.ontologyEntityApiNameHint")}
             />
@@ -637,7 +602,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         <Form.Item
           name="description"
           label={
-            <FieldLabel
+            <AidpOntologyFieldLabel
               label={t("aidpKnowledge.ontologyEntityDescription")}
               help={t("aidpKnowledge.ontologyEntityDescriptionHelp")}
             />
@@ -673,7 +638,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             <Form.Item
               name="demo_parents"
               label={
-                <FieldLabel
+                <AidpOntologyFieldLabel
                   label={t("aidpKnowledge.ontologyEntityParent")}
                   help={t("aidpKnowledge.ontologyEntityParentHelp")}
                 />
@@ -686,13 +651,19 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                 maxCount={RELATION_LIMIT.parent}
                 options={parentOptions}
                 filterOption={false}
+                loading={allEntitiesQuery.isLoading}
+                notFoundContent={
+                  allEntitiesQuery.isError
+                    ? t("aidpKnowledge.ontologyEntityLoadFailed")
+                    : undefined
+                }
                 onSearch={setRelationSearch}
               />
             </Form.Item>
             <Form.Item
               name="demo_synonyms"
               label={
-                <FieldLabel
+                <AidpOntologyFieldLabel
                   label={t("aidpKnowledge.ontologyEntitySynonym")}
                   help={t("aidpKnowledge.ontologyEntitySynonymHelp")}
                 />
@@ -704,13 +675,19 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                 maxCount={RELATION_LIMIT.synonym}
                 options={synonymOptions}
                 filterOption={false}
+                loading={allEntitiesQuery.isLoading}
+                notFoundContent={
+                  allEntitiesQuery.isError
+                    ? t("aidpKnowledge.ontologyEntityLoadFailed")
+                    : undefined
+                }
                 onSearch={setRelationSearch}
               />
             </Form.Item>
             <Form.Item
               name="demo_children"
               label={
-                <FieldLabel
+                <AidpOntologyFieldLabel
                   label={t("aidpKnowledge.ontologyEntityChild")}
                   help={t("aidpKnowledge.ontologyEntityChildHelp")}
                 />
@@ -723,6 +700,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                 maxCount={RELATION_LIMIT.child}
                 options={relationOptions}
                 filterOption={false}
+                loading={allEntitiesQuery.isLoading}
+                notFoundContent={
+                  allEntitiesQuery.isError
+                    ? t("aidpKnowledge.ontologyEntityLoadFailed")
+                    : undefined
+                }
                 onSearch={setRelationSearch}
               />
             </Form.Item>
@@ -736,7 +719,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             aria-expanded={propertiesOpen}
             onClick={() => setPropertiesOpen((previous) => !previous)}
           >
-            <FieldLabel
+            <AidpOntologyFieldLabel
               label={t("aidpKnowledge.ontologyEntityPropertiesOptional")}
               help={t("aidpKnowledge.ontologyEntityPropertiesHelp")}
             />
@@ -748,15 +731,15 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                 {fields.length > 0 && (
                   <div className={styles.propertyHeader}>
                     <span>
-                      <em>*</em>
-                      <FieldLabel
+                      <AidpOntologyFieldLabel
+                        required
                         label={t("aidpKnowledge.ontologyEntityPropertyName")}
                         help={t("aidpKnowledge.ontologyEntityPropertyNameHelp")}
                       />
                     </span>
                     <span>
-                      <em>*</em>
-                      <FieldLabel
+                      <AidpOntologyFieldLabel
+                        required
                         label={t("aidpKnowledge.ontologyEntityPropertyType")}
                         help={t("aidpKnowledge.ontologyEntityPropertyTypeHelp")}
                       />
@@ -765,7 +748,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                       {t("aidpKnowledge.ontologyEntityPropertyValue")}
                     </span>
                     <span>
-                      <FieldLabel
+                      <AidpOntologyFieldLabel
                         label={t("aidpKnowledge.ontologyEntityPropertyRange")}
                         help={t(
                           "aidpKnowledge.ontologyEntityPropertyRangeHelp"
@@ -810,28 +793,10 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                       className={styles.propertyDense}
                     >
                       <Select
-                        options={[
-                          {
-                            value: "string",
-                            label: t("aidpKnowledge.ontologyMetadataTypeText"),
-                          },
-                          {
-                            value: "list[str]",
-                            label: t(
-                              "aidpKnowledge.ontologyEntityPropertyTypeMultiText"
-                            ),
-                          },
-                          {
-                            value: "datetime",
-                            label: t("aidpKnowledge.ontologyMetadataTypeDate"),
-                          },
-                          {
-                            value: "float",
-                            label: t(
-                              "aidpKnowledge.ontologyMetadataTypeNumber"
-                            ),
-                          },
-                        ]}
+                        options={DATA_TYPE_OPTIONS.map((value) => ({
+                          value,
+                          label: t(DATA_TYPE_LABEL_KEYS[value]),
+                        }))}
                       />
                     </Form.Item>
                     <Form.Item

@@ -1508,7 +1508,6 @@ def _merge_folder_into(kds_id: str, source: str, destination: str) -> None:
     Files move into the destination; child folders with a matching name are
     merged recursively, other children keep their names.
     """
-    source_prefix = f"{source}/"
     child_folders = sorted(
         path
         for path in _all_folder_paths(kds_id)
@@ -2132,25 +2131,6 @@ def _check_auth(authorization: Optional[str]) -> None:
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
-
-
-class CreateChunkBody(BaseModel):
-    """Body of PUT .../Chunks (add one chunk to a file)."""
-
-    file_uuid: uuid.UUID = Field(...)
-    chunk_text: str = Field(..., min_length=1, max_length=10240)
-
-
-class UpdateChunkBody(BaseModel):
-    """Body of PATCH .../Chunks/{chunk_id} (text is the only writable field)."""
-
-    chunk_text: str = Field(..., min_length=1, max_length=10240)
-
-
-class RemoveChunksBody(BaseModel):
-    """Body of DELETE .../Chunks."""
-
-    chunk_ids: List[int] = Field(..., min_length=1, max_length=2000)
 
 
 class FailNextMiddleware(BaseHTTPMiddleware):
@@ -3725,109 +3705,6 @@ def update_chunk(
 # =============================================================================
 
 
-# =============================================================================
-# Document chunks (semantic slicing)
-# =============================================================================
-def _public_chunk(chunk: Dict[str, Any]) -> Dict[str, Any]:
-    """Return chunk fields without any mock-only private keys."""
-    return {key: value for key, value in chunk.items() if not key.startswith("_")}
-
-
-def _file_chunks(kds_id: str, file_uuid: str) -> List[Dict[str, Any]]:
-    return [
-        chunk
-        for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
-        if _same_file_uuid(chunk.get("file_uuid"), file_uuid)
-    ]
-
-
-def _next_chunk_id() -> int:
-    global _NEXT_DOCUMENT_CHUNK_ID
-    chunk_id = _NEXT_DOCUMENT_CHUNK_ID
-    _NEXT_DOCUMENT_CHUNK_ID += 1
-    return chunk_id
-
-
-def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Generate a deterministic chunk set for a file the first time it is read.
-
-    Real AIDP chunks each ingested file; the mock has no parser, so it writes a
-    fixed set once and then treats it like user data (edits and removals stick,
-    including deleting every chunk).
-    """
-    file_uuid = str(document.get("file_uuid"))
-    marker = f"{kds_id}:{file_uuid}"
-    if marker in _DOCUMENT_CHUNK_GENERATED_FILES:
-        return _file_chunks(kds_id, file_uuid)
-
-    file_name = str(document.get("file_name") or "document")
-    stubs = [
-        ("这是文件的标题与概述部分，用于验证语义切片的查看与编辑。", [1]),
-        ("第二段正文示例：AIDP 在入库时按语义边界切分文本，每个切片带有页码与元数据。", [1]),
-        ("核心指标对照\n\n<table><thead><tr><th>指标</th><th>取值</th><th>说明</th></tr></thead><tbody><tr><td>准确率</td><td>98%</td><td>测试集结果</td></tr><tr><td>召回率</td><td>95%</td><td>测试集结果</td></tr></tbody></table>", [2]),
-        ("第三段正文示例：切片的文本可在此页面修改，修改只提交 chunk_text 字段。", [2, 3]),
-        ("图片说明示例：该切片对应文档中的插图说明文字。", [3]),
-    ]
-    chunks = _DOCUMENT_CHUNKS_BY_KB.setdefault(kds_id, [])
-    for index, (text, pages) in enumerate(stubs):
-        chunk_type = _DOCUMENT_CHUNK_TYPES[index % len(_DOCUMENT_CHUNK_TYPES)]
-        if chunk_type == "IMAGE":
-            # Real AIDP stores each image chunk's picture under
-            # "{kds_id}/{file_ino_no}/{image_uuid}.png" served through
-            # ViewImage; text/table chunks report the literal "null".
-            image_file_url = f"{kds_id}/{document.get('file_ino_no')}/{uuid.uuid4()}.png"
-        else:
-            image_file_url = "null"
-        chunk = {
-            "chunk_id": _next_chunk_id(),
-            "chunk_text": text,
-            "chunk_type": chunk_type,
-            "file_uuid": file_uuid,
-            "file_name": file_name,
-            "file_url": image_file_url,
-            "page_ids": pages,
-            "metadata": {"section": f"part-{index + 1}", "source": file_name},
-            "metadata_json": {},
-        }
-        # User-defined metadata from the bound ontology domain; the page shows
-        # this field instead of AIDP's system metadata. Keys mirror domain 1's
-        # definitions so the FAQ demo KB (bound to domain 1) round-trips them.
-        if index in (0, 4):
-            chunk["metadata_json"] = {"doc_type": "faq", "publish_year": "2026"}
-        # Newer AIDP builds return ontology auto-tags on `tag`; only some
-        # chunks carry them, so the page must treat the field as optional.
-        if index in (0, 2):
-            chunk["tag"] = ["智能手机"]
-        chunks.append(chunk)
-    _DOCUMENT_CHUNK_GENERATED_FILES.add(marker)
-    _save_state()
-    return _file_chunks(kds_id, file_uuid)
-
-
-def _require_file(kds_id: str, file_uuid: str) -> Dict[str, Any]:
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    document = _find_document(kds_id, file_uuid)
-    if document is None:
-        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
-    return document
-
-
-def _require_chunk(kds_id: str, chunk_id: int) -> Dict[str, Any]:
-    chunk = next(
-        (
-            item
-            for item in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
-            if item.get("chunk_id") == chunk_id
-        ),
-        None,
-    )
-    if chunk is None:
-        raise HTTPException(status_code=404, detail=f"Chunk {chunk_id} not found")
-    return chunk
-
-
-
 
 # =============================================================================
 # File summaries
@@ -4727,10 +4604,6 @@ def _next_numeric_id(values: List[Any], prefix: int = 0) -> str:
 
 
 def _public_entity(item: Dict[str, Any]) -> Dict[str, Any]:
-    return {key: value for key, value in item.items() if not key.startswith("_")}
-
-
-def _public_chunk(item: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in item.items() if not key.startswith("_")}
 
 
@@ -5698,15 +5571,6 @@ def delete_ontology_metadata(
     _ONTOLOGY_METADATA[domain_id] = remaining
     _save_state()
     return JSONResponse(status_code=204, content=None)
-
-
-def _chunk_belongs_to(kds_id: str, chunk_id: Any) -> Optional[Dict[str, Any]]:
-    for chunk in _ONTOLOGY_CHUNKS_BY_KB.get(kds_id, []):
-        if str(chunk.get("chunk_id")) == str(chunk_id):
-            return chunk
-    return None
-
-
 
 
 # =============================================================================

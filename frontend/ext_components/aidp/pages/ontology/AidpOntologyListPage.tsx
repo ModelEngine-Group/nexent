@@ -36,6 +36,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { formatAidpDate } from "@/ext_components/aidp/shared/utils/aidpTime";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import { AIDP_ONTOLOGY_MANAGER_ROLES } from "@/ext_components/aidp/shared/utils/aidpOntologyRoles";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
@@ -55,7 +56,6 @@ const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
 const DEFAULT_PAGE_SIZE = 12;
 const GUIDE_STORAGE_KEY = "aidpOntology.guideExpanded";
 const VIEW_MODE_STORAGE_KEY = "aidpOntology.viewMode";
-const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
 
 type ListView = "table" | "cards";
 type ColumnKey = "name" | "description" | "update_time" | "actions";
@@ -76,7 +76,7 @@ const AidpOntologyListPage: React.FC = () => {
   const queryClient = useQueryClient();
   const scope = useAidpQueryScope();
   const { user } = useAuthorizationContext();
-  const canManage = !!user && MANAGER_ROLES.has(user.role);
+  const canManage = !!user && AIDP_ONTOLOGY_MANAGER_ROLES.has(user.role);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [searchInput, setSearchInput] = useState("");
@@ -573,12 +573,11 @@ const AidpOntologyListPage: React.FC = () => {
           open={!!deletingDomain}
           domain={deletingDomain}
           onClose={() => setDeletingDomain(null)}
-          onDeleted={(domain) => {
+          onDeleted={() => {
             setDeletingDomain(null);
             message.success(t("aidpKnowledge.ontologyDomainDeleted"));
             setPage(1);
             refresh();
-            void domain;
           }}
         />
       </div>

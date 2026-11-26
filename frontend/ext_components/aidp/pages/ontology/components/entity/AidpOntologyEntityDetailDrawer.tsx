@@ -8,6 +8,7 @@ import { Button, Descriptions, Drawer, Tag, Tooltip } from "antd";
 import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
 
 import type { AidpOntologyEntity } from "@/ext_components/aidp/shared/types/ontology";
+import { aidpRelationName } from "@/ext_components/aidp/shared/utils/aidpRelationDisplay";
 import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
@@ -29,32 +30,16 @@ const propertyTypeLabel = (
   switch (value) {
     case "str":
     case "string":
-      return t("aidpKnowledge.ontologyEntityPropertyTypeStr");
+      return t("aidpKnowledge.ontologyMetadataTypeText");
     case "float":
-      return t("aidpKnowledge.ontologyEntityPropertyTypeFloat");
+      return t("aidpKnowledge.ontologyMetadataTypeNumber");
     case "datetime":
-      return t("aidpKnowledge.ontologyEntityPropertyTypeDatetime");
+      return t("aidpKnowledge.ontologyMetadataTypeDate");
     case "list[str]":
-      return t("aidpKnowledge.ontologyEntityPropertyTypeList");
+      return t("aidpKnowledge.ontologyEntityPropertyTypeMultiText");
     default:
       return value || "—";
   }
-};
-
-const relationName = (value: unknown): string => {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return String(
-      record.display_name ??
-        record.displayName ??
-        record.api_name ??
-        record.name ??
-        record.id ??
-        "—"
-    );
-  }
-  return "—";
 };
 
 const AidpOntologyEntityDetailDrawer: React.FC<
@@ -72,8 +57,8 @@ const AidpOntologyEntityDetailDrawer: React.FC<
     return (
       <div className={tableStyles.metadataTags}>
         {values.map((value, index) => (
-          <Tag key={`${relationName(value)}-${index}`}>
-            {relationName(value)}
+          <Tag key={`${aidpRelationName(value)}-${index}`}>
+            {aidpRelationName(value)}
           </Tag>
         ))}
       </div>

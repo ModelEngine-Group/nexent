@@ -25,8 +25,8 @@ import styles from "./AidpFileDetail.module.css";
 
 const AidpPdfViewer = dynamic(
   () =>
-    import("../knowledge-files/AidpPdfViewer").then(
-      (module) => module.AidpPdfViewer
+    import("../knowledge-files/AidpPdfRenderer").then(
+      (module) => module.AidpPdfRenderer
     ),
   { ssr: false }
 );

@@ -225,10 +225,9 @@ export function previewOntologyImport(
 export function parseOntologyJson(
   text: string,
   t: TFunction
-): {
-  document?: AidpOntologyJsonDocument;
-  error?: string;
-} {
+):
+  | { document: AidpOntologyJsonDocument; error?: never }
+  | { document?: never; error: string } {
   try {
     const parsed: unknown = JSON.parse(text);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

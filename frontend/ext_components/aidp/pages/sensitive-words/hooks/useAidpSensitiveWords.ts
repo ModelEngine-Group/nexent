@@ -20,8 +20,7 @@ export const useAidpSensitiveWordList = (
   page: number,
   pageSize: number,
   keyword: string,
-  mode?: AidpSensitiveWordMode,
-  enabled = true
+  mode?: AidpSensitiveWordMode
 ) => {
   const scope = useAidpQueryScope();
   return useQuery({
@@ -33,7 +32,7 @@ export const useAidpSensitiveWordList = (
     ],
     queryFn: () =>
       aidpSensitiveWordService.list(kdsId, page, pageSize, keyword, mode),
-    enabled: scope.enabled && enabled && Boolean(kdsId),
+    enabled: scope.enabled && Boolean(kdsId),
     staleTime: 15_000,
     refetchOnMount: "always",
     retry: false,

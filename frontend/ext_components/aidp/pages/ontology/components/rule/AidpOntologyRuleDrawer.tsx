@@ -159,8 +159,6 @@ interface ConditionValueInputProps {
   fieldType: FieldType;
   value?: unknown;
   onChange?: (value: unknown) => void;
-  id?: string;
-  disabled?: boolean;
 }
 
 /** Value control depends on the field type and forwards Form.Item props. */
@@ -169,8 +167,6 @@ const ConditionValueInput: React.FC<ConditionValueInputProps> = ({
   fieldType,
   value,
   onChange,
-  id,
-  disabled,
 }) => {
   const operator = Form.useWatch(["conditions", name, "operator"]) as
     string | undefined;
@@ -184,8 +180,6 @@ const ConditionValueInput: React.FC<ConditionValueInputProps> = ({
           : Number(value);
     return (
       <InputNumber
-        id={id}
-        disabled={disabled}
         className={styles.fullWidth}
         precision={3}
         value={Number.isFinite(numberValue) ? numberValue : undefined}
@@ -196,8 +190,6 @@ const ConditionValueInput: React.FC<ConditionValueInputProps> = ({
   if (fieldType === "date") {
     return (
       <DatePicker
-        id={id}
-        disabled={disabled}
         showTime
         className={styles.fullWidth}
         value={
@@ -213,8 +205,6 @@ const ConditionValueInput: React.FC<ConditionValueInputProps> = ({
   }
   return (
     <Input
-      id={id}
-      disabled={disabled}
       value={value === null || value === undefined ? "" : String(value)}
       onChange={onChange}
     />

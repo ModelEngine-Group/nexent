@@ -50,8 +50,6 @@ export interface AidpOntologyEntity {
   /** Optional AIDP audit values; absent fields render as an em dash. */
   create_time?: string | number | null;
   update_time?: string | number | null;
-  /** False when the per-row detail call failed and properties are unknown. */
-  detail_loaded?: boolean | null;
   /** Create-only: child relations failed after the entity itself was created. */
   relation_error?: string | null;
 }

@@ -17,6 +17,7 @@ import {
 import { ApartmentOutlined, SearchOutlined } from "@ant-design/icons";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { aidpRelationName } from "@/ext_components/aidp/shared/utils/aidpRelationDisplay";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
@@ -38,22 +39,6 @@ interface AidpKnowledgeOntologyTabProps {
 }
 
 type ReadonlyView = "metadata" | "entities" | "rules";
-
-const relationName = (value: unknown): string => {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return String(
-      record.display_name ??
-        record.displayName ??
-        record.api_name ??
-        record.name ??
-        record.id ??
-        "—"
-    );
-  }
-  return "—";
-};
 
 const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   bindingId,
@@ -174,21 +159,21 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
       key: "parent",
       width: 140,
       render: (_value, record) =>
-        (record.parent_entities ?? []).map(relationName).join("、") || "—",
+        (record.parent_entities ?? []).map((item) => aidpRelationName(item)).join("、") || "—",
     },
     {
       title: t("aidpKnowledge.ontologyEntitySynonym"),
       key: "synonym",
       width: 140,
       render: (_value, record) =>
-        (record.synonym_entities ?? []).map(relationName).join("、") || "—",
+        (record.synonym_entities ?? []).map((item) => aidpRelationName(item)).join("、") || "—",
     },
     {
       title: t("aidpKnowledge.ontologyEntityChild"),
       key: "child",
       width: 140,
       render: (_value, record) =>
-        (record.child_entities ?? []).map(relationName).join("、") || "—",
+        (record.child_entities ?? []).map((item) => aidpRelationName(item)).join("、") || "—",
     },
   ];
 
@@ -212,7 +197,9 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
       width: 120,
       render: (value: boolean) => (
         <Tag color={value ? "green" : "default"}>
-          {value ? t("aidpKnowledge.ontologyRulesFilterEnabled") : "—"}
+          {value
+            ? t("aidpKnowledge.ontologyRulesEnabled")
+            : t("aidpKnowledge.ontologyRulesDisabled")}
         </Tag>
       ),
     },

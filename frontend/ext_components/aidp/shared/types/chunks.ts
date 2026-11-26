@@ -45,5 +45,5 @@ export interface AidpChunkUpdatePayload {
 
 /** AIDP answers a chunk creation with the new identifier. */
 export interface AidpChunkCreateResponse {
-  chunk_id?: number | string;
+  chunk_id: number;
 }

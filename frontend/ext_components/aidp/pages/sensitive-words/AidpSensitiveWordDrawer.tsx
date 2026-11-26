@@ -28,7 +28,6 @@ interface AidpSensitiveWordDrawerProps {
   open: boolean;
   editing: AidpSensitiveWordItem | null;
   onClose: () => void;
-  onSaved: () => void;
 }
 
 /**
@@ -43,7 +42,6 @@ const AidpSensitiveWordDrawer: React.FC<AidpSensitiveWordDrawerProps> = ({
   open,
   editing,
   onClose,
-  onSaved,
 }) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -145,7 +143,6 @@ const AidpSensitiveWordDrawer: React.FC<AidpSensitiveWordDrawerProps> = ({
         message.success(t("aidpSensitiveWords.createSuccess"));
       }
       onClose();
-      onSaved();
     } catch (error) {
       log.error("Failed to save AIDP sensitive word:", {
         id: editing?.id,

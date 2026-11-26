@@ -108,9 +108,7 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
         setFileName(file.name);
         setDocument(null);
         setPreview(null);
-        setErrorMessage(
-          parsed.error ?? t("aidpKnowledge.ontologyImportParseFailed")
-        );
+        setErrorMessage(parsed.error);
         return;
       }
       const nextPreview = previewOntologyImport(
@@ -188,7 +186,7 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
     getLabel: (issue: ImportIssue) => string
   ) => (
     <div className={styles.errorList}>
-      <Alert type={type} showIcon message={title} />
+      <Alert type={type} showIcon title={title} />
       <ul>
         {visibleIssues.map((issue, index) => (
           <li key={`${issue.index ?? ""}-${issue.field ?? ""}-${index}`}>

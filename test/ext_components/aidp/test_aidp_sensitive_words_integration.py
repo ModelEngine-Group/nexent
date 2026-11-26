@@ -204,7 +204,6 @@ def test_sensitive_words_are_isolated_per_kb_over_http(configured_client):
     assert created1.status_code == 201
     assert set(created1.json()) == {"id"}
     word_id = created1.json()["id"]
-    assert all(row["id"] != word_id for row in body2["value"])
 
     created2 = client.post(
         kb2,

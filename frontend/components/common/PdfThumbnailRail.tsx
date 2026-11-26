@@ -10,11 +10,13 @@ function Thumbnail({
   pdf,
   page,
   active,
+  aspectRatio,
   onSelect,
 }: {
   pdf: PDFDocumentProxy;
   page: number;
   active: boolean;
+  aspectRatio?: number;
   onSelect: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -71,6 +73,7 @@ function Thumbnail({
     >
       <canvas
         ref={canvasRef}
+        style={aspectRatio ? { aspectRatio } : undefined}
         className={`mx-auto mb-1 block h-auto w-full max-w-[176px] border bg-white shadow-sm ${active ? "border-blue-600" : "border-gray-300"}`}
       />
       {page}
@@ -81,10 +84,12 @@ function Thumbnail({
 export default function PdfThumbnailRail({
   pdf,
   currentPage,
+  pageAspectRatio,
   onSelect,
 }: {
   pdf: PDFDocumentProxy;
   currentPage: number;
+  pageAspectRatio?: number;
   onSelect: (page: number) => void;
 }) {
   const { t } = useTranslation("common");
@@ -99,6 +104,7 @@ export default function PdfThumbnailRail({
           pdf={pdf}
           page={index + 1}
           active={currentPage === index + 1}
+          aspectRatio={pageAspectRatio}
           onSelect={() => onSelect(index + 1)}
         />
       ))}

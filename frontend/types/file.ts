@@ -26,6 +26,8 @@ export interface PdfViewerProps {
    * as the full-screen preview.
    */
   initialScaleMode?: ScaleMode;
+  /** Show the thumbnail rail toggle. Off by default for compact previews. */
+  enableThumbnails?: boolean;
 }
 
 export type ScaleMode = 'fit-width' | 'fit-page' | 'actual-size' | 'custom';

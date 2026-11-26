@@ -147,7 +147,6 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
         setSelectedKeys((current) => current.filter((key) => key !== id));
         message.success(t("aidpSensitiveWords.deleteSuccess"));
       }
-      await refetch();
     } catch (error) {
       log.error("Failed to delete AIDP sensitive word:", { id, error });
       message.error(
@@ -230,9 +229,6 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
           setSelectedKeys((current) =>
             current.filter((key) => failedIds.has(String(key)))
           );
-          if (result.succeeded > 0) {
-            await refetch();
-          }
           if (result.failed.length === 0) {
             message.success(t("aidpSensitiveWords.deleteSuccess"));
             return;
@@ -394,7 +390,6 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
           open={drawer.open}
           editing={drawer.editing}
           onClose={closeDrawer}
-          onSaved={() => void refetch()}
         />
       </div>
     </ConfigProvider>

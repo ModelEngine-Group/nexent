@@ -26,7 +26,6 @@ import {
 import type { AidpChunk } from "@/ext_components/aidp/shared/types/chunks";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
-import { isAidpChunkEditable } from "@/ext_components/aidp/shared/utils/aidpChunkType";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import log from "@/lib/logger";
@@ -274,7 +273,7 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
 
   const saveChunkMetadata = useCallback(
     async (chunkId: number, payload: AidpChunkFormPayload) => {
-      if (!payload.metadataDirty || odId === null || odId === undefined) {
+      if (!payload.metadataDirty || odId === null) {
         return;
       }
       await aidpKnowledgeService.batchUpdateChunkMetadata(kdsId, {
@@ -299,11 +298,11 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
             file_uuid: fileUuid,
             chunk_text: payload.text,
           });
-          const createdId = Number(created.chunk_id);
+          const createdId = created.chunk_id;
           // The create endpoint carries text only; tags/metadata follow in a
           // second call. The chunk already exists, so a metadata failure is
           // reported as a warning instead of failing the whole save.
-          if (payload.metadataDirty && Number.isFinite(createdId)) {
+          if (payload.metadataDirty) {
             try {
               await saveChunkMetadata(createdId, payload);
             } catch (metadataError) {
@@ -432,14 +431,10 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
     setDrawer({ mode: "create", chunk: null });
   }, []);
   const openEdit = useCallback((chunk: AidpChunk) => {
-    // Only TEXT chunks carry editable text; TABLE/IMAGE stay read-only and
-    // never expose an edit entry in the UI.
-    if (!isAidpChunkEditable(chunk)) return;
     setDetailReturnId(null);
     setDrawer({ mode: "edit", chunk });
   }, []);
   const openEditFromDetail = useCallback((chunk: AidpChunk) => {
-    if (!isAidpChunkEditable(chunk)) return;
     setDetailReturnId(chunk.chunk_id);
     setDetailId(null);
     setDrawer({ mode: "edit", chunk });
@@ -458,7 +453,7 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
 
   const loadingFirstPage = activeQuery.isPending;
   const refreshing = activeQuery.isFetching && !loadingFirstPage;
-  const metadataEnabled = odId !== null && odId !== undefined;
+  const metadataEnabled = odId !== null;
   const moreMenuItems = [
     {
       key: "refresh",
@@ -597,7 +592,7 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
               onOpen={() => setDetailId(chunk.chunk_id)}
               onEdit={() => openEdit(chunk)}
               onDelete={() => setDeleteTargets([chunk.chunk_id])}
-              metadataEnabled={odId !== null && odId !== undefined}
+              metadataEnabled={odId !== null}
               onExportMetadata={() => handleExportChunkMetadata(chunk)}
             />
           ))

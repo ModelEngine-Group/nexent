@@ -19,6 +19,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import { AIDP_ONTOLOGY_MANAGER_ROLES } from "@/ext_components/aidp/shared/utils/aidpOntologyRoles";
 import {
   ONTOLOGY_DESCRIPTION_MAX_BYTES,
   ONTOLOGY_NAME_MAX_BYTES,
@@ -37,7 +38,6 @@ interface CreateFormValues {
   description?: string;
 }
 
-const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
 
 const AidpOntologyCreatePage: React.FC = () => {
   const { t } = useTranslation();
@@ -45,7 +45,7 @@ const AidpOntologyCreatePage: React.FC = () => {
   const params = useParams();
   const locale = (params?.locale as string) || "zh";
   const { user, isAuthzReady } = useAuthorizationContext();
-  const canManage = !!user && MANAGER_ROLES.has(user.role);
+  const canManage = !!user && AIDP_ONTOLOGY_MANAGER_ROLES.has(user.role);
   const [form] = Form.useForm<CreateFormValues>();
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

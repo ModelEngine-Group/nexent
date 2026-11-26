@@ -110,7 +110,7 @@ const AidpSensitiveWordsTable: React.FC<AidpSensitiveWordsTableProps> = ({
       filterMultiple: false,
       filteredValue: mode ? [mode] : null,
       render: (value: AidpSensitiveWordMode) => (
-        <Tag color={MODE_COLORS[value] ?? "default"} className="mr-0">
+        <Tag color={MODE_COLORS[value]} className="mr-0">
           {value === "WHITE"
             ? t("aidpSensitiveWords.modeWhite")
             : t("aidpSensitiveWords.modeBlack")}

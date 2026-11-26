@@ -107,9 +107,17 @@ const AidpMetadataEditor: React.FC<AidpMetadataEditorProps> = ({
       setJsonError(t("aidpKnowledge.chunkMetadataJsonUnmatched"));
       return;
     }
+    if (matched.length > AIDP_METADATA_ROW_LIMIT) {
+      setJsonError(
+        t("aidpKnowledge.chunkMetadataRowLimit", {
+          limit: AIDP_METADATA_ROW_LIMIT,
+        })
+      );
+      return;
+    }
     // The JSON is the metadata map itself: render exactly those fields back
     // into the form, in its order.
-    onChange(matched.slice(0, AIDP_METADATA_ROW_LIMIT));
+    onChange(matched);
     setJsonOpen(false);
     setJsonDraft("");
     setJsonError(null);

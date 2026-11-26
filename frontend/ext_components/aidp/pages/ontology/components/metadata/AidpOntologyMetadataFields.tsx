@@ -25,7 +25,6 @@ import {
 import {
   DeleteOutlined,
   EditOutlined,
-  QuestionCircleOutlined,
   ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
@@ -34,6 +33,8 @@ import {
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import { AIDP_ONTOLOGY_MANAGER_ROLES } from "@/ext_components/aidp/shared/utils/aidpOntologyRoles";
+import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
 import {
   METADATA_FIELD_LIMIT,
   validateFieldName,
@@ -71,7 +72,6 @@ interface CreateFormValues {
   field_type: AidpMetadataFieldType;
 }
 
-const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -80,19 +80,6 @@ const TYPE_LABEL_KEYS: Record<AidpMetadataFieldType, string> = {
   date: "aidpKnowledge.ontologyMetadataTypeDate",
   number: "aidpKnowledge.ontologyMetadataTypeNumber",
 };
-
-/** Format an AIDP metadata audit value with minutes, never inventing a time. */
-const FieldLabel: React.FC<{ label: string; help: string }> = ({
-  label,
-  help,
-}) => (
-  <span className={styles.fieldLabel}>
-    {label}
-    <Tooltip title={help}>
-      <QuestionCircleOutlined className={styles.helpIcon} aria-label={help} />
-    </Tooltip>
-  </span>
-);
 
 const fieldKey = (field: AidpOntologyMetadataField): string =>
   String(field.id ?? field.field_name);
@@ -106,7 +93,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
   const { user, isAuthzReady } = useAuthorizationContext();
-  const canManage = !!user && MANAGER_ROLES.has(user.role) && isAuthzReady;
+  const canManage = !!user && AIDP_ONTOLOGY_MANAGER_ROLES.has(user.role) && isAuthzReady;
   const [editForm] = Form.useForm<FieldFormValues>();
   const [createForm] = Form.useForm<CreateFormValues>();
   const [createOpen, setCreateOpen] = useState(autoOpenCreate);
@@ -468,7 +455,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   };
 
   const typeLabel = (value: AidpMetadataFieldType) =>
-    t(TYPE_LABEL_KEYS[value] ?? "aidpKnowledge.ontologyMetadataFieldType");
+    t(TYPE_LABEL_KEYS[value]);
 
   const columns: TableColumnsType<AidpOntologyMetadataField> = [
     {
@@ -806,7 +793,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           <Form.Item
             name="field_name"
             label={
-              <FieldLabel
+              <AidpOntologyFieldLabel
                 label={t("aidpKnowledge.ontologyMetadataFieldName")}
                 help={t("aidpKnowledge.ontologyMetadataFieldNameHelp")}
               />
@@ -831,7 +818,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           <Form.Item
             name="field_type"
             label={
-              <FieldLabel
+              <AidpOntologyFieldLabel
                 label={t("aidpKnowledge.ontologyMetadataValueType")}
                 help={t("aidpKnowledge.ontologyMetadataFieldTypeHelp")}
               />
@@ -890,7 +877,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           <Form.Item
             name="field_name"
             label={
-              <FieldLabel
+              <AidpOntologyFieldLabel
                 label={t("aidpKnowledge.ontologyMetadataFieldName")}
                 help={t("aidpKnowledge.ontologyMetadataFieldNameHelp")}
               />
@@ -914,7 +901,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           <Form.Item
             name="field_type"
             label={
-              <FieldLabel
+              <AidpOntologyFieldLabel
                 label={t("aidpKnowledge.ontologyMetadataFieldType")}
                 help={t("aidpKnowledge.ontologyMetadataFieldTypeHelp")}
               />
