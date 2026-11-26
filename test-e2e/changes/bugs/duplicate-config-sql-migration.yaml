@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: CONFIG-SQL-STARTUP-20261126
+  change_type: bugfix
+  bug_id: CONFIG-SQL-STARTUP-20261126
+  title: Skip application SQL on Config startup when migrations are current
+  description: Check the recorded init and version SQL checksums under the migration lock before running SQL on Config startup.
+  observed_behavior: Config startup executes init.sql and updates its migration record after deployment bootstrap already applied the same files.
+  expected_behavior: A current migration ledger allows Config to start without executing init or version SQL. Missing or outdated migrations complete before the API starts.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: The deployment replay check exercises unchanged checksums without checking whether Config startup rewrites the init record.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AUTH-LOCAL, RUNTIME-REPLICAS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [RUNTIME-OFFLINE-DEPLOY-D5-001, RUNTIME-DIRECT-DEPLOY-D5-001]
+    added: []
+    modified: [AUTH-LOCAL-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Both platform launchers guard regular Config startup while deployment bootstrap uses the full migrator.
+    - The guarded migration plan checks for current init and version SQL under the existing lock and falls through to migration when the ledger is missing or outdated.
+    reason: Extend the existing launcher and migration-plan tests. The real PostgreSQL deployment case owns proof of SQL side effects and startup failure.
+    test_selectors:
+    - test/backend/deploy/test_backend_launchers.py
+    - test/backend/deploy/test_workbench_publication.py::test_docker_publication_uses_sql_entrypoint_and_stops_on_failure
+  notes: The sibling Nexent documentation checkout is absent in this workspace. The deployment entry points and the SQL migration README are the available baseline. The Runtime cases cover default bootstrap ordering and replica-only direct upgrades with stable Config Pods.

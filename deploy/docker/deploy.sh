@@ -1252,6 +1252,7 @@ publish_shared_workbench() {
   if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
     ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
     run --rm --no-deps --workdir /opt/backend \
+    --env NEXENT_SQL_SKIP_IF_CURRENT=false \
     --entrypoint /opt/nexent/scripts/start-backend.sh nexent-config \
     sh -c 'python -m management.services.agent.system_initialize && python -m management.services.agent.system_release'; then
     echo "Error: shared Workbench initialization or publication failed." >&2

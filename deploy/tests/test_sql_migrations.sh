@@ -151,6 +151,7 @@ PLAN_FILE="$TMP_DIR/plan.sql"
 PATH="$BIN_DIR:$PATH" \
 CAPTURE_PLAN="$PLAN_FILE" \
 CAPTURE_QUERY="" \
+NEXENT_SQL_SKIP_IF_CURRENT=false \
 NEXENT_SQL_INIT_FILE="$INIT_SQL_FILE" \
 NEXENT_SQL_MIGRATION_DIR="$SYMLINK_SQL_DIR" \
 NEXENT_SQL_WAIT_TIMEOUT_SECONDS=1 \
@@ -177,9 +178,27 @@ assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] reapply v1_merged_mig
 assert_file_contains "$PLAN_FILE" "migration_skip_eligible" "plan should compute skip eligibility from checksum and cascade flag"
 assert_file_contains "$PLAN_FILE" "executed_at = now()" "plan should refresh execution time on reapply"
 assert_file_contains "$PLAN_FILE" "SET search_path TO \"nexent\", public;" "plan should set search path for legacy migrations"
+assert_file_not_contains "$PLAN_FILE" "migrations_current" "bootstrap should use the full migration plan"
 
 first_check="$(grep -nF '\echo [sql-migrations] check v' "$PLAN_FILE" | head -1 | cut -d: -f2-)"
 [ "$first_check" = "\\echo [sql-migrations] check v1_merged_migrations.sql" ] || fail "migrations should be sorted before execution"
+
+STARTUP_PLAN_FILE="$TMP_DIR/startup-plan.sql"
+PATH="$BIN_DIR:$PATH" \
+CAPTURE_PLAN="$STARTUP_PLAN_FILE" \
+CAPTURE_QUERY="" \
+NEXENT_SQL_SKIP_IF_CURRENT=true \
+NEXENT_SQL_INIT_FILE="$INIT_SQL_FILE" \
+NEXENT_SQL_MIGRATION_DIR="$SYMLINK_SQL_DIR" \
+  bash "$MIGRATION_SCRIPT" --migrate
+
+assert_file_contains "$STARTUP_PLAN_FILE" "\\if :migrations_current" "startup should only execute SQL when the target is outdated"
+assert_file_contains "$STARTUP_PLAN_FILE" "VALUES ('__init.sql'," "startup should check the init checksum"
+assert_file_contains "$STARTUP_PLAN_FILE" "('v2_test.sql'," "startup should check versioned checksums"
+assert_file_contains "$STARTUP_PLAN_FILE" "\\set migrations_current false" "startup should migrate on an empty or legacy ledger"
+awk '/pg_advisory_lock/ { lock=NR } /\\if :migrations_current/ { check=NR } /CREATE SCHEMA/ { writes=NR }
+  END { exit !(lock && lock < check && check < writes) }' "$STARTUP_PLAN_FILE" \
+  || fail "startup should check migration status under the existing lock before any SQL writes"
 
 WAIT_QUERY_FILE="$TMP_DIR/wait-query.sql"
 WAIT_TABLE_PLAN="$TMP_DIR/wait-table-plan.sql"

@@ -40,6 +40,7 @@ publish_shared_workbench
 ''')
     assert result.returncode == (1 if failure else 0), result.stderr
     assert "<run>\n<--rm>\n<--no-deps>\n<--workdir>\n</opt/backend>" in result.stdout
+    assert "<--env>\n<NEXENT_SQL_SKIP_IF_CURRENT=false>" in result.stdout
     assert "<--entrypoint>\n</opt/nexent/scripts/start-backend.sh>\n<nexent-config>" in result.stdout
     assert "</deployment with spaces/.env>" in result.stdout
     assert "system_initialize && python -m management.services.agent.system_release" in result.stdout

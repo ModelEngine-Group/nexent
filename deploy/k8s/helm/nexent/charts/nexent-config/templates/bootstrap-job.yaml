@@ -1,5 +1,5 @@
 {{- if default false .Values.global.businessPaused }}
-{{- $pod := include "nexent-config.podSpec" . | fromYaml -}}
+{{- $pod := include "nexent-config.podSpec" (dict "context" . "skipCurrentMigrations" false) | fromYaml -}}
 {{- $_ := set $pod "restartPolicy" "Never" -}}
 {{- $container := index $pod.containers 0 -}}
 {{- range $key := list "ports" "startupProbe" "livenessProbe" "readinessProbe" -}}

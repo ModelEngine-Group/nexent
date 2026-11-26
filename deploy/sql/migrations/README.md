@@ -23,8 +23,11 @@ Cascading re-apply:
   an inconsistent state. The cascade is one-way: once tripped, it stays
   tripped until the end of the deployment. A subsequent deployment with no
   changed files starts with a clean cascade flag.
-- `deploy/sql/init.sql` runs unconditionally on every startup and does not
-  participate in the cascade. Keep its statements idempotent.
+- Deployment bootstrap runs `deploy/sql/init.sql` before the version migrations.
+  Config startup checks the recorded checksums for the init file and all version
+  migrations under the migration lock. When they are current, Config skips the
+  entire SQL plan. Otherwise it runs init and the applicable version migrations.
+  The init file does not participate in the cascade. Keep its statements idempotent.
 
 Keep migration SQL idempotent because changing an existing file causes it to run
 again. Use patterns such as `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD
