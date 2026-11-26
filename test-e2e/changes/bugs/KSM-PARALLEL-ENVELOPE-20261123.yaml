@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: KSM-PARALLEL-ENVELOPE-20261123
+  change_type: bugfix
+  bug_id: KSM-PARALLEL-ENVELOPE-20261123
+  title: Use one parsed Python action for CodeAgent parallel delegation
+  description: Preserve protocol markers inside literal worker tasks and validate the parsed action that reaches the executor.
+  observed_behavior: After an invalid Python proposal, a legacy CodeAgent rejected its regenerated parallel batch before starting either requested child. The delegation parser prematurely closed the action at a code marker inside the worker task string.
+  expected_behavior: Parse literal worker tasks intact and dispatch only a complete authorized batch from the same parsed action.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing parallel delegation tests preformatted the model batch and did not replay malformed quotes followed by a complete legacy batch containing literal protocol markers.
+  feature_contract_changed: false
+  affected_features:
+    existing: [KSM-SYSTEM]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [KSM-EXECUTION-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/sdk/core/agents/test_shared_agent_policy.py::test_parallel_delegation_validates_the_exact_action_with_quoted_protocol_tags
+      - test/sdk/core/agents/test_shared_agent_policy.py::test_legacy_parallel_delegation_recovers_after_bad_quotes
+      - test/sdk/core/agents/test_shared_agent_policy.py::test_parallel_delegation_keeps_unverified_outputs_out_of_executor
+    behaviors:
+      - Execute the validated batch exactly once when collaborator task strings contain literal protocol tags.
+      - Retract the invalid proposal and accept the regenerated batch only when it contains complete authorized Python.
+      - Reject truncated responses, incomplete envelopes, quoted examples, extra execution and premature final answers.
+    reason: Exercise the model-attempt and executor boundary separately from the existing Kubernetes kernel-concurrency case.
+  notes: >-
+    The runtime-sandbox-kubernetes-migration design and KSM-EXECUTION-D3-001 own independent child kernels and real overlap.
+    The controlled model replay supplies the rejected and regenerated envelopes through Gateway and Runtime in an isolated namespace.

@@ -35,6 +35,75 @@ def test_recover_streaming_runs_finishes_redis_state(monkeypatch):
     runtime_state.mark_stream_completed.assert_called_once_with("user-1", 10, "failed")
 
 
+@pytest.mark.parametrize("sandbox_enabled", [False, True])
+def test_maintenance_redis_failure_leaves_conversation_update_for_transaction_rollback(monkeypatch, sandbox_enabled):
+    from runtime import identity
+
+    monkeypatch.setattr(identity, "uses_distributed_runtime", lambda: sandbox_enabled)
+    session = object()
+    fail_messages = MagicMock(return_value=[{"message_id": 123, "conversation_id": 10, "user_id": "user-1"}])
+    runtime_state = MagicMock()
+    runtime_state.mark_interrupted_run.side_effect = ConnectionError("Redis offline")
+    _install_module(monkeypatch, "infrastructure.rdb.conversation_state", fail_streaming_assistant_messages=fail_messages)
+    automation = _install_module(
+        monkeypatch, "management.db.automation.repository",
+        recover_orphaned_runs=MagicMock(), release_all_task_locks=MagicMock(),
+    )
+    _install_module(
+        monkeypatch, "management.db.evaluation.runs",
+        list_evaluation_tenant_ids=MagicMock(), reap_stale_runs=MagicMock(),
+    )
+    _install_module(monkeypatch, "infrastructure.redis.run_state", runtime_state_service=runtime_state)
+
+    with pytest.raises(ConnectionError, match="Redis offline"):
+        startup_recovery_service.recover_runtime_tasks(db_session=session)
+
+    fail_messages.assert_called_once_with(db_session=session)
+    runtime_state.mark_interrupted_run.assert_called_once_with("user-1", 10, 123)
+    automation.release_all_task_locks.assert_not_called()
+
+
+@pytest.mark.parametrize("offline", [False, True])
+def test_runtime_recovery_marks_interrupted_run_and_recovers_tasks(monkeypatch, offline):
+    session = object() if offline else None
+    transaction = {"db_session": session} if offline else {}
+    rows = [
+        {"message_id": "123", "conversation_id": "10", "user_id": "user-1"},
+        {"message_id": "456", "conversation_id": "20", "user_id": None},
+    ]
+    messages = _install_module(
+        monkeypatch, "infrastructure.rdb.conversation_state",
+        fail_streaming_assistant_messages=MagicMock(return_value=rows),
+    )
+    automation = _install_module(
+        monkeypatch, "management.db.automation.repository",
+        recover_orphaned_runs=MagicMock(return_value=2), release_all_task_locks=MagicMock(return_value=3),
+    )
+    evaluations = _install_module(
+        monkeypatch, "management.db.evaluation.runs",
+        list_evaluation_tenant_ids=MagicMock(return_value=["tenant-1"]), reap_stale_runs=MagicMock(return_value=1),
+    )
+    runtime_state = MagicMock()
+    _install_module(monkeypatch, "infrastructure.redis.run_state", runtime_state_service=runtime_state)
+
+    result = startup_recovery_service.recover_runtime_tasks(db_session=session)
+
+    assert result == {"conversation_messages": 2, "agent_evaluations": 1, "automation_runs": 2, "automation_locks": 3}
+    if offline:
+        assert runtime_state.mock_calls == [call.mark_interrupted_run("user-1", 10, 123)]
+    else:
+        assert runtime_state.mock_calls == [
+            call.mark_run_finished("user-1", 10, "failed"),
+            call.mark_stream_completed("user-1", 10, "failed"),
+        ]
+    messages.fail_streaming_assistant_messages.assert_called_once_with(**transaction)
+    evaluations.reap_stale_runs.assert_called_once_with(
+        "tenant-1", timeout_minutes=0, **transaction,
+    )
+    automation.recover_orphaned_runs.assert_called_once_with(**transaction)
+    automation.release_all_task_locks.assert_called_once_with(**transaction)
+
+
 def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
     reap = MagicMock(side_effect=[2, 3])
     _install_module(

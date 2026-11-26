@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "revision": "generated-615-rows",
   "routes": [
     {
       "method": "GET",
@@ -635,6 +636,50 @@
       "target": "management",
       "source": "backend/management/api/agent/agent.py",
       "route_id": "route-02ad5beab4a08024",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/knowledge_recommendations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-2e6097a0a63eb8d3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_installation_attempts",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-9bb4d46c7b7f0a77",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_installations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-0b0c7d19b4ff9733",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/resource_links",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
+      "route_id": "route-4d4c5dee4c60bea6",
       "credential_kinds": [
         "session"
       ]
@@ -3006,6 +3051,28 @@
     },
     {
       "method": "GET",
+      "path": "/api/memory/config/tenant-switch",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-fed989f4c3dee7e1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/config/tenant-switch",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-114554631c1bfc9f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/memory/context",
       "transport": "http",
       "target": "management",
@@ -3712,7 +3779,7 @@
       "method": "GET",
       "path": "/api/nb/a2a/{endpoint_id}/.well-known/agent-card.json",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-766a8f22de7bc7e0",
       "credential_kinds": [
@@ -3724,7 +3791,7 @@
       "method": "POST",
       "path": "/api/nb/a2a/{endpoint_id}/message:send",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-d518b1bb25155772",
       "credential_kinds": [
@@ -3735,7 +3802,7 @@
       "method": "POST",
       "path": "/api/nb/a2a/{endpoint_id}/message:stream",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-8ce9b7f404de6d99",
       "credential_kinds": [
@@ -3746,7 +3813,7 @@
       "method": "GET",
       "path": "/api/nb/a2a/{endpoint_id}/tasks/{task_id}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-a22946f7810a4abe",
       "credential_kinds": [
@@ -3757,7 +3824,7 @@
       "method": "POST",
       "path": "/api/nb/a2a/{endpoint_id}/v1",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-348b756ddefd2bf4",
       "credential_kinds": [
@@ -3768,7 +3835,7 @@
       "method": "GET",
       "path": "/api/nb/v1/agents",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-5cd5f2e1822aeffc",
       "credential_kinds": [
@@ -3779,7 +3846,7 @@
       "method": "GET",
       "path": "/api/nb/v1/agents/{agent_name}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-8d825461e1902474",
       "credential_kinds": [
@@ -3790,7 +3857,7 @@
       "method": "GET",
       "path": "/api/nb/v1/agents/{agent_name}/knowledge-bases",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-04f35de29d140275",
       "credential_kinds": [
@@ -3801,7 +3868,7 @@
       "method": "DELETE",
       "path": "/api/nb/v1/api-keys",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-b17ebde2d4860c9d",
       "credential_kinds": [
@@ -3812,7 +3879,7 @@
       "method": "POST",
       "path": "/api/nb/v1/api-keys/refresh",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-580070d1b8fafaa3",
       "credential_kinds": [
@@ -3823,7 +3890,7 @@
       "method": "POST",
       "path": "/api/nb/v1/api-users/batch",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-75dfea1214949e05",
       "credential_kinds": [
@@ -3834,7 +3901,7 @@
       "method": "POST",
       "path": "/api/nb/v1/chat/attachments/upload",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-aceb79abdf9b2f89",
       "credential_kinds": [
@@ -3845,7 +3912,7 @@
       "method": "POST",
       "path": "/api/nb/v1/chat/run",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-97400f6c2e7ed668",
       "credential_kinds": [
@@ -3856,7 +3923,7 @@
       "method": "GET",
       "path": "/api/nb/v1/chat/stop/{conversation_id}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-a5ac95ac94272b85",
       "credential_kinds": [
@@ -3867,7 +3934,7 @@
       "method": "GET",
       "path": "/api/nb/v1/conversations",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-59f5e6b2bc872240",
       "credential_kinds": [
@@ -3878,7 +3945,7 @@
       "method": "GET",
       "path": "/api/nb/v1/conversations/{conversation_id}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-34577d71fb3004a8",
       "credential_kinds": [
@@ -3889,7 +3956,7 @@
       "method": "PUT",
       "path": "/api/nb/v1/conversations/{conversation_id}/title",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-206331d754369bc6",
       "credential_kinds": [
@@ -3900,7 +3967,7 @@
       "method": "GET",
       "path": "/api/nb/v1/file/fetch",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-350731bc17230f9c",
       "credential_kinds": [
@@ -3911,7 +3978,7 @@
       "method": "POST",
       "path": "/api/nb/v1/generate_title",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-51d9941c101c25e7",
       "credential_kinds": [
@@ -3922,7 +3989,7 @@
       "method": "GET",
       "path": "/api/nb/v1/health",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-c8379045b327507c",
       "credential_kinds": [
@@ -3934,7 +4001,7 @@
       "method": "GET",
       "path": "/api/nb/v1/knowledge/file/download/{object_name:path}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-20ed23dee113414b",
       "credential_kinds": [
@@ -3945,7 +4012,7 @@
       "method": "POST",
       "path": "/api/nb/v1/knowledge/file/upload",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-b851e0c4e6c3fea9",
       "credential_kinds": [
@@ -3956,7 +4023,7 @@
       "method": "GET",
       "path": "/api/nb/v1/knowledge/indices",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-2ae4373ac69bcb86",
       "credential_kinds": [
@@ -3967,7 +4034,7 @@
       "method": "POST",
       "path": "/api/nb/v1/knowledge/indices/search/hybrid",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-e831fa0fefeb6dad",
       "credential_kinds": [
@@ -3978,7 +4045,7 @@
       "method": "DELETE",
       "path": "/api/nb/v1/knowledge/indices/{index_name}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-58992a1638d1790c",
       "credential_kinds": [
@@ -3989,7 +4056,7 @@
       "method": "POST",
       "path": "/api/nb/v1/knowledge/indices/{index_name}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-1ae563680e1f4cc3",
       "credential_kinds": [
@@ -4000,7 +4067,7 @@
       "method": "POST",
       "path": "/api/nb/v1/knowledge/indices/{index_name}/chunks",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-9478912285b5ca30",
       "credential_kinds": [
@@ -4011,7 +4078,7 @@
       "method": "DELETE",
       "path": "/api/nb/v1/knowledge/indices/{index_name}/documents",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-c3d5f5ef9936423e",
       "credential_kinds": [
@@ -4022,7 +4089,7 @@
       "method": "GET",
       "path": "/api/nb/v1/knowledge/indices/{index_name}/files",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-86efefd44ecc92c4",
       "credential_kinds": [
@@ -4033,7 +4100,7 @@
       "method": "GET",
       "path": "/api/nb/v1/models",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-db110c724295692e",
       "credential_kinds": [
@@ -4091,6 +4158,270 @@
       "target": "management",
       "source": "backend/management/api/permission/ops_access.py",
       "route_id": "route-a1e8b5e11c48a871",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/catalog",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-catalog",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/overview",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-overview",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/v1/monitoring/mcp-tools/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-refresh",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-refresh-status",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/v1/monitoring/models/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-refresh",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-refresh-status",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/models/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-model-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/v1/monitoring/skills/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-refresh",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-refresh-status",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/skills/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-skill-monitoring-trends",
       "credential_kinds": [
         "session"
       ]
@@ -5760,7 +6091,7 @@
       "method": "GET",
       "path": "/nb/a2a/{endpoint_id}/.well-known/agent-card.json",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-013b817ac295aafd",
       "credential_kinds": [
@@ -5772,7 +6103,7 @@
       "method": "POST",
       "path": "/nb/a2a/{endpoint_id}/message:send",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-9abf7557b97b4835",
       "credential_kinds": [
@@ -5783,7 +6114,7 @@
       "method": "POST",
       "path": "/nb/a2a/{endpoint_id}/message:stream",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-d1bc59a2e287e190",
       "credential_kinds": [
@@ -5794,7 +6125,7 @@
       "method": "GET",
       "path": "/nb/a2a/{endpoint_id}/tasks/{task_id}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-5288e33340114b76",
       "credential_kinds": [
@@ -5805,7 +6136,7 @@
       "method": "POST",
       "path": "/nb/a2a/{endpoint_id}/v1",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-7b0756239bad92b1",
       "credential_kinds": [
@@ -5816,7 +6147,7 @@
       "method": "GET",
       "path": "/nb/v1/agents",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-1d077daaf0c07485",
       "credential_kinds": [
@@ -5827,7 +6158,7 @@
       "method": "GET",
       "path": "/nb/v1/agents/{agent_name}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-762573a9cecbad96",
       "credential_kinds": [
@@ -5838,7 +6169,7 @@
       "method": "GET",
       "path": "/nb/v1/agents/{agent_name}/knowledge-bases",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-9c09b5fa57f65cf9",
       "credential_kinds": [
@@ -5849,7 +6180,7 @@
       "method": "DELETE",
       "path": "/nb/v1/api-keys",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-0b6d93ea50b45951",
       "credential_kinds": [
@@ -5860,7 +6191,7 @@
       "method": "POST",
       "path": "/nb/v1/api-keys/refresh",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-b623a57e4ad12700",
       "credential_kinds": [
@@ -5871,9 +6202,33 @@
       "method": "POST",
       "path": "/nb/v1/api-users/batch",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-aa195e4ca442dd22",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/automations",
+      "transport": "http",
+      "target": "management",
+      "source": "management.api.northbound_gates.automations.nb_list_automations",
+      "route_id": "route-072fe7cb7adbd559",
+      "capability_id": "automations.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/automations/{task_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "management.api.northbound_gates.automations.nb_get_automation",
+      "route_id": "route-33e33f81254a2715",
+      "capability_id": "automations.detail",
       "credential_kinds": [
         "api_key"
       ]
@@ -5882,7 +6237,7 @@
       "method": "POST",
       "path": "/nb/v1/chat/attachments/upload",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-bca1379452c721bb",
       "credential_kinds": [
@@ -5893,7 +6248,7 @@
       "method": "POST",
       "path": "/nb/v1/chat/run",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-91db5b7130233914",
       "credential_kinds": [
@@ -5904,7 +6259,7 @@
       "method": "GET",
       "path": "/nb/v1/chat/stop/{conversation_id}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-7ec828d9a246de8b",
       "credential_kinds": [
@@ -5915,9 +6270,33 @@
       "method": "GET",
       "path": "/nb/v1/conversations",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-a7d58c75a3c59a53",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/conversations/batch-delete",
+      "transport": "http",
+      "target": "management",
+      "source": "management.api.northbound_gates.conversations.nb_delete_conversations_batch",
+      "route_id": "route-ae902de6d85c0eba",
+      "capability_id": "conversations.batch_delete",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/nb/v1/conversations/{conversation_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "management.api.northbound_gates.conversations.nb_delete_conversation",
+      "route_id": "route-beb523b77b3d7957",
+      "capability_id": "conversations.delete",
       "credential_kinds": [
         "api_key"
       ]
@@ -5926,7 +6305,7 @@
       "method": "GET",
       "path": "/nb/v1/conversations/{conversation_id}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-7f050fd88f3eddd6",
       "credential_kinds": [
@@ -5937,7 +6316,7 @@
       "method": "PUT",
       "path": "/nb/v1/conversations/{conversation_id}/title",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-304322fea3f63ac2",
       "credential_kinds": [
@@ -5946,9 +6325,21 @@
     },
     {
       "method": "GET",
+      "path": "/nb/v1/file/download/{object_name:path}",
+      "transport": "http",
+      "target": "management",
+      "source": "management.api.northbound_gates.files.nb_get_storage_file",
+      "route_id": "route-a684835a9abec2c4",
+      "capability_id": "file.download",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/nb/v1/file/fetch",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-b2351fc0b57440f5",
       "credential_kinds": [
@@ -5959,7 +6350,7 @@
       "method": "POST",
       "path": "/nb/v1/generate_title",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-3b4b8ffd65aa8cfe",
       "credential_kinds": [
@@ -5970,7 +6361,7 @@
       "method": "GET",
       "path": "/nb/v1/health",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-43b25562966e8eed",
       "credential_kinds": [
@@ -5982,7 +6373,7 @@
       "method": "GET",
       "path": "/nb/v1/knowledge/file/download/{object_name:path}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-05cefb8b3c6edc9c",
       "credential_kinds": [
@@ -5993,7 +6384,7 @@
       "method": "POST",
       "path": "/nb/v1/knowledge/file/upload",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-e8b327a3ef5824d3",
       "credential_kinds": [
@@ -6004,7 +6395,7 @@
       "method": "GET",
       "path": "/nb/v1/knowledge/indices",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-f77b6c73c8761f7e",
       "credential_kinds": [
@@ -6015,7 +6406,7 @@
       "method": "POST",
       "path": "/nb/v1/knowledge/indices/search/hybrid",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-2f88b37790061e20",
       "credential_kinds": [
@@ -6026,7 +6417,7 @@
       "method": "DELETE",
       "path": "/nb/v1/knowledge/indices/{index_name}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-8f3b643a96551740",
       "credential_kinds": [
@@ -6037,7 +6428,7 @@
       "method": "POST",
       "path": "/nb/v1/knowledge/indices/{index_name}",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-a00401c45256ba60",
       "credential_kinds": [
@@ -6048,7 +6439,7 @@
       "method": "POST",
       "path": "/nb/v1/knowledge/indices/{index_name}/chunks",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-1feecb874779208d",
       "credential_kinds": [
@@ -6059,7 +6450,7 @@
       "method": "DELETE",
       "path": "/nb/v1/knowledge/indices/{index_name}/documents",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-cd6cadd00fa81a53",
       "credential_kinds": [
@@ -6070,7 +6461,7 @@
       "method": "GET",
       "path": "/nb/v1/knowledge/indices/{index_name}/files",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-736f2102beaaaa92",
       "credential_kinds": [
@@ -6081,7 +6472,7 @@
       "method": "GET",
       "path": "/nb/v1/models",
       "transport": "http",
-      "target": "northbound",
+      "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-8a04feb31fc1d67f",
       "credential_kinds": [
@@ -6425,117 +6816,6 @@
       "credential_kinds": [
         "session"
       ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/models",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-model-monitoring-list",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/models/summary",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-model-monitoring-summary",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/models/trends",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-model-monitoring-trends",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/models/rankings",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-model-monitoring-rankings",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/ops/v1/monitoring/models/refresh",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-model-monitoring-refresh",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/models/refreshes/{refresh_id}",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-model-monitoring-refresh-status",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/agents",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-agent-monitoring-list",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/agents/summary",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-agent-monitoring-summary",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/agents/trends",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-agent-monitoring-trends",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/ops/v1/monitoring/agents/rankings",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/monitoring.py",
-      "route_id": "ops-agent-monitoring-rankings",
-      "credential_kinds": [
-        "session"
-      ]
     }
-  ],
-  "revision": "2026-11-23.agentos-ops-monitoring"
+  ]
 }

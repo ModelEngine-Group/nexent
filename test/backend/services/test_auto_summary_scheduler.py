@@ -345,13 +345,11 @@ class TestParseLastSummaryTime:
         assert result is None
 
     def test_parse_iso_string_with_timezone(self):
-        """ISO string with timezone should be parsed correctly."""
+        """ISO string with timezone should have tzinfo stripped, not converted."""
         iso_str = "2025-04-30T10:30:00+08:00"
         result = _parse_last_summary_time(iso_str)
-        assert result is not None
-        assert result.year == 2025
-        assert result.month == 4
-        assert result.day == 30
+        assert result == datetime(2025, 4, 30, 10, 30, 0)
+        assert result.tzinfo is None
 
 
 class TestIsDueForSummary:

@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-TOP3-RECALL-20261116
+  change_type: requirement
+  requirement_id: NL2AGENT-TOP3-RECALL-20261116
+  title: Thresholded per-route Top3 bilingual hybrid resource recall
+  description: Search installed and installable pools independently, apply each route threshold and Top3, union bilingual
+    lexical and embedding references, verify every unique candidate and mark rejected or empty results uncovered without further
+    retrieval.
+  affected_features:
+    existing: []
+    modified:
+    - F-045
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - NL2A-COVERAGE-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Strict Top3 and inclusive threshold per query route and resource pool without name or knowledge bypasses.
+    - Independent bilingual embedding queries, configurable cosine threshold and reference deduplication.
+    - Complete independent verification and uncovered results without additional retrieval, including empty candidates.
+    - Preserve source authorization, explicit linked-resource verification, cache reuse and lexical failure fallback.
+    reason: Strengthen existing retrieval UT; the existing runtime D3 owns real ES and provider collaboration, so no duplicate
+      D1 is added.
+    test_selectors:
+    - test/backend/services/test_nl2agent_top3_recall.py
+    - test/backend/services/test_nl2agent_semantic_top3.py
+    - test/backend/services/test_nl2agent_bilingual_recall.py
+    - test/backend/services/test_nl2agent_semantic_retrieval.py
+    - test/backend/services/test_nl2agent_search_alternatives.py
+    - test/backend/services/test_nl2agent_knowledge_priority.py
+  notes: SPEC ../nexent-doc/docs/Developing/chat-nl2agent-top-three-recall/. F-045 inherits agent_config responsibility. Reuse
+    owned D3 preparation and cleanup; deterministic vectors do not certify real-model threshold quality.

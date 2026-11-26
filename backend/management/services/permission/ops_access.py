@@ -3,6 +3,7 @@
 
 from sqlalchemy import func, literal, select, union_all
 
+from infrastructure.rdb.agent_monitoring import monitored_agent_predicate
 from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.knowledge_base.models import KnowledgeRecord
@@ -26,7 +27,7 @@ def resource_inventory(user, tenant_id=None, page=1, page_size=20):
         if tenant is not None:
             query = query.where(model.tenant_id == tenant)
         if model is AgentInfo:
-            query = query.where(model.version_no == 0)
+            query = query.where(model.version_no == 0, monitored_agent_predicate())
         statements.append(query)
     inventory = union_all(*statements).subquery()
 

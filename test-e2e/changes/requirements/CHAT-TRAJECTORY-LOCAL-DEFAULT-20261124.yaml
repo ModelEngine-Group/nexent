@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-LOCAL-DEFAULT-20261124
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-LOCAL-DEFAULT-20261124
+  title: 默认启用本地轨迹采集并独立控制三方导出
+  description: 默认应用部署采集到本地文件。LOCAL_FILE_MONITORING_ENABLED 控制本地采集，部署脚本通过 monitoring 组件和 provider 控制三方导出。两种方式可独立启用或同时使用。
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-DEPLOYMENT-D5-001
+    - CHAT-TRAJECTORY-ISOLATION-D5-001
+    - CHAT-TRAJECTORY-LOAD-D5-001
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-REAL-MODEL-D3-001
+    - CHAT-TRAJECTORY-RECOVERY-D5-001
+    - CHAT-TRAJECTORY-RETENTION-D5-001
+    - CHAT-TRAJECTORY-TRACE-LOOKUP-D2-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 验证默认本地、仅三方、同时采集、全部关闭和独立读取历史。
+    - 验证同一真实 Span 进入两个处理器，三方保留采样和预览，本地专用字段不进入三方。
+    reason: 配置单测和隔离进程验证实际运行时启动。沿用部署 Shell 检查及既有 D3 和 D5 用例验证更高边界。
+    test_selectors:
+    - test/backend/utils/test_trajectory_deployment_options.py
+    - test/backend/utils/test_trajectory_bootstrap.py
+    - test/backend/utils/test_trajectory_processor.py
+  notes: >-
+    责任域为 runtime。基于 8cdbebae5 的工作区通过 D3 回环 HTTP 专项 14 项，使用独占模型和 OTLP HTTP 服务及临时轨迹目录，沿用脚本的资源释放断言。
+    完整脚本 30 项通过，8 项失败在基线复现。使用临时配置验证 Docker Compose 和 Helm 渲染。工作区缺少外部 SPEC 文档库和独占容器部署环境，D3 与 D5 的完整现场验收仍待执行。

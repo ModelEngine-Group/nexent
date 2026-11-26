@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -28,13 +29,13 @@ class TestIdentity:
     role: str
 
 
-def configured_user(identity_id: str) -> tuple[dict[str, Any], str]:
-    users = load_yaml("users.yaml").get("users") or []
+def configured_user(identity_id: str, *, home: Path | None = None) -> tuple[dict[str, Any], str]:
+    users = load_yaml("users.yaml", home=home).get("users") or []
     record = next((item for item in users if item.get("id") == identity_id), None)
     if not record:
         raise RuntimeError(f"config/users.yaml has no user id={identity_id!r}")
     password_key = str(record.get("password_env_key") or "")
-    password = os.environ.get(password_key) or load_secret_env().get(password_key, "")
+    password = os.environ.get(password_key) or load_secret_env(home=home).get(password_key, "")
     if not password:
         raise RuntimeError(f"config/secrets.env has no value for {password_key}")
     return record, password
@@ -62,17 +63,21 @@ async def sign_in(identity_id: str) -> TestIdentity:
     return await sign_in_credentials(identity_id, record, password)
 
 
-async def sign_in_credentials(identity_id: str, record: dict[str, Any], password: str) -> TestIdentity:
-    """Authenticate an ephemeral account without persisting it in shared config."""
-    async with client("config") as anonymous:
-        response = await anonymous.post("/user/signin", json={"email": record["username"], "password": password})
-    assert_status(response, 200)
+async def request_session(api: httpx.AsyncClient, username: str, password: str) -> tuple[str, str | None]:
+    """Use the product login contract shared by Cases and the Daily mode probe."""
+    response = await api.post("/user/signin", json={"email": username, "password": password})
+    response.raise_for_status()
     payload = response.json()
-    access_token = _find_string(payload, {"access_token", "accesstoken", "token"})
+    access_token = (_find_string(payload, {"access_token", "accesstoken", "token"}) or "").removeprefix("Bearer ").strip()
     if not access_token:
-        raise AssertionError("signin response contains no access token")
-    access_token = access_token.removeprefix("Bearer ").strip()
-    refresh_token = _find_string(payload, {"refresh_token", "refreshtoken"})
+        raise ValueError("signin response contains no access token")
+    return access_token, _find_string(payload, {"refresh_token", "refreshtoken"})
+
+
+async def sign_in_credentials(identity_id: str, record: dict[str, Any], password: str) -> TestIdentity:
+    """Authenticate without persisting the account or its session."""
+    async with client("config") as anonymous:
+        access_token, refresh_token = await request_session(anonymous, str(record["username"]), password)
 
     async with client("config", token=access_token) as authenticated:
         info_response = await authenticated.get("/user/current_user_info")
@@ -94,7 +99,7 @@ async def sign_in_credentials(identity_id: str, record: dict[str, Any], password
     )
     role = str(user.get("role") or user.get("user_role") or info.get("role") or record.get("role") or "").upper()
     if not user_id or not tenant_id:
-        raise AssertionError(f"current_user_info lacks user/tenant identity: {info}")
+        raise AssertionError("current_user_info lacks user/tenant identity")
     return TestIdentity(
         id=identity_id,
         username=str(record["username"]),

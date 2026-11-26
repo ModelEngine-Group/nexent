@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: MEMORY-CONTROLS-20261116
+  change_type: requirement
+  requirement_id: MEMORY-CONTROLS-20261116
+  title: Tenant, user and Agent automatic memory controls
+  description: Apply tenant, user and Agent policy to automatic retrieval, writing, forwarding and Dreaming publication.
+  affected_features:
+    existing: [F-119, F-120, F-122, F-123, F-178]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGT-049, AGT-050, AGT-051]
+    added: []
+    modified: [AGT-071]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_memory_record_unchanged.py
+    - test/backend/services/test_memory_dreaming_service.py
+    - test/backend/apps/test_memory_dreaming_app.py
+    - test/backend/apps/test_memory_tenant_config_app.py
+    - test/backend/services/test_memory_external_provider_service.py
+    - test/backend/services/test_agent_service.py
+    - test/backend/app/test_agentos_memory_store.py
+    - test/backend/services/test_agentos_memory_callback.py
+    - test/backend/services/test_prepared_memory_completion.py
+    - test/backend/database/test_memory_completion_scope.py
+    - test/backend/database/test_prepared_omitted_user.py
+    - test/backend/services/test_memory_backend_adapter.py
+    - test/backend/app/test_management_agentos_callbacks.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/gateway/test_exposure.py
+    - test/backend/app/test_tenant_app.py
+    behaviors:
+    - Preserve explicit disabled settings and enforce all three scopes at execution and write boundaries.
+    - Recheck the scope of Dreaming evidence before publishing.
+    - Retry background work on configuration read errors rather than treating failures as an explicit off switch.
+    - Keep the executed Agent version for queued policy checks and extracted memory writes after a later publication.
+    reason: Unit tests cover policy and Dreaming revocation. AGT-071 checks scoped automatic retrieval and the continued availability of existing records.

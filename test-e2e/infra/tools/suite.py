@@ -38,6 +38,15 @@ from test_asset_lib import repository_root
 from validate_execution import inspect
 
 STAGES = [f"D{i}" for i in range(1, 6)]
+D4_DEFAULT_CASE_TIMEOUT_SECONDS = 600
+D4_WORKER_GRACE_SECONDS = 60
+
+
+def case_timeout_seconds(record, settings):
+    default = settings["case_timeout_seconds"]
+    if record["stage"] == "D4":
+        default = min(default, D4_DEFAULT_CASE_TIMEOUT_SECONDS)
+    return record["execution"].get("timeout_seconds", default)
 
 
 def static_requirements(repo, records, *, daily, catalog=None):
@@ -250,9 +259,22 @@ def dependency_failure_outcome(directory, env, *, outcome, exc, preparation_log=
     return outcome, reason, ({'evidence': evidence} if evidence else None)
 
 
+def registered_cleanup(repo, directory, env, timeout, run_logged, *, force=False):
+    output = directory / "runtime/cleanup-results.jsonl"
+    command = [sys.executable, "-m", "shared.asset_cleanup", "--output", str(output)]
+    if force:
+        command.append("--force")
+    return run_logged(command, repo, env, directory / "logs/cleanup.log", timeout)
+
+
 def worker(repo, home, record, directory, settings):
     """Run one Case with its own asset registry; never clean another run's assets."""
+    case_started = time.monotonic()
     env = machine_environment(home, repo)
+    managed_tfp = os.environ.get("NEXENT_CASE_DEPLOYMENT_PROFILE") == "tfp"
+    env.pop("NEXENT_CASE_DEPLOYMENT_PROFILE", None)
+    if managed_tfp:
+        env["NEXENT_CASE_DEPLOYMENT_PROFILE"] = "tfp"
     # Keep all descendants in the worker group so the controller can terminate it.
     run_logged = partial(logged, new_session=False)
     automation = repo / "test-e2e/infra/automation"
@@ -328,11 +350,18 @@ def worker(repo, home, record, directory, settings):
                 env[key] = value
         # The controller owns this worker's whole process group and Case deadline.
         # Keep its commands in that group so outer cancellation also reclaims children.
-        _, outcome, _ = run_one(record, repo, home, env, result_dir=directory, enforce_timeout=False)
-        status_path = directory / "status.json"
-        if status_path.is_file():
-            test_details = json.loads(status_path.read_text(encoding="utf-8"))
-            reason = test_details.get("reason")
+        if record["stage"] == "D4":
+            remaining_ms = int((case_timeout_seconds(record, settings) - (time.monotonic() - case_started)) * 1000)
+            if remaining_ms <= 0:
+                outcome, reason = "TIMEOUT", "D4 case budget exhausted during preparation"
+            else:
+                env["D4_CASE_TIMEOUT_MS"] = str(remaining_ms)
+        if outcome != "TIMEOUT":
+            _, outcome, _ = run_one(record, repo, home, env, result_dir=directory, enforce_timeout=False)
+            status_path = directory / "status.json"
+            if status_path.is_file():
+                test_details = json.loads(status_path.read_text(encoding="utf-8"))
+                reason = test_details.get("reason")
     except Exception as exc:
         outcome, reason, failure_details = dependency_failure_outcome(
             directory, env, outcome=outcome, exc=exc, preparation_log=preparation_log)
@@ -353,9 +382,8 @@ def worker(repo, home, record, directory, settings):
                 checkpoint.parent.mkdir(parents=True, exist_ok=True)
                 checkpoint.write_text(json.dumps({"case_id": record["case_id"], "result": outcome}) + "\n", encoding="utf-8")
             try:
-                registered_cleanup_code = run_logged([sys.executable, "-m", "shared.asset_cleanup", "--output",
-                                       str(directory / "runtime/cleanup-results.jsonl")], repo, env,
-                                      directory / "logs/cleanup.log", settings["command_timeout_seconds"])
+                registered_cleanup_code = registered_cleanup(repo, directory, env, settings["command_timeout_seconds"],
+                                                             run_logged, force=managed_tfp)
                 cleanup_code = cleanup_code or registered_cleanup_code
             except Exception:
                 cleanup_code = 2
@@ -415,7 +443,7 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
 
 
 def _execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, directory=None,
-             on_result=None, validation_report=None, on_batch_created=None):
+             on_result=None, validation_report=None, on_batch_created=None, deployment_profile=None):
     directory = directory or home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False)
     if os.name != "nt":
@@ -452,6 +480,9 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
     env = notification_environment(home)
     try:
         env = machine_environment(home, repo)
+        env.pop("NEXENT_CASE_DEPLOYMENT_PROFILE", None)
+        if deployment_profile == "tfp":
+            env["NEXENT_CASE_DEPLOYMENT_PROFILE"] = "tfp"
         if validation_report is not None and not validation_report.get("ready"):
             raise RuntimeError("Global or unclassified asset validation failure")
         state["stages"]["D0"] = "RUNNING"
@@ -512,10 +543,13 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                     row = {"case_id": case_id, "stage": stage, "result": result, "reason": record["status"], "evidence": []}
                 else:
                     case_dir = directory / "cases" / case_id
+                    worker_timeout = case_timeout_seconds(record, settings)
+                    if stage == "D4":
+                        worker_timeout += D4_WORKER_GRACE_SECONDS
                     code = logged([sys.executable, str(Path(__file__)), "worker", "--test-home", str(home),
                                    "--case", case_id, "--batch-dir", str(directory)], repo, env,
                                   directory / "logs" / f"{case_id}.log",
-                                  record["execution"].get("timeout_seconds", settings["case_timeout_seconds"]))
+                                  worker_timeout)
                     receipt = case_dir / "receipt.json"
                     row = json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else {
                         "case_id": case_id, "stage": stage, "result": "TIMEOUT" if code == 124 else "AUTOMATION_ERROR",
@@ -553,6 +587,20 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
     except Exception as exc:
         error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
+        if deployment_profile == "tfp":
+            for record in records:
+                case_dir = directory / "cases" / record["case_id"]
+                if (case_dir / "receipt.json").exists() or not (case_dir / "runtime/resolved-assets.yaml").is_file():
+                    continue
+                cleanup_env = dict(env, RESULT_DIR=str(case_dir), PYTHONPATH=os.pathsep.join(
+                    [str(repo / "test-e2e/infra/automation"), env.get("PYTHONPATH", "")]))
+                try:
+                    cleanup = registered_cleanup(repo, case_dir, cleanup_env,
+                                                 min(120, settings["command_timeout_seconds"]), logged, force=True)
+                except Exception:
+                    cleanup = 2
+                if cleanup:
+                    error = error or "TFP worker stopped before owned asset cleanup could complete"
         summary = finalize(directory, report_records, rows, error, environment=env)
         for stage, status in state["stages"].items():
             if status in {"PENDING", "RUNNING"}:

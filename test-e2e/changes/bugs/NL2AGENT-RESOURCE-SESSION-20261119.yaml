@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-RESOURCE-SESSION-20261119
+  change_type: bugfix
+  bug_id: NL2AGENT-RESOURCE-SESSION-20261119
+  title: Isolate resource cards by creator conversation
+  description: Prevent delayed resource work from another conversation replacing the current binding card.
+  observed_behavior: Conversation 538 issued a binding card, but delayed conversation 537 overwrote its shared Redis state and confirmation returned resource_state_expired.
+  expected_behavior: Resource state is isolated by tenant, user, draft and conversation; runs within one conversation share versioned state. Matching unexpired legacy state remains usable.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing scope assertions cover tenant, user and draft but omit two conversations on the same draft.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_state_service.py
+      - test/backend/services/test_nl2agent_resource_flow.py
+    behaviors:
+      - Different conversations cannot overwrite resource cards and runs within one conversation share a key.
+      - Matching legacy state is read and migrated atomically; mismatched or missing legacy state cannot authorize an action.
+      - Redis failures, card versions and identity boundaries retain their existing rejection behavior.
+    reason: UT owns key and migration boundaries; the existing runtime Case exercises real HTTP, MCP and Redis collaboration and owned cleanup.
+  notes: >-
+    See ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/resource-session-isolation-fix.md.
+    F-045 retains agent_config ownership. Existing D3 preparation creates and cleans isolated
+    databases, Redis keys, ES indices, providers and workers. No additional D1 or D4 is needed
+    for a storage identity fix with unchanged UI and HTTP contracts.

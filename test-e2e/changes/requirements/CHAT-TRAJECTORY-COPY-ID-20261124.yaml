@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-COPY-ID-20261124
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-COPY-ID-20261124
+  title: 智能体对话和工作台显示可复制的会话 ID
+  description: 在两个页面的共用对话工具区显示当前已保存的会话 ID，便于在可观测中心按 ID 查找轨迹。
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [CHAT-TRAJECTORY-ID-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 有效 ID 可见，切换后复制当前 ID，未保存时不显示；剪贴板操作失败有提示。
+    reason: 前端组件测试覆盖显示和失败分支；浏览器旅程验证两入口与剪贴板。未改变后端接口、运行、权限或部署，无需新增其他阶段用例。
+    test_selectors:
+    - frontend/tests/component/conversationToolbar.test.tsx
+  notes: 责任域为 runtime。D4 使用用例独占浏览器上下文和受控会话接口，无后端数据写入或共享资源准备；由浏览器夹具回收页面、路由和权限。当前工作区缺少外部 SPEC 文档库。

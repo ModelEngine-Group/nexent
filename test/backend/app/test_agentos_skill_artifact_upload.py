@@ -2,7 +2,7 @@
 """Verify ordinary prepared skill output stays inside its Runtime workspace."""
 
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -31,13 +31,13 @@ def test_prepared_skill_uploads_workspace_files_before_cleanup(tmp_path, bind, a
     sink = Mock()
     writes = []
 
-    def upload(path, key):
-        writes.append((Path(path).read_bytes(), key))
+    def upload(stream, key):
+        writes.append((stream.read(), key))
         return available, "stored" if available else "store unavailable"
 
     uploader = UploadToS3Tool(
         workspace_path=str(workspace), user_id="actor", run_id="run", observer=sink,
-        minio_client=SimpleNamespace(upload_file=upload, default_bucket="bucket"),
+        minio_client=SimpleNamespace(upload_fileobj=upload, default_bucket="bucket"),
         on_upload=actor._record_workspace_upload,
     )
     uploader.workspace_mapping = actor.workspace_mapping

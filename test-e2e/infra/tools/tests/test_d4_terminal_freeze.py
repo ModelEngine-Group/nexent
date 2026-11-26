@@ -122,3 +122,56 @@ exported.journey('fixture',async({contract})=>{
 """.replace("ROOT", json.dumps(str(repo))).replace("LATE_AT", json.dumps(late_at))
     outcome = subprocess.run(["node", "-"], input=script, text=True, capture_output=True, timeout=20)
     assert outcome.returncode == 0, outcome.stderr
+
+
+def test_chat_completion_bounds_open_sse_and_shares_budget_with_ui():
+    repo = Path(__file__).resolve().parents[4]
+    script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+const root = ROOT;
+const ts = require(path.join(root, 'test-e2e/infra/automation/d1/frontend/node_modules/typescript'));
+const source = fs.readFileSync(path.join(root,'test-e2e/infra/automation/d4/pages/chat.page.ts'),'utf8');
+const code = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+let now = 0, timer, cleared = 0;
+const budgets = [];
+const check = (pattern, {timeout}) => {budgets.push(timeout); now += 10;};
+const expect = () => ({toContainText:check, toHaveCount:check});
+expect.poll = (action, {timeout}) => ({not:{toMatch: pattern => check(pattern, {timeout})}});
+const exported = {};
+vm.runInNewContext(code, {
+  exports:exported, performance:{now:()=>now},
+  setTimeout(callback, timeout){timer = {callback, timeout}; return timer;},
+  clearTimeout(handle){assert.equal(handle, timer); cleared++;},
+  require(name){
+    if(name==='playwright/test')return {expect};
+    if(name==='../runner/runtime-config')return {};
+    return require(name);
+  }
+});
+(async()=>{
+  const page = {locator: () => ({last:()=>({})})};
+  const chat = new exported.ChatPage(page);
+  chat.lastRunResponse = {finished: () => new Promise(()=>{})};
+  const pending = chat.waitForCompletion(100);
+  assert.equal(timer.timeout, 100);
+  now = 100;
+  timer.callback();
+  await assert.rejects(pending, {name:'TimeoutError', message:/SSE response completion.*100 ms/});
+  assert.deepEqual(budgets, []);
+  assert.equal(cleared, 1);
+
+  now = 0;
+  chat.lastRunResponse = {finished: async () => {now = 40; return null;}};
+  await chat.waitForCompletion(100);
+  assert.deepEqual(budgets, [60, 50, 40], 'SSE and all UI checks consume the same deadline');
+  assert.equal(cleared, 2);
+
+  now = 0;
+  chat.lastRunResponse = {finished: async () => new Error('connection closed')};
+  await assert.rejects(chat.waitForCompletion(100), /agent run stream failed: connection closed/);
+  assert.equal(cleared, 3);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+""".replace("ROOT", json.dumps(str(repo)))
+    outcome = subprocess.run(["node", "-"], input=script, text=True, capture_output=True, timeout=20)
+    assert outcome.returncode == 0, outcome.stderr

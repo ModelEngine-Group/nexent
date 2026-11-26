@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MCP-UI-SHELL-20261124
+  change_type: requirement
+  requirement_id: OPS-MCP-UI-SHELL-20261124
+  title: Show MCP monitoring layouts before statistics are available
+  description: Show authorized all-service, single-service and single-tool MCP layouts using existing directory filters.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    test_selectors:
+    - frontend/tests/component/monitoringFilters.test.tsx
+    behaviors:
+    - Tenant changes clear the resource and group while preserving dates.
+    - Changing or clearing an MCP service clears the selected tool while keeping other filters.
+    reason: The existing frontend unit suite covers the unchanged reducer. The current route and directory behavior are verified in D4. The backend is unchanged.

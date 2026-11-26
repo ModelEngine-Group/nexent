@@ -26,8 +26,9 @@ case:
       configuration to Jiuwen with CM enabled, and inject invalid summary output or
       a blocked summary read.
     expected: Neither fault overwrites or appends an invalid checkpoint; historical
-      messages and tool effects remain unchanged. Cancelled reads close, stop within
-      ten seconds and send no main follow-up model request.
+      messages and tool effects remain unchanged. Cancelling the summary after the
+      first model response closes the read within ten seconds and sends no further
+      main model request.
   - order: 2
     action: Restore the controlled model endpoint, reopen the same conversation and
       follow up; also query with a different owner, tenant or invalid current-message
@@ -37,8 +38,8 @@ case:
       workers drain without STUCK tasks.
   expected_results:
   - Neither fault overwrites or appends an invalid checkpoint; historical messages
-    and tool effects remain unchanged. Cancelled reads close, stop within ten seconds
-    and send no main follow-up model request.
+    and tool effects remain unchanged. Cancelling the summary after the first model
+    response closes the read within ten seconds and sends no further main model request.
   - An authorized new run completes from preserved history; old checkpoint content
     remains unchanged and unauthorized history queries return no data. Managed workers
     drain without STUCK tasks.

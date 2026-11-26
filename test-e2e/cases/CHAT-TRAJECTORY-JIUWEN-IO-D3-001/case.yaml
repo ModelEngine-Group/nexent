@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-JIUWEN-IO-D3-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids: [CHAT-LOCAL-TRAJECTORY-20261103]
+  business_rule_ids: [TRJ-RULE-001, TRJ-RULE-004]
+  title: 从会话归档读取九问智能体的最终回复和工具输入输出
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 对照智能体实际答复、工具调用和返回值，验证 Ops 历史快照预览与按引用读取的正文。
+  preconditions:
+  - 使用真实 Jiuwen Runner、模型服务和受控 HTTP 模型，采集到独占本地目录。
+  - 以受控租户、会话和管理员身份读取轨迹。模型提供方和数据库身份查询为受控边界。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 让九问根智能体执行一次加法工具。刷盘后以新建的读取服务请求快照和对应正文。
+    expected: 根输出等于实际发送的最终答复。加法节点的输入和输出分别等于执行参数和返回值。预览与完整正文一致。
+  - order: 2
+    action: 让主智能体委派两个不同任务，从新建读取服务核对根输出、两个工具的正文和各自的子智能体。
+    expected: 每个委派工具都有独立节点。工具参数、返回值分别对应其子智能体的任务和回复，根节点显示本轮最终答复。
+  - order: 3
+    action: 模型拒绝请求或在生成中取消运行，刷盘后检查根节点。
+    expected: 运行保留失败或取消状态。没有最终答复时，根节点没有输出正文引用或预览。
+  expected_results:
+  - 普通工具的执行参数、返回值和根最终答复能从快照预览及正文引用读取。
+  - 委派工具的任务、结果和子智能体调用归属一致，根答复独立于子智能体返回值。
+  - 失败和取消保留各自状态，根节点没有最终答复正文。
+  forbidden_side_effects:
+  - 采集不得额外触发模型调用、工具或委派执行。
+  - 不留下运行线程、HTTP 服务或本用例创建的轨迹目录。
+  acceptance:
+  - id: AC-01
+    description: 普通工具和成功根节点保留其实际输入输出。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: 委派工具正文及归属与实际子智能体任务和回复相符。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1, 2]
+  - id: AC-03
+    description: 失败及取消运行不生成根节点最终答复。
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [2]
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
+    acceptance_criteria: [AC-003]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary:
+  - 九问运行器、真实模型服务和工具至本地 OTLP 归档，再经新建 Ops 服务的快照及正文接口读取。
+  observations:
+  - 本轮结果、模型请求数、实际工具输入输出、父子节点 ID、快照预览及完整正文。
+  cleanup:
+  - 关闭 HTTP 服务、读取客户端、轨迹处理器与受管线程，检查工作线程计数，并删除独占目录。

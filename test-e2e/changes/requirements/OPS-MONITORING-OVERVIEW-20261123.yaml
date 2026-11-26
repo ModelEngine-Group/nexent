@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MONITORING-OVERVIEW-20261123
+  change_type: requirement
+  requirement_id: OPS-MONITORING-OVERVIEW-20261123
+  title: Connect the monitoring overview totals and daily trends
+  description: Show current Agent and Model totals by tenant and their daily request series. Keep MCP and Skill visibly unconnected.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/monitoringOverview.test.tsx
+    - test/backend/ops/test_monitoring_api.py
+    - test/backend/ops/test_resource_inventory.py
+    behaviors:
+    - Count distinct current Agent and Model identities by resource kind and tenant.
+    - Verify Model trend parameter serialization, cancellation and error propagation.
+    reason: Existing API tests cover permitted tenant scope and published zero versus missing values. The dashboard browser proves scope and date interactions, independent states, and no extra monitoring endpoints.
+  notes: Base 9784633ba. The change covers the existing Overview route. Model detail is a later increment.

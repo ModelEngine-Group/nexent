@@ -1,0 +1,20 @@
+schema_version: 1
+enabled: false
+# Copy to the private test-home config directory. Never use a developer cluster.
+kubeconfig: runtime-scaling.kubeconfig
+context: nexent-runtime-scaling-e2e
+# UID of kube-system on the test cluster. The cluster owner must label that namespace
+# nexent.io/runtime-scaling-e2e=true before opting in.
+cluster_uid: 00000000-0000-0000-0000-000000000000
+# Reserve this dynamic StorageClass for the test, with Delete reclaim policy and real RWX.
+storage_class: runtime-scaling-e2e-rwx
+# The cluster must have access to images built from the revision under test.
+# The cross-node storage case also requires two schedulable worker hosts with distinct hostnames.
+image_source: general
+app_version: replace-with-tested-image-tag
+# Replace the placeholder with the candidate Runtime and Management build imageIDs
+# digest(s), including any platform-specific runtime identities. Do not adopt IDs
+# from a test run unless they are independently attributable to the candidate build.
+backend_image_digests:
+  - sha256:0000000000000000000000000000000000000000000000000000000000000000
+wait_seconds: 600

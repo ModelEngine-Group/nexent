@@ -1620,7 +1620,11 @@ class TestCreateAidpKbImpl:
     def test_non_2xx_logs_body_before_raise(self, aidp_service_module):
         """response.status_code >= 400 triggers diagnostic body logging (line 551)."""
         request = httpx.Request("PUT", "http://127.0.0.1:30081")
-        resp = httpx.Response(500, request=request, text='{"error": "internal"}')
+        resp = httpx.Response(
+            500,
+            request=request,
+            text='{"error": {"code": 1022, "message": "internal"}}',
+        )
         mock_client = MagicMock()
         mock_client.put.return_value = resp
         mock_manager = MagicMock()
@@ -2547,7 +2551,7 @@ class TestAidpDocumentFileOperations:
     async def test_download_maps_upstream_http_error(self, aidp_service_module):
         response = httpx.Response(
             404,
-            json={"error": "file not found"},
+            json={"error": {"code": 1001, "message": "file not found"}},
             request=httpx.Request("POST", "http://127.0.0.1:30081"),
         )
         _setup_mock_async_client(
@@ -2636,7 +2640,7 @@ class TestAidpDocumentFileOperations:
     async def test_preview_maps_upstream_http_error(self, aidp_service_module):
         response = httpx.Response(
             404,
-            json={"error": "file not found"},
+            json={"error": {"code": 1001, "message": "file not found"}},
             request=httpx.Request("GET", "http://127.0.0.1:30081"),
         )
         _setup_mock_async_client(

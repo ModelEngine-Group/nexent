@@ -8,6 +8,13 @@ import { appPath } from "../runner/runtime-config";
 /** A path or a full setFiles payload (name/mimeType/buffer). */
 type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
 
+class ChatCompletionTimeoutError extends Error {
+  constructor(phase: string, timeout: number) {
+    super(`Agent run ${phase} exceeded the ${timeout} ms completion budget`);
+    this.name = "TimeoutError";
+  }
+}
+
 export class ChatPage {
   private lastServerConversationId?: number;
   private stoppedConversationId?: number;
@@ -187,15 +194,31 @@ export class ChatPage {
     // Wait for the SSE response body to end, not just for an early completion
     // badge: a new conversation can expose the stop-less placeholder before
     // the final answer has rendered.
+    const deadline = performance.now() + timeout;
+    const remaining = (phase: string): number => {
+      const ms = Math.ceil(deadline - performance.now());
+      if (ms <= 0) throw new ChatCompletionTimeoutError(phase, timeout);
+      return ms;
+    };
     const run = this.lastRunResponse;
     if (run) {
-      const failure = await run.finished();
-      if (failure) throw new Error(`agent run stream failed: ${failure.message}`);
+      const phase = "SSE response completion (/api/agent/run)";
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const expires = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new ChatCompletionTimeoutError(phase, timeout)), remaining(phase));
+        });
+        const failure = await Promise.race([run.finished(), expires]);
+        if (failure) throw new Error(`agent run stream failed: ${failure.message}`);
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    const uiTimeout = () => remaining("UI completion");
     const last = this.assistantMessages().last();
-    await expect(last).toContainText(/已完成|Completed|失败|Error/i, { timeout });
-    await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout });
-    await expect.poll(async () => (await last.innerText()).trim(), { timeout })
+    await expect(last).toContainText(/已完成|Completed|失败|Error/i, { timeout: uiTimeout() });
+    await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: uiTimeout() });
+    await expect.poll(async () => (await last.innerText()).trim(), { timeout: uiTimeout() })
       .not.toMatch(/Thinking\.\.\.|思考中/);
   }
 

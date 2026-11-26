@@ -14,7 +14,7 @@ def request_with(params, agent="root", tool="aidp_search"):
 def inherited_tree():
     return [{"agent_name": "root", "tools": [{
         "name": "aidp_search", "class_name": "AidpSearchTool",
-        "params": [{"name": "top_k", "default": 10}, {"name": "hybrid_top_k", "default": 6}],
+        "params": [{"name": "top_k", "default": 11}, {"name": "hybrid_top_k", "default": 6}],
     }]}]
 
 

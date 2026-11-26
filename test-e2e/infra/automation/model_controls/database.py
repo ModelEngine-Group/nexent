@@ -13,7 +13,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 from infrastructure import agent_model_config
 from management.services.model import run_bindings
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, MODEL_CONFIG_MAPPING
-from management.db import client as client
+from infrastructure.rdb import client
 from management.db import models as db_models
 from model_controls.api import CAPABILITY, BUDGET
 
@@ -69,8 +69,9 @@ def database_fixture(monkeypatch, provider):
     models = {}
     try:
         with sessions() as session:
-            session.add(db_models.UserTenant(user_id=owner, tenant_id=tenant, user_role="CREATOR",
-                                            user_email="model-controls@fixture.invalid", created_by=owner, updated_by=owner))
+            session.add(db_models.UserAccount(user_id=owner, user_roles=["DEV"],
+                                             user_email="model-controls@fixture.invalid", created_by=owner, updated_by=owner))
+            session.add(db_models.UserTenant(user_id=owner, tenant_id=tenant, created_by=owner, updated_by=owner))
             for label, capacity, effort in [("default-A", 16000, "low"), ("selected-B", 8000, "medium"),
                                             ("budget-B", 10000, "auto"), ("business-C", 12000, "high")]:
                 record = db_models.ModelRecord(
@@ -138,7 +139,7 @@ def database_fixture(monkeypatch, provider):
                     ))
                     session.flush()
             for typ, sub in [("agent", "create"), ("skill", "create"), ("agent", "read"), ("agent", "use")]:
-                session.add(db_models.RolePermission(user_role="CREATOR", permission_category="RESOURCE",
+                session.add(db_models.RolePermission(user_role="DEV", permission_category="RESOURCE",
                                                     permission_type=typ, permission_subtype=sub))
             for kind in ("embedding", "stt", "tts"):
                 session.add(db_models.ModelRecord(model_repo="", model_name="fixture-" + kind,
@@ -149,6 +150,10 @@ def database_fixture(monkeypatch, provider):
         yield {"schema": schema, "tenant": tenant, "owner": owner, "models": models,
                "agent_id": agent_id, "sessions": sessions, "engine": engine}
     finally:
+        # Imports performed during a callback must not retain this schema's session factory.
+        for name, module in list(sys.modules.items()):
+            if name.startswith(("management.", "infrastructure.")) and getattr(module, "get_db_session", None) is sessions:
+                setattr(module, "get_db_session", original_session)
         with engine.begin() as connection:
             connection.execute(DropSchema(schema, cascade=True))
         event.remove(engine, "before_cursor_execute", rewrite_schema)

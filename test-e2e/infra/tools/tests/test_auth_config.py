@@ -42,7 +42,7 @@ class AuthConfigTests(unittest.TestCase):
                 "NEXENT_TEST_HOME": str(home),
                 "SYNTHETIC_PASSWORD": "process-value",
             }):
-                _, password = configured_user("tenant_a_admin")
+                _, password = configured_user("tenant_a_admin", home=home)
             self.assertEqual(password, "process-value")
 
 

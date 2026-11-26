@@ -73,26 +73,64 @@ def test_capture_generated_code_result_and_logs_survive_cold_read(runtime):
 
 
 @pytest.mark.parametrize('creator', [False, True], ids=['clarification', 'creator-card'])
-def test_capture_interactive_card_preserves_stop_status(runtime, creator):
+def test_capture_interactive_card_preserves_stop_status(runtime, monkeypatch, creator):
+    from infrastructure.nl2agent_tool_config import NL2AGENT_RECEIPT_KEY, NL2A_WRAPPER_NAME
+    from nexent.core.agents.cores.smolagents import agent as module
     from ops.services.trajectory.projection import execution_values
-    from services.nl2agent_service import _Nl2AgentBoundaryObserver
+    from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 
-    payload = {'subtype': 'requirement_clarification', 'questions': [{
+    payload = {'agent_id': 7, 'subtype': 'requirement_clarification', 'questions': [{
         'question_id': 'scope', 'question_type': 'text', 'title': 'Which region?',
         'required': True, 'options': [], 'allow_other': False, 'other_input_expanded': False,
     }]}
-    wrapper = '<nl2a>' + json.dumps(payload) + '</nl2a>'
-    code = (f'print({wrapper!r})' if creator else
+    run_id = 'controlled-creator-card'
+    conversation_id = '123'
+    stop_event = None
+    receipt = {NL2AGENT_RECEIPT_KEY: {
+        'run_id': run_id, 'conversation_id': conversation_id, 'event_id': 'card', 'payload': payload,
+    }}
+
+    class CaptureCreatorCardTool(Tool):
+        name = 'capture_creator_card'
+        description = 'Deliver a controlled creator card receipt'
+        inputs: ClassVar[dict] = {}
+        output_type = 'string'
+        observer = None
+
+        def forward(self) -> str:
+            self.observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, receipt)
+            assert self.observer.boundary_reached
+            # A valid receipt completes the turn gracefully. Request an explicit stop after delivery.
+            assert not stop_event.is_set()
+            stop_event.set()
+            return 'Card delivered'
+
+    def make_observer(stop):
+        nonlocal stop_event
+        stop_event = stop
+        return _Nl2AgentBoundaryObserver(
+            lang='en', stop_event=stop, agent_id=7, run_id=run_id, conversation_id=conversation_id,
+        )
+
+    config = None
+    if creator:
+        monkeypatch.setattr(module, 'CaptureCreatorCardTool', CaptureCreatorCardTool, raising=False)
+        config = AgentConfig(
+            name='root', description='Controlled Agent', model_name='model', max_steps=2,
+            tools=[ToolConfig(class_name='CaptureCreatorCardTool', name='capture_creator_card',
+                              source='local', params={})],
+        )
+    code = ('capture_creator_card()' if creator else
             "ask_user(questions=[{'id': 'scope', 'type': 'text', 'title': 'Which region?'}])")
+    factory = make_observer if creator else None
 
     def reply(request, number, emit):
         emit(f'<code>{code}</code>')
         emit(usage={'prompt_tokens': 9, 'completion_tokens': 4, 'total_tokens': 13})
         emit(done=True)
 
-    factory = (lambda stop: _Nl2AgentBoundaryObserver(lang='en', stop_event=stop)) if creator else None
     with runtime.http(reply) as (base, requests):
-        info, _ = runtime.run(base, observer_factory=factory)
+        info, _ = runtime.run(base, config=config, observer_factory=factory)
         assert len(requests) == 1
     assert info.attempt_outcome == ('stopped' if creator else 'completed')
     events = [json.loads(item) for item in info.observer.get_cached_message()]
@@ -173,11 +211,53 @@ def test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads(runtime
         root = next(n for n in result['nodes'] if n['parent_id'] is None)
         assert root['display_trace_id'] == '123' and root['model_call_count'] == 2
         indexed = {n['id']: n for n in result['nodes']}
+        reason = 'The model service is temporarily unavailable. Please try again later.'
+        assert json.loads(first['nexent.error'])['safe_message'] == reason
+        assert indexed[first['nexent.record_id']]['failure_reason'] == reason
+        assert 'failure_reason' not in indexed[second['nexent.record_id']]
         for physical, expected in zip(models, ('failed-partial', '<final_answer>completed-answer</final_answer>')):
             body = json.loads(indexed[attrs(physical)['nexent.record_id']]['output']['text'])
             assert body['choices'][0]['delta']['content'] == expected
             assert not {'content_parts', 'provider_metadata', 'complete', 'message_id'} & body.keys()
         assert client.get('/trajectory/conversations/123', headers={'Authorization': 'user'}).status_code == 403
+
+
+def test_capture_tool_failure_reason_survives_cold_read(runtime, monkeypatch):
+    from nexent.core.agents.cores.smolagents import agent as module
+
+    calls = []
+    reason = 'The controlled tool rejected the request.'
+
+    class CaptureFailureTool(Tool):
+        name = 'capture_failure'
+        description = 'A controlled tool failure'
+        inputs: ClassVar[dict] = {}
+        output_type = 'string'
+
+        def forward(self) -> str:
+            calls.append(True)
+            raise ValueError(reason)
+
+    monkeypatch.setattr(module, 'CaptureFailureTool', CaptureFailureTool, raising=False)
+    config = AgentConfig(name='root', description='Controlled Agent', model_name='model', max_steps=2,
+                         tools=[ToolConfig(class_name='CaptureFailureTool', name='capture_failure',
+                                           source='local', params={})])
+
+    def reply(request, number, emit):
+        emit('<code>\ncapture_failure()\n</code>' if number == 1 else '<final_answer>recovered</final_answer>')
+        emit(done=True)
+
+    with runtime.http(reply) as (base, requests):
+        info, _ = runtime.run(base, config=config)
+        assert info.attempt_outcome == 'completed'
+        assert len(requests) == 2 and calls == [True]
+    tool_span = next(s for s in runtime.spans() if attrs(s).get('tool.name') == 'capture_failure')
+    assert attrs(tool_span)['error.message'] == reason
+    with runtime.client() as client:
+        view = snapshot(runtime, client)
+        node = next(n for n in view['nodes'] if n['name'] == 'capture_failure')
+        assert node['source']['span_id'] == tool_span['spanId']
+        assert node['status'] == 'failed' and node['failure_reason'] == reason
 
 
 def test_capture_parallel_tools_nested_output_and_full_local_body(runtime, monkeypatch):
@@ -273,7 +353,7 @@ def test_capture_actual_worker_cancel_preserves_partial_output(runtime):
     assert provider_body['choices'][0]['delta']['content'] == 'partial-before-cancellation'
 
 
-def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(runtime, monkeypatch):
+def _capture_parallel_subagents(runtime, monkeypatch, *, explicit=False):
     from nexent.core.agents.cores.smolagents import agent as module
 
     barrier, calls = threading.Barrier(2), []
@@ -300,8 +380,12 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
 
     def reply(request, number, emit):
         if request['model'] == 'model':
-            answer = ('<code>\nparallel_executor(tasks=[(child, {"task": "left"}), '
-                      '(child, {"task": "right"})])\n</code>') if number == 1 else '<final_answer>root-done</final_answer>'
+            parallel_code = (
+                'results = parallel_executor(tasks=[(child, {"task": "left"}, "left"), '
+                '(child, {"task": "right"}, "right")], max_workers=2)\nprint(results)'
+                if explicit else 'parallel_executor(tasks=[(child, {"task": "left"}), (child, {"task": "right"})])'
+            )
+            answer = f'<code>\n{parallel_code}\n</code>' if number == 1 else '<final_answer>root-done</final_answer>'
         else:
             answer = ('<final_answer>child-done</final_answer>' if 'leaf-result-' in json.dumps(request['messages'])
                       else '<code>\ncapture_leaf(value="executed")\n</code>')
@@ -311,7 +395,8 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
     with runtime.http(reply) as (base, requests):
         models = [ModelConfig(cite_name=alias, model_name=model, url=base, api_key='synthetic')
                   for alias, model in [('model', 'model'), ('child', 'child-model')]]
-        info, _ = runtime.run(base, config=root, models=models)
+        query = 'Please call the subagent for two independent tasks.' if explicit else 'Controlled question'
+        info, _ = runtime.run(base, config=root, models=models, query=query)
         assert info.attempt_outcome == 'completed'
         assert len(requests) == 6
     assert len(calls) == 2
@@ -327,6 +412,20 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
         assert attrs(span)['nexent.invocation_id'] == attrs(span)['subagent.invocation_id']
         assert attrs(span)['nexent.parent_invocation_id'] == root_invocation
     assert {call['nexent.local.nexent.invocation_id'] for call in calls} == set(child_invocations.values())
+    return root_invocation, child_invocations
+
+
+def test_capture_explicit_parallel_delegation_executes_both_children(runtime, monkeypatch):
+    _, child_invocations = _capture_parallel_subagents(runtime, monkeypatch, explicit=True)
+    with runtime.client() as client:
+        result = snapshot(runtime, client)
+    assert result['coverage']['complete']
+    children = [node for node in result['nodes'] if node['kind'] == 'agent' and node['parent_id'] is not None]
+    assert {child['id']: child['attributes']['nexent.invocation_id'] for child in children} == child_invocations
+
+
+def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(runtime, monkeypatch):
+    root_invocation, child_invocations = _capture_parallel_subagents(runtime, monkeypatch)
     with runtime.client() as client:
         result = snapshot(runtime, client)
     assert result['coverage']['complete']
@@ -407,10 +506,10 @@ def test_capture_root_switch_keeps_directory_and_native_context(runtime, first_a
         assert len(result['executions']) == 2
 
 
-@pytest.mark.parametrize('sink', ['otlp', 'local_file'])
+@pytest.mark.parametrize('sink, dual', [('otlp', False), ('local_file', False), ('otlp', True)])
 @pytest.mark.parametrize('content_mode', ['summary', 'metrics', 'full'])
-def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_receiver, sink, content_mode):
-    runtime.configure(sink, telemetry_receiver.endpoint, content_mode=content_mode)
+def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_receiver, sink, dual, content_mode):
+    runtime.configure(sink, telemetry_receiver.endpoint, content_mode=content_mode, capture_local_traces=dual)
     large = '完整模型输入' * 16000
 
     def reply(request, number, emit):
@@ -422,8 +521,8 @@ def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_r
         assert info.attempt_outcome == 'completed' and len(requests) == 1
     runtime.flush_remote()
     files = list(runtime.root.rglob('*.otlp.jsonl'))
-    assert bool(files) == (sink != 'otlp')
-    assert bool(telemetry_receiver.requests) == (sink != 'local_file')
+    assert bool(files) == (sink == 'local_file' or dual)
+    assert bool(telemetry_receiver.requests) == (sink == 'otlp')
     assert all(path == '/v1/traces' for path, _ in telemetry_receiver.requests)
     if files:
         assert files[0].stat().st_size > 256 * 1024
@@ -435,18 +534,25 @@ def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_r
         assert meta['capture_state'] == 'ready'
         assert meta['confirmed_bytes'] == files[0].stat().st_size
         assert meta['confirmed_sha256'] == hashlib.sha256(files[0].read_bytes()).hexdigest()
-    for _, message in telemetry_receiver.requests:
-        spans = [s for resource in message.resource_spans for scope in resource.scope_spans for s in scope.spans]
-        assert all(s.name != 'model.attempt' for s in spans)
-        assert all(not item.key.startswith('nexent.local.') for s in spans for item in s.attributes)
-        assert all(large not in item.value.string_value for s in spans for item in s.attributes)
+    remote_spans = [span for _, message in telemetry_receiver.requests for resource in message.resource_spans
+                    for scope in resource.scope_spans for span in scope.spans]
+    assert all(span.name != 'model.attempt' for span in remote_spans)
+    assert all(not item.key.startswith('nexent.local.') for span in remote_spans for item in span.attributes)
+    assert all(large not in item.value.string_value for span in remote_spans for item in span.attributes)
+    if dual:
+        local_root, = [s for s in runtime.spans() if attrs(s).get('nexent.trajectory.root')]
+        remote_root, = [s for s in remote_spans if s.name == 'agent.run']
+        assert (local_root['traceId'], local_root['spanId']) == (remote_root.trace_id.hex(), remote_root.span_id.hex())
 
 
 @pytest.mark.parametrize('failed_sink', ['remote', 'local'])
-def test_capture_selected_exporter_faults_do_not_retry_business(runtime, telemetry_receiver, failed_sink, monkeypatch):
+@pytest.mark.parametrize('dual', [False, True])
+def test_capture_selected_exporter_faults_do_not_retry_business(runtime, telemetry_receiver, failed_sink, dual,
+                                                                 monkeypatch):
     from infrastructure.trace.trajectory_store import RunWriter
 
-    runtime.configure('otlp' if failed_sink == 'remote' else 'local_file', telemetry_receiver.endpoint)
+    sink = 'otlp' if dual or failed_sink == 'remote' else 'local_file'
+    runtime.configure(sink, telemetry_receiver.endpoint, capture_local_traces=dual)
     if failed_sink == 'remote':
         telemetry_receiver.status = 503
     else:
@@ -463,13 +569,12 @@ def test_capture_selected_exporter_faults_do_not_retry_business(runtime, telemet
         info, _ = runtime.run(base)
         assert info.attempt_outcome == 'completed' and len(requests) == 1
     runtime.flush_remote()
-    if failed_sink == 'remote':
-        assert telemetry_receiver.requests
-        assert not list(runtime.root.rglob('meta.json'))
-    else:
-        assert not telemetry_receiver.requests
-        run = json.loads(next(runtime.root.rglob('meta.json')).read_text())['runs'][0]
-        assert run['capture_state'] == 'incomplete'
+    assert bool(telemetry_receiver.requests) == (sink == 'otlp')
+    manifests = list(runtime.root.rglob('meta.json'))
+    assert bool(manifests) == (dual or failed_sink == 'local')
+    if manifests:
+        run = json.loads(manifests[0].read_text())['runs'][0]
+        assert run['capture_state'] == ('ready' if failed_sink == 'remote' else 'incomplete')
 
 
 def test_capture_disabled_and_remote_mode_preserve_historical_files_and_cold_read(runtime, telemetry_receiver):
@@ -555,24 +660,37 @@ def test_capture_independent_process_reads_published_facts_without_runtime_cache
 
 
 @pytest.mark.parametrize('workbench', [False, True])
-def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, monkeypatch, workbench):
+@pytest.mark.parametrize('kind', ['agent', 'skill'])
+def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, monkeypatch, workbench, kind):
     import asyncio
-    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
 
-    from contracts.agent import NL2AgentRunRequest, SystemAgentRef
-    from contracts.authentication import AuthenticatedIdentity
-    from management.services.conversation import creation_history, creator_execution
-    from services import nl2agent_service
+    import httpx
+    from fastapi import FastAPI
 
-    from nexent.core.agents.contracts.run import AgentRunInfo
-    from nexent.core.utils.observer import MessageObserver
-    from nexent.monitor import get_agent_monitoring_context
+    from contracts.agent import SystemAgentRef
+    from contracts.constants import environment
+    from management.api.agent import creator as agent_api
+    from management.api.skill import creation as skill_api
+    from management.services.agent import creator_run, runtime_client
+    from management.services.conversation import creation_history, creator_checkpoints, creator_execution
+    from management.services.skill import creation as skill_creation
+    from nexent.core.concurrency.context import _reset_current_thread_manager, _set_current_thread_manager
+    from nexent.monitor import AgentRunMetadata, agent_monitoring_context, get_agent_monitoring_context
+    from runtime.agentos import (
+        agent_creator_config, creator_definition, ephemeral, prepared_agent_creator, prepared_skill_creator,
+    )
+    from runtime.agentos.middleware import AgentOSMiddleware
 
-    history = {'agent_id': 77, 'target': {'type': 'agent', 'id': 201}, 'message_records': []}
+    system_id = 77 if kind == 'agent' else 78
+    system_key = f'nl2{kind}_main'
+    target = {'type': 'agent', 'id': 201} if kind == 'agent' else None
+    history = {'agent_id': system_id, 'target': target, 'message_records': []}
     saved, run_infos = [], []
-    runtime.catalog.agent_id = '77'
+    runtime.catalog.agent_id = str(system_id)
     monkeypatch.setattr(creator_execution.system_agent_provider, 'get_creator_ref',
-                        lambda *_: SystemAgentRef('shared', 'nl2agent_main', 77, 0))
+                        lambda *_: SystemAgentRef('shared', system_key, system_id, 0))
     monkeypatch.setattr(creator_execution, 'authorize_target', lambda target, *_: target)
     monkeypatch.setattr(creator_execution, 'get_conversation_history', lambda *_: history)
     monkeypatch.setattr(creation_history, 'get_conversation_history', lambda *_: history)
@@ -581,7 +699,24 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
     monkeypatch.setattr(creation_history, 'save_message_unit', lambda **kw: None)
     monkeypatch.setattr('management.services.conversation.model_preferences.read_model_preferences',
                         lambda *_: {'model_parameter_preferences': {}, 'selected_model_id': None})
-    monkeypatch.setattr(nl2agent_service, 'runtime_thread_manager', runtime.threads)
+    monkeypatch.setattr(creator_checkpoints, 'checkpoint_creator_message', Mock())
+    monkeypatch.setattr(ephemeral, 'runtime_thread_manager', runtime.threads)
+    monkeypatch.setattr(environment, 'JWT_SECRET', 'controlled-creator-trajectory-agentos-key')
+    monkeypatch.setattr(agent_creator_config, 'NEXENT_AGENT_CORE', 'smolagents')
+    monkeypatch.setattr(prepared_skill_creator, 'NEXENT_AGENT_CORE', 'smolagents')
+    creator_lookup = Mock(return_value={'agent_id': system_id, 'version_no': 0, 'max_steps': 2})
+    monkeypatch.setattr(creator_definition, 'read_system_creator', creator_lookup)
+    model_scope = {
+        'model': {'model_id': 11, 'alias': 'model', 'revision': 'v1'},
+        'input_budget': 8192, 'context_window_tokens': 8192,
+    }
+    monkeypatch.setattr(creator_run, 'prepare_creator_model', lambda *_: model_scope)
+    monkeypatch.setattr(skill_creation, 'prepare_creator_model', lambda *_: model_scope)
+    monkeypatch.setattr(creator_run, '_build_verified_bound_resources_context',
+                        AsyncMock(return_value=SimpleNamespace(content={'text': 'Verified bindings'})))
+    opened, closed = Mock(), Mock()
+    monkeypatch.setattr(creator_run, 'open_nl2agent_tool_grant', opened)
+    monkeypatch.setattr(creator_run, 'close_nl2agent_tool_grant', closed)
 
     def save(message, **kwargs):
         identity = len(saved) + 10
@@ -593,64 +728,98 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
         return identity
 
     monkeypatch.setattr(creation_history, 'save_message', save)
+    monkeypatch.setattr(creator_execution, 'save_message', save)
+
+    management, worker = FastAPI(), FastAPI()
+    management.include_router(agent_api.router if kind == 'agent' else skill_api.skill_creator_router)
+    permission = (agent_api.require_agent_create_permission if kind == 'agent' else skill_api.require_skill_create_permission)
+    management.dependency_overrides[permission] = lambda: None
+    public_api = agent_api if kind == 'agent' else skill_api
+    monkeypatch.setattr(public_api, 'ENABLE_AGENT_WORKBENCH', True)
+    monkeypatch.setattr(public_api, 'get_current_user_info', lambda *_: ('owner', 'tenant', 'en'))
+    worker.add_middleware(AgentOSMiddleware)
+    worker.include_router(ephemeral.create_ephemeral_run_router())
+    load = ephemeral.load_prepared_run
+
+    async def observe_load(payload, actor, materialize):
+        assert get_agent_monitoring_context().conversation_id is None
+        info = await load(payload, actor, materialize)
+        run_infos.append(info)
+        return info
+
+    async def runtime_app(scope, receive, send):
+        with agent_monitoring_context(AgentRunMetadata()):
+            await worker(scope, receive, send)
+
+    async def assert_runtime_response(response):
+        assert response.status_code == 200, (response.status_code, (await response.aread()).decode())
+
+    monkeypatch.setattr(ephemeral, 'load_prepared_run', observe_load)
+    monkeypatch.setattr(runtime_client, 'create_httpx_client', lambda **kwargs: httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=runtime_app, root_path='/api'),
+        event_hooks={'response': [assert_runtime_response]}, **kwargs,
+    ))
 
     def reply(request, number, emit):
-        emit('<final_answer>created</final_answer>')
+        answer = 'created' if kind == 'agent' else '<skill>\n# created\n</skill>'
+        emit(f'<final_answer>{answer}</final_answer>')
         emit(done=True)
 
     with runtime.http(reply) as (base, requests):
-        async def build(**kwargs):
-            info = AgentRunInfo(
-                query=kwargs['request'].query, observer=MessageObserver(),
-                stop_event=threading.Event(), thread_manager=runtime.threads,
-                agent_config=AgentConfig(name='nl2agent_main', agent_id=77, version_no=0,
-                                         description='Controlled creator', model_name='model', tools=[], max_steps=2),
-                model_config_list=[ModelConfig(cite_name='model', model_name='model', url=base, api_key='synthetic')],
-            )
-            run_infos.append(info)
-            return info
-
-        monkeypatch.setattr(nl2agent_service, 'build_nl2agent_run_info', AsyncMock(side_effect=build))
+        materialization = prepared_agent_creator if kind == 'agent' else prepared_skill_creator
+        monkeypatch.setattr(materialization, '_materialize_model', lambda *_: ModelConfig(
+            cite_name='model', model_name='model', url=base, api_key='synthetic',
+        ))
 
         async def execute():
-            config = ({'schema_version': 4, 'mode': 'agent_create', 'agent_mounts': [], 'skill_mounts': []}
-                      if workbench else None)
+            config = {'schema_version': 4, 'mode': f'{kind}_create', 'agent_mounts': [], 'skill_mounts': []}
+            path = '/agent/nl2agent/run' if kind == 'agent' else '/skills/nl2skill/run'
+            fields = {'agent_id': 201} if kind == 'agent' else {}
+            token = _set_current_thread_manager(runtime.threads)
             before = get_agent_monitoring_context()
-            for turn in range(3):
-                request = NL2AgentRunRequest(
-                    query='build' if turn != 1 else 'edit', agent_id=201,
-                    conversation_id=None if turn == 0 else 123, workbench_config=config,
-                    retry_user_message_id=10 if turn == 2 else None,
-                )
-                stream, conversation = await creator_execution.start_creation_turn(
-                    request, kind='agent', user_id='owner', tenant_id='tenant',
-                    stream_factory=lambda effective, ref: nl2agent_service.create_nl2agent_stream(
-                        effective, 'tenant', 'en', identity=AuthenticatedIdentity('owner', 'tenant'),
-                        system_ref=ref,
-                    ),
-                )
-                assert conversation == 123
-                events = []
-                async for event in stream:
-                    events.append(event)
+            try:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management),
+                                             base_url='http://management') as client:
+                    for turn in range(3):
+                        response = await client.post(path, json={
+                            **fields, 'query': 'build' if turn != 1 else 'edit',
+                            'conversation_id': None if turn == 0 else 123,
+                            'retry_user_message_id': 10 if turn == 2 else None,
+                            'workbench_config': config if workbench else None,
+                        })
+                        assert response.status_code == 200 and response.headers['conversation_id'] == '123'
+                        events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith('data: ')]
+                        assert 'created' in response.text and all(event['type'] != 'error' for event in events), events
+                        assert get_agent_monitoring_context() is before
+                    response = await client.post(path, json={
+                        **fields, 'query': 'unsaved', 'conversation_id': 123, 'persist_history': False,
+                        'trajectory': {'conversation_id': 123, 'source_message_id': 10},
+                    })
+                    assert response.status_code == 200 and 'conversation_id' not in response.headers
+                    assert 'created' in response.text
                     assert get_agent_monitoring_context() is before
-                assert any('created' in event for event in events)
-                assert get_agent_monitoring_context() is before
+            finally:
+                _reset_current_thread_manager(token)
 
         asyncio.run(execute())
-        assert len(requests) == 3
+        assert len(requests) == 4
     assert [role for role, _, _ in saved] == ['user', 'assistant', 'user', 'assistant', 'assistant']
-    assert history['agent_id'] == 77 and history['target'] == {'type': 'agent', 'id': 201}
+    assert history['agent_id'] == system_id and history['target'] == target
+    assert [call.args for call in creator_lookup.call_args_list] == [(system_id, 0, system_key)] * 3
+    if kind == 'agent':
+        assert opened.call_count == closed.call_count == 4
+        assert all(call.args[1] == 201 for call in opened.call_args_list)
     assert all(info.thread_future.done() and info.attempt_outcome == 'completed' for info in run_infos)
     roots = [span for span in runtime.spans() if span['name'] == 'agent.run']
     assert len(roots) == 3
     values = sorted((attrs(span) for span in roots), key=lambda item: int(item['nexent.source_message_id']))
     assert [item['nexent.source_message_id'] for item in values] == ['10', '10', '12']
-    assert all(str(item['agent.id']) == '77' for item in values)
+    assert all(str(item['agent.id']) == str(system_id) for item in values)
     assert all(str(item['nexent.trace_id']) == '123' for item in values)
     assert all(str(item['agent.version_no']) == '0' for item in values)
+    assert [item['input.value'] for item in values] == ['build', 'build', 'edit']
     meta_path = next(runtime.root.rglob('meta.json'))
-    assert meta_path.parent.parts[-4:] == ('tenant', 'owner', '77', '123')
+    assert meta_path.parent.parts[-4:] == ('tenant', 'owner', str(system_id), '123')
     meta = json.loads(meta_path.read_text())
     assert len(meta['runs']) == 3
     with runtime.client() as client:
@@ -660,7 +829,7 @@ def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, 
                                      headers={'Authorization': 'admin'}))
             root = next(node for node in result['nodes'] if node['parent_id'] is None)
             assert root['agent_version_no'] == 0
-            assert run['root_agent_id'] == '77'
+            assert run['root_agent_id'] == str(system_id)
             assert len([node for node in result['nodes'] if node['kind'] == 'model']) == 1
 
 

@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-TAG-REFRESH-20261119
+  change_type: bugfix
+  bug_id: NL2AGENT-TAG-REFRESH-20261119
+  title: Refresh mounted resource tags after successful NL2Agent saves
+  description: Invalidate the resource assignment cache and notify mounted tag chips from accepted live tags-saved events.
+  observed_behavior: NL2Agent saves tags successfully but the mounted editor chips retain their old local state until the page reloads.
+  expected_behavior: Valid same-agent tags-saved events refresh mounted chips immediately, including repeated changes and removing all tags; failed or unrelated events do not refresh them.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing tests cover saved draft snapshots and tag editor writes separately, without exercising live save events against the assignment cache and mounted chips.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045, F-054]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Valid same-agent live tags saves refresh all matching mounted chips without a page reload and deduplicate their reads.
+    - Repeated identical saved-field events and removal of all tags render current server assignments.
+    - Other-agent, malformed, unrelated-field and failed saves leave existing chips and unrelated resources unchanged.
+    - Late old requests cannot replace refreshed tags or evict a newer cached result after failure.
+    - Unmounted chips unsubscribe; successful manual writes refresh chips while rejected writes retain confirmed tags.
+    test_selectors:
+    - frontend/tests/workbench/Nl2AgentTagRefresh.test.tsx
+    reason: Exercise the real SSE adapter, cache, tag API client and mounted chips with controlled HTTP and stream boundaries. Backend persistence, permissions and event contracts are unchanged; no Python unit change or duplicate formal D1 is needed.
+  notes: >-
+    Design at ../nexent-doc/docs/Developing/dev-agent-nl2agent-tag-refresh/design.md.
+    F-045-RULE-08 and F-054-RULE-01 retain their existing save/display intent.
+    PW-NL2AGENT-01 and NL2AGENT-PROTOCOL-D4-001 were inspected: their generation/protocol
+    assertions do not cover this cache notification variant and are not claimed as passing.
+    No formal Case definition, script or preparation contract is modified.
+    Frontend traditional regressions remain separate from full real-model journey acceptance.

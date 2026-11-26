@@ -36,7 +36,7 @@ COPY backend/ext_components/aidp/__init__.py /opt/backend/ext_components/aidp/
 COPY backend/ext_components/aidp/consts/aidp_exceptions.py /opt/backend/ext_components/aidp/consts/
 COPY backend/gateway/__init__.py /opt/backend/gateway/
 COPY backend/http/logging.py backend/http/ops_service.py /opt/backend/http/
-COPY backend/http/server/__init__.py backend/http/server/exception_handlers.py /opt/backend/http/server/
+COPY backend/http/server/__init__.py backend/http/server/exception_handlers.py backend/http/server/request_context.py /opt/backend/http/server/
 COPY backend/management/__init__.py /opt/backend/management/
 COPY backend/management/api/__init__.py /opt/backend/management/api/
 COPY backend/management/api/permission /opt/backend/management/api/permission
@@ -103,6 +103,7 @@ COPY \
     infrastructure/rdb/account_record.py \
     infrastructure/rdb/agent_admission.py \
     infrastructure/rdb/agent_execution.py \
+    infrastructure/rdb/agent_monitoring.py \
     infrastructure/rdb/audit_fields.py \
     infrastructure/rdb/base.py \
     infrastructure/rdb/client.py \

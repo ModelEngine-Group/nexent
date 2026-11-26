@@ -11,16 +11,28 @@ import time
 from concurrent.futures import Future as ConcurrentFuture
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AsyncExitStack
+from contextvars import ContextVar
 from typing import Any, Callable, Dict, Union
 
 import httpx
 
-from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
+from nexent.consts.mcp_errors import (
+    MCPConnectionFailure,
+    MCPConnectionTimeoutError,
+    MCPToolResultError,
+    MCPToolTimeoutError,
+)
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
+from nexent.monitor.mcp_fact import observe_mcp_tool_call, resolve_mcp_server_identity
 
 
 logger = logging.getLogger("managed_mcp")
+
+# Per-invocation correlation between the worker-thread tool call and the
+# caller waiting on its future. The adapter drops CallToolResult.isError, so
+# the raw protocol outcome travels through this token instead.
+_tool_call_token: ContextVar[object | None] = ContextVar("mcp_tool_call_token", default=None)
 
 
 class ManagedMCPToolCollection:
@@ -66,6 +78,8 @@ class ManagedMCPToolCollection:
         self._lock = threading.Lock()
         self._active_calls_lock = threading.Lock()
         self._active_calls: set[ConcurrentFuture] = set()
+        self._result_errors_lock = threading.Lock()
+        self._result_errors: dict[object, bool] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._session_task: asyncio.Task | None = None
         self._async_close_event: asyncio.Event | None = None
@@ -125,6 +139,7 @@ class ManagedMCPToolCollection:
             connections = []
             for parameters in self.server_parameters:
                 parameters = parameters.copy()
+                on_tool_result = parameters.pop("on_tool_result", None)
                 allowed_tools = parameters.pop("allowed_tools", None)
                 try:
                     connection = await asyncio.wait_for(
@@ -149,10 +164,12 @@ class ManagedMCPToolCollection:
                         url=str(parameters.get("url", "unknown")),
                         transport=str(parameters.get("transport", "unknown")),
                     ) from exc
-                connections.append((*connection, allowed_tools))
+                connections.append((*connection, on_tool_result, allowed_tools))
 
             tools = []
-            for session, mcp_tools, allowed_tools in connections:
+            # Connections mirror server_parameters order: exactly one per entry.
+            for parameters, (session, mcp_tools, on_tool_result, allowed_tools) in zip(
+                    self.server_parameters, connections):
                 matched = set()
                 for mcp_tool in mcp_tools:
                     if allowed_tools is not None and mcp_tool.name not in allowed_tools:
@@ -162,10 +179,28 @@ class ManagedMCPToolCollection:
                         arguments=None,
                         __session=session,
                         __name=mcp_tool.name,
+                        __on_tool_result=on_tool_result,
                     ):
-                        return self._call_tool(__session, __name, arguments)
+                        result = self._call_tool(__session, __name, arguments)
+                        # Read the protocol result before the adapter renders it:
+                        # adapters drop isError and return plain content.
+                        if getattr(result, "isError", False):
+                            token = _tool_call_token.get()
+                            if token is not None:
+                                with self._result_errors_lock:
+                                    self._result_errors[token] = True
+                        elif (
+                            __on_tool_result is not None
+                            and not self._close_requested.is_set()
+                            and not self.cancellation_scope.cancelled
+                        ):
+                            __on_tool_result(__name, result.meta)
+                        return result
 
                     tool = adapter.adapt(call_tool, mcp_tool)
+                    # Non-invasive binding: managed_forward resolves the monitoring
+                    # server identity from this URL at invocation time.
+                    tool._nexent_mcp_server_url = parameters.get("url")
                     if allowed_tools is not None:
                         if mcp_tool.name in matched or tool.name != allowed_tools[mcp_tool.name]:
                             raise ValueError("MCP tool discovery does not match the authorized binding")
@@ -194,41 +229,64 @@ class ManagedMCPToolCollection:
                 __forward=original_forward,
                 __task_name=task_name,
                 __tool_name=getattr(tool, "name", "unknown"),
+                __server_url=getattr(tool, "_nexent_mcp_server_url", None),
                 **kwargs,
             ):
                 if self.cancellation_scope.cancelled:
                     raise RuntimeError("MCP tool call cancelled")
-                execution = self.manager.submit(
-                    "model-tool-io",
-                    ManagedTaskSpec(
-                        task_name=__task_name,
-                        owner="nexent.core.agents.resources.mcp",
-                        close_hook=self.request_close,
-                    ),
-                    __forward,
-                    *args,
-                    **kwargs,
-                )
-                try:
-                    return execution.future.result(timeout=self.tool_timeout_seconds)
-                except FutureTimeoutError as exc:
-                    logger.warning(
-                        "event=mcp_tool_timeout tool_name=%s timeout_seconds=%.3f execution_id=%s error_type=%s",
-                        __tool_name,
-                        self.tool_timeout_seconds,
-                        execution.execution_id,
-                        "TimeoutError",
+                # Caller-observed monitoring window: one fact per invocation,
+                # spanning the queue wait and the deadline-capped result wait.
+                with observe_mcp_tool_call(
+                    resolve_mcp_server_identity(__server_url, __tool_name), __tool_name
+                ) as observation:
+                    token = object()
+
+                    def invoke():
+                        # Runs on the manager worker thread that also executes
+                        # the adapter callback, so the token is visible there.
+                        _tool_call_token.set(token)
+                        try:
+                            return __forward(*args, **kwargs)
+                        finally:
+                            _tool_call_token.set(None)
+
+                    execution = self.manager.submit(
+                        "model-tool-io",
+                        ManagedTaskSpec(
+                            task_name=__task_name,
+                            owner="nexent.core.agents.resources.mcp",
+                            close_hook=self.request_close,
+                        ),
+                        invoke,
                     )
-                    self.request_close()
-                    self.manager.cancel(
-                        execution.execution_id,
-                        reason="MCP tool deadline exceeded",
-                        wait_timeout=self.close_timeout_seconds,
-                        mark_stuck_on_timeout=True,
-                    )
-                    raise MCPToolTimeoutError(
-                        f"MCP tool request timed out after {self.tool_timeout_seconds:g} seconds"
-                    ) from exc
+                    try:
+                        result = execution.future.result(timeout=self.tool_timeout_seconds)
+                    except FutureTimeoutError as exc:
+                        logger.warning(
+                            "event=mcp_tool_timeout tool_name=%s timeout_seconds=%.3f execution_id=%s error_type=%s",
+                            __tool_name,
+                            self.tool_timeout_seconds,
+                            execution.execution_id,
+                            "TimeoutError",
+                        )
+                        self.request_close()
+                        self.manager.cancel(
+                            execution.execution_id,
+                            reason="MCP tool deadline exceeded",
+                            wait_timeout=self.close_timeout_seconds,
+                            mark_stuck_on_timeout=True,
+                        )
+                        raise MCPToolTimeoutError(
+                            f"MCP tool request timed out after {self.tool_timeout_seconds:g} seconds"
+                        ) from exc
+                    finally:
+                        with self._result_errors_lock:
+                            result_failed = self._result_errors.pop(token, False)
+                    if result_failed:
+                        # Record the protocol outcome without altering the
+                        # content the Agent receives.
+                        observation.finish(MCPToolResultError())
+                    return result
 
             tool.forward = managed_forward
         return tools
@@ -439,6 +497,8 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
 
+        if callable(mcp_host_item.get("on_tool_result")):
+            result["on_tool_result"] = mcp_host_item["on_tool_result"]
         if "allowed_tools" in mcp_host_item:
             result["allowed_tools"] = mcp_host_item["allowed_tools"]
 

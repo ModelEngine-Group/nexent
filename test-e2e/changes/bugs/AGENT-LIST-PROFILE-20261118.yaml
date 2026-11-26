@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-LIST-PROFILE-20261118
+  change_type: bugfix
+  bug_id: AGENT-LIST-PROFILE-20261118
+  title: Load complete saved model profiles for Agent list overrides
+  description: Extend the credential-free batch projection with the fields consumed by the existing profile decoder.
+  observed_behavior: Agent list raises PROFILE_STORAGE_INVALID because its batch query supplies only metadata to the saved-profile decoder.
+  expected_behavior: Valid saved model profiles support Agent override projection without additional queries or reading credentials.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing batch regression uses legacy model rows without profile_schema_version or overrides and never exercises decoding a migrated row.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-042]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Batch and individual projections agree for saved profiles with legacy, current and empty overrides.
+    - Batch SQL excludes credentials, remains one query and performs no further query during projection.
+    - Invalid saved profiles remain rejected and an empty batch performs no read.
+    reason: Strengthen the existing relational batch regression with the real profile codec; no duplicate formal Case or interface change is needed. Read-only local list service verification remains separate from UT.
+    test_selectors:
+    - test/backend/database/test_management_batch_queries.py
+  notes: Design at ../nexent-doc/docs/Developing/dev-agent-list-profile-loading/design.md. API-055/API-056 were inspected; their broad historical D3 contracts and uncertified legacy bindings do not prove this exact variant and are not claimed as passing. No formal Case assets change. Local reported tenant reproduces the defect through the actual list service; no data repair is required.

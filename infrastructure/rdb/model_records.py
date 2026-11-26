@@ -123,9 +123,9 @@ def update_model_record(
         return result.rowcount > 0
 
 
-def fail_detecting_models_on_startup() -> int:
+def fail_detecting_models_on_startup(*, db_session=None) -> int:
     """Clear interrupted checks without claiming the model failed a completed probe."""
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         result = session.execute(
             update(ModelRecord)
             .where(
@@ -388,8 +388,9 @@ def get_model_records_by_ids(model_ids: List[int]) -> Dict[int, Dict[str, Any]]:
     """Load complete frozen profiles and list flags without model credentials."""
     if not model_ids:
         return {}
+    credentials = {"api_key", "http_headers", "model_appid", "access_token"}
     with get_db_session() as session:
-        columns = [column for column in ModelRecord.__table__.columns if column.key not in {"api_key", "http_headers"}]
+        columns = [column for column in ModelRecord.__table__.columns if column.key not in credentials]
         rows = session.execute(select(*columns).where(ModelRecord.model_id.in_(model_ids))).mappings().all()
         return {row["model_id"]: dict(row) for row in rows}
 

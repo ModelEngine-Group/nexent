@@ -104,6 +104,7 @@ class AutomationConversationAdapter:
         tenant_id: str,
         *,
         run_id: Optional[int] = None,
+        lease_owner: Optional[str] = None,
     ) -> AutomationPromptTurn:
         """Append a new automation turn without regenerating an existing message."""
         history_payload = get_conversation_history_service(conversation_id, user_id)
@@ -130,7 +131,7 @@ class AutomationConversationAdapter:
             message_id = create_run_message(run_id, {
                 "conversation_id": conversation_id, "message_idx": next_message_index,
                 "role": "user", "content": prompt,
-            }, user_id, tenant_id)
+            }, user_id, tenant_id, **({"lease_owner": lease_owner} if lease_owner is not None else {}))
             return self.load_run_prompt(conversation_id, message_id, prompt, user_id, tenant_id)
         message_id = save_message(
             request, user_id, tenant_id, message_source=MessageSource.AUTOMATION,

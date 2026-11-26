@@ -167,7 +167,8 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
         model_config_list=[ModelConfig(cite_name="fixture", model_name=profile.identity.request_model_id,
             url=profile.connection.base_url, api_key="fixture-only", resolved_profile=profile)],
         agent_config=AgentConfig(agent_core="jiuwen", name="resource-runtime", description="Fixture",
-                                model_name="fixture", max_steps=6, tools=tools),
+                                model_name="fixture", max_steps=6, tools=tools,
+                                response_mode="python_workflow" if scenario == "parallel" else "chat"),
     )
     async def consume(run_info):
         events = []
@@ -209,6 +210,7 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
             follow_up = info.model_copy(update={
                 "query": "What can you do? CURRENT_TASK_ONLY_MARKER", "observer": MessageObserver(lang="en"),
                 "stop_event": threading.Event(), "cancellation_scope": None,
+                "run_timing": None, "attempt_outcome": None, "run_result": None,
                 "history": [AgentHistory(role="user", content=info.query),
                             AgentHistory(role="assistant", content="native_result_20")],
             })

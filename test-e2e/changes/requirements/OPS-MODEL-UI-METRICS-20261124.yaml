@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MODEL-UI-METRICS-20261124
+  change_type: requirement
+  requirement_id: OPS-MODEL-UI-METRICS-20261124
+  title: Connect Model monitoring cards and trends
+  description: Use scoped published Model data for summary and both trends.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/modelMonitoring.test.tsx
+    - test/backend/ops/test_monitoring_api.py
+    behaviors:
+    - Verify Model summary and trends query serialization.
+    - Preserve exact Token labels and null error rates.
+    reason: Existing backend contract cases cover publication and scope. Browser coverage checks both visual consumers and shared requests.

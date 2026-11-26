@@ -20,8 +20,11 @@ from runtime.agentos.debug import stop_agentos_debug
 from runtime.agentos.ephemeral import create_ephemeral_run_router
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
-from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import (
+    NEXENT_RECOVERY_MODE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+)
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
+from runtime.api.sandbox import router as sandbox_router
 from infrastructure.system_configuration.runtime import (
     start_system_configuration,
     stop_system_configuration,
@@ -35,6 +38,8 @@ from nexent.core.concurrency import (
 )
 from runtime.trajectory import configure_runtime_trajectory
 from runtime.thread_management import runtime_thread_manager, shutdown_agent_stream_tasks
+from runtime.identity import uses_distributed_runtime
+from runtime.sandbox_runtime import configure_runtime_coordination
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
@@ -87,12 +92,21 @@ async def runtime_lifespan(_app):
                     close_hook=local_trajectory_processor.request_stop,
                 ),
             )
+        if NEXENT_RECOVERY_MODE == "startup":
+            await runtime_thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
+                fail_detecting_models_on_startup,
+            )
+            if not uses_distributed_runtime():
+                await recover_runtime_state()
         await runtime_thread_manager.run(
             "control-io",
-            ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
-            fail_detecting_models_on_startup,
+            ManagedTaskSpec(task_name="sandbox-owner-startup", owner="runtime"),
+            configure_runtime_coordination,
+            runtime_thread_manager,
+            getattr(_app, "state", None),
         )
-        await recover_runtime_state()
         reconciler = asyncio.create_task(watch_executions(runtime_thread_manager))
         try:
             yield
@@ -115,7 +129,12 @@ async def runtime_lifespan(_app):
 
                 sandbox_pool = SandboxPoolManager._instance
                 if sandbox_pool is not None:
-                    sandbox_pool.shutdown(logger)
+                    await runtime_thread_manager.run(
+                        "control-io",
+                        ManagedTaskSpec(task_name="sandbox-pool-shutdown", owner="runtime"),
+                        sandbox_pool.shutdown,
+                        logger,
+                    )
             finally:
                 try:
                     if local_trajectory_processor is not None:
@@ -164,3 +183,4 @@ app.include_router(create_run_lifecycle_router())
 app.include_router(create_prepared_run_router())
 app.include_router(create_ephemeral_run_router())
 app.include_router(voice_router)
+app.include_router(sandbox_router)

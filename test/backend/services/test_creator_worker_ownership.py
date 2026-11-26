@@ -24,7 +24,7 @@ def worker(monkeypatch):
         _run_managed=AsyncMock(),
     )
     channel = SimpleNamespace(
-        generation=None, publish=AsyncMock(), complete=MagicMock(),
+        generation=None, durable_event_count=None, publish=AsyncMock(), complete=MagicMock(),
         subscribe_with_history=MagicMock(return_value="subscription"),
     )
     channels = SimpleNamespace(
@@ -150,6 +150,48 @@ async def test_rejected_shared_claim_releases_its_local_reservation(worker, fail
         await runtime.claim_creator(91, "owner", "run")
     worker.manager.release_agent_run_reservation.assert_called_once_with(91, "owner", "reserved")
     worker.manager.register_agent_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_durable_claim_releases_local_slot_when_redis_is_disabled(worker):
+    worker.manager.reserve_agent_run.return_value = "reserved"
+    worker.state.claim_creator_run_async = AsyncMock()
+
+    with pytest.raises(runtime.RuntimeCoordinationUnavailableError) as exc:
+        await runtime.claim_creator(91, "owner", "run", execution_id="run")
+
+    assert str(exc.value.__cause__) == "Runtime Redis is disabled"
+    worker.state.claim_creator_run_async.assert_not_awaited()
+    worker.manager.release_agent_run_reservation.assert_called_once_with(91, "owner", "reserved")
+    worker.manager.register_agent_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("settlement_error", [RuntimeError("write failed"), asyncio.CancelledError()])
+async def test_repeated_request_cancellation_waits_for_a_failed_preparation_write(settlement_error):
+    entered, finish, settled = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def write():
+        entered.set()
+        try:
+            await finish.wait()
+            raise settlement_error
+        finally:
+            settled.set()
+
+    owner = asyncio.create_task(runtime.wait_creator_step(write()))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        for reason in ("client disconnected", "shutdown"):
+            owner.cancel(reason)
+            await asyncio.sleep(0)
+            assert not owner.done() and not settled.is_set()
+    finally:
+        finish.set()
+        with pytest.raises(asyncio.CancelledError, match="client disconnected"):
+            await asyncio.wait_for(owner, timeout=2)
+
+    assert settled.is_set()
 
 
 @pytest.mark.asyncio

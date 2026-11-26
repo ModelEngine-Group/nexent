@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: SMOLAGENTS-PARALLEL-DELEGATION-20261124
+  change_type: bugfix
+  bug_id: SMOLAGENTS-PARALLEL-DELEGATION-20261124
+  title: Accept explicit parallel sub-agent delegation in Smolagents
+  description: Recognize the bound parallel executor when every task targets an authorized collaborator.
+  observed_behavior: Smolagents rejects the built-in parallel executor while waiting for explicit delegation, even when every task calls the requested sub-agent.
+  expected_behavior: An authorized direct or parallel proposal may run. Delegation is satisfied when an authorized collaborator returns successfully.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: The parallel sub-agent runtime regression used a request that did not require delegation.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-RESOURCES, CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-CAPTURE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Accept the bound executor with both supported tuple formats and verify that a proposal does not count as completed delegation.
+      - Reject unavailable executor bindings, other tools, other children, and expressions outside the authorized action.
+    reason: Unit tests verify the proposal boundary. The runtime regression observes both actual child invocations and their results.
+    test_selectors:
+      - test/sdk/core/agents/test_shared_agent_policy.py
+  notes: Reuses JIUWEN-RESOURCES-RULE-005 and the existing self-contained Smolagents parallel trajectory regression.

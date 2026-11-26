@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-TERMINAL-20261124
+  change_type: bugfix
+  bug_id: NL2AGENT-TERMINAL-20261124
+  title: Preserve the NL2Agent run result after a clarification card
+  description: Forward run_terminal through Runtime and Management after the first NL2Agent card.
+  observed_behavior: A valid clarification card arrives, followed by NEXENT_TERMINAL_MISSING and a failed message status.
+  expected_behavior: A completed awaiting_input result keeps the card actionable and the public message free of terminal errors. A submitted card starts exactly one follow-up run.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: The Runtime unit test expected post-card terminal suppression. The browser journey checks submission but looks for the internal terminal on the public interface.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AGENT-CORE-CONFIG]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [JIUWEN-AGENT-CREATOR-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Each transfer preserves the post-card native terminal and keeps the first-card cutoff in force.
+    - Native completed, failed and stopped results keep their original fields and order.
+    - The Workbench accepts one valid clarification submission under the normal card interaction rules.
+    reason: Isolated stream and component assertions cover deterministic branches. The existing D4 covers live status, persisted native outcome and browser submission through the deployed creator.
+    test_selectors:
+    - test/backend/agents/test_jiuwen_creator_results.py::test_creator_stream_preserves_terminal_after_first_card_and_drains_worker
+    - test/backend/services/test_specialized_agent_stream_contract.py::test_creation_stream_preserves_events_and_releases_grant
+    - frontend/tests/workbench/CreatorConversationRuntime.test.tsx
+  notes: >-
+    Reuses runtime-agent-core-factory AC-NA-02/03 and AGENT-CORE-CONFIG-RULE-004.
+    The D4 Case routes to agent_config. Its fixture owns a uniquely marked draft and conversation,
+    removes both, checks original record fingerprints and removes private auth files.
+    No shared preparation family is needed. Existing unit and D4 boundaries cover the regression without a new Case.

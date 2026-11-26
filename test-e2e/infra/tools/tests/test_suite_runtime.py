@@ -104,28 +104,67 @@ class SuiteTests(unittest.TestCase):
             self.assertTrue(summary["execution_complete"])
 
     def test_case_local_timeout_overrides_machine_default(self):
-        with tempfile.TemporaryDirectory() as root:
-            home = Path(root)
-            records = [{"case_id": "SYNTHETIC-D5-TIMEOUT", "stage": "D5", "status": "active",
-                        "execution": {"test": True, "timeout_seconds": 4800}}]
-            observed = []
+        samples = [
+            ("D4", {}, 1800, 660),
+            ("D4", {}, 400, 460),
+            ("D4", {"timeout_seconds": 900}, 1800, 960),
+            ("D5", {"timeout_seconds": 4800}, 1800, 4800),
+        ]
+        for stage, execution, default, expected in samples:
+            with self.subTest(stage=stage, execution=execution, default=default), tempfile.TemporaryDirectory() as root:
+                home = Path(root)
+                case_id = f"SYNTHETIC-{stage}-TIMEOUT"
+                records = [{"case_id": case_id, "stage": stage, "status": "active",
+                            "execution": {"test": True, **execution}}]
+                observed = []
 
-            def command_result(command, cwd, env, log, timeout):
-                if "--batch-dir" in command:
-                    observed.append(timeout)
-                    batch = Path(command[command.index("--batch-dir") + 1])
-                    save(batch / "cases/SYNTHETIC-D5-TIMEOUT/receipt.json", {
-                        "case_id": "SYNTHETIC-D5-TIMEOUT", "stage": "D5", "result": "PASS", "cleanup_exit_code": 0})
+                def command_result(command, cwd, env, log, timeout):
+                    if "--batch-dir" in command:
+                        observed.append(timeout)
+                        batch = Path(command[command.index("--batch-dir") + 1])
+                        save(batch / "cases" / case_id / "receipt.json", {
+                            "case_id": case_id, "stage": stage, "result": "PASS", "cleanup_exit_code": 0})
+                    return 0
+
+                with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \
+                        patch.object(suite, "fingerprint", return_value={"head": "test"}), \
+                        patch.object(suite, "static_requirements", return_value=set()), \
+                        patch.object(suite, "static_inventory", return_value=[]), \
+                        patch.object(suite, "logged", side_effect=command_result):
+                    self.assertEqual(suite.execute(home, home, records,
+                                                   {"hooks": {}, "case_timeout_seconds": default}), 0)
+                self.assertEqual(observed, [expected])
+
+    def test_tfp_controller_cleans_registered_case_assets_after_worker_timeout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            directory = home / "runs/repository-daily/test-tfp"
+            case_id = "TFP-D3-001"
+            case_dir = directory / "cases" / case_id
+            records = [{"case_id": case_id, "stage": "D3", "status": "active", "execution": {"test": True}}]
+
+            def execute(command, cwd, env, log, timeout):
+                if "--case" in command:
+                    self.assertEqual(env["NEXENT_CASE_DEPLOYMENT_PROFILE"], "tfp")
+                    save(case_dir / "runtime/resolved-assets.yaml", {"assets": {}})
+                    return 124
+                if "shared.asset_cleanup" in command:
+                    self.assertEqual(env["RESULT_DIR"], str(case_dir))
+                    self.assertIn("--force", command)
+                    (case_dir / "runtime/cleanup-results.jsonl").write_text('{"result":"DELETED"}\n', encoding="utf-8")
                 return 0
 
-            with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \
-                    patch.object(suite, "fingerprint", return_value={"head": "test"}), \
-                    patch.object(suite, "static_requirements", return_value=set()), \
-                    patch.object(suite, "static_inventory", return_value=[]), \
-                    patch.object(suite, "logged", side_effect=command_result):
-                self.assertEqual(suite.execute(home, home, records,
-                                               {"hooks": {}, "case_timeout_seconds": 1800}), 0)
-            self.assertEqual(observed, [4800])
+            with (patch.object(suite, "machine_environment", return_value={}),
+                  patch.object(suite, "fingerprint", return_value={"head": "test"}),
+                  patch.object(suite, "static_requirements", return_value=set()),
+                  patch.object(suite, "static_inventory", return_value=[]),
+                  patch.object(suite, "runtime_blocks", return_value={}),
+                  patch.object(suite, "logged", side_effect=execute)):
+                settings = {"hooks": {}, "case_timeout_seconds": 20, "command_timeout_seconds": 120}
+                self.assertEqual(suite._execute(home, home, records, settings, directory=directory, deployment_profile="tfp"), 1)
+            self.assertTrue((case_dir / "runtime/cleanup-results.jsonl").is_file())
+            summary = json.loads((directory / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["counts"], {"TIMEOUT": 1})
 
     def test_notification_refuses_nonterminal(self):
         with tempfile.TemporaryDirectory() as root:
@@ -257,6 +296,8 @@ class SuiteTests(unittest.TestCase):
 
             def run(record, repo, home, env, *, result_dir, enforce_timeout):
                 self.assertFalse(enforce_timeout)
+                self.assertGreater(int(env["D4_CASE_TIMEOUT_MS"]), 0)
+                self.assertLessEqual(int(env["D4_CASE_TIMEOUT_MS"]), 600_000)
                 events.append("test")
                 self.assertEqual(env["NEXENT_D4_CHAT_AGENT"], "owned-agent")
                 self.assertEqual(result_dir, directory)
@@ -267,7 +308,7 @@ class SuiteTests(unittest.TestCase):
                  patch.object(suite, "logged", side_effect=command), \
                  patch.object(suite, "run_one", side_effect=run):
                 self.assertEqual(suite.worker(Path(root), Path(root), record, directory,
-                                             {"command_timeout_seconds": 10}), 0)
+                                             {"command_timeout_seconds": 10, "case_timeout_seconds": 1800}), 0)
             self.assertEqual(events, ["services-start", "prepare-anchors", "prepare-basic_agent",
                                       "prepare-special", "prepare-d4", "test", "cleanup", "services-stop"])
 
@@ -312,7 +353,7 @@ class SuiteTests(unittest.TestCase):
                     patch.object(suite, "run_one", side_effect=run), \
                     patch.object(suite, "logged", return_value=0):
                 self.assertEqual(suite.worker(Path(root), Path(root), record, directory,
-                                               {"command_timeout_seconds": 10}), 1)
+                                               {"command_timeout_seconds": 10, "case_timeout_seconds": 1800}), 1)
             receipt = json.loads((directory / "receipt.json").read_text(encoding="utf-8"))
             self.assertEqual(receipt["result"], "CLEANUP_FAILED")
             self.assertEqual(receipt["test_result"], "AUTOMATION_ERROR")

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-MCP-COVERAGE-LANE-20261110
+  change_type: bugfix
+  bug_id: NL2AGENT-MCP-COVERAGE-LANE-20261110
+  title: Publish coverage when a verified candidate comes from the MCP repository
+  description: Run the repository installation lookup in the MCP service control lane and clarify the creator tool response boundary.
+  observed_behavior: Coverage publication returns resource_workflow_failed because the MCP process lacks the default model-tool-io lane.
+  expected_behavior: The coverage card displays the repository candidate with its actual installation status.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: The coverage tests did not exercise a repository MCP candidate under the MCP service worker policy.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/services/test_nl2agent_resource_flow.py::test_coverage_card_distinguishes_existing_and_uninstalled_repository_mcps
+    behaviors:
+      - Publish installed and disabled MCP status under the production MCP service lane policy.
+      - Return status for an installed candidate when installation is requested from an older card.
+    reason: The fallback SDK manager has a model-tool-io lane and previously hid the MCP process failure.
+  notes: >-
+    The existing contract is in ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md,
+    sections 4.1 and 7.6. Reuse the coverage D3 case for the verified candidate and card receipt.

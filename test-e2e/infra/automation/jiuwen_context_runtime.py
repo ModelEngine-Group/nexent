@@ -58,10 +58,12 @@ def context_database(monkeypatch):
             raise AssertionError("Isolated history PostgreSQL did not start")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres")
         from infrastructure.rdb import client
+        from infrastructure.rdb.account_record import UserAccount, UserTenant
+        from infrastructure.rdb.trajectory.models import TrajectoryExecution, TrajectoryStatistics
         from infrastructure.system_configuration import runtime as configuration_runtime
         from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
         from management.db.conversation import repository as conversation_db
-        from management.db.identity.models import UserTenant
+        from management.db.conversation.projection_receipt import ConversationProjectionReceipt
         from management.db.models import (
             AgentInfo,
             ConversationMessage,
@@ -70,7 +72,6 @@ def context_database(monkeypatch):
             ConversationSourceSearch,
             ConversationSourceImage,
         )
-        from infrastructure.rdb.trajectory.models import TrajectoryExecution
 
         monkeypatch.setattr(client.db_client, "session_maker", sessionmaker(bind=engine))
 
@@ -86,8 +87,13 @@ def context_database(monkeypatch):
         with engine.begin() as connection:
             connection.execute(text("CREATE SCHEMA nexent"))
         for model in (AgentInfo, ConversationRecord, ConversationMessage, ConversationMessageUnit,
-                      ConversationSourceSearch, ConversationSourceImage, UserTenant, TrajectoryExecution):
+                      ConversationSourceSearch, ConversationSourceImage, UserTenant, TrajectoryExecution,
+                      TrajectoryStatistics, ConversationProjectionReceipt, UserAccount):
             model.__table__.create(engine)
+        with engine.begin() as connection:
+            connection.execute(insert(UserTenant).values(
+                user_id="owner", tenant_id="spike-tenant", created_by="fixture", delete_flag="N",
+            ))
         yield engine
     finally:
         if engine is not None:
@@ -129,13 +135,16 @@ def message(conversation, index, role, content, files=None, status="completed"):
 
 
 def record_output(conversation, index, output):
-    from management.db.conversation.repository import create_message_units
+    from contracts.conversation import MessageSource
+    from management.db.conversation.repository import persist_prepared_assistant_projection
+    from management.services.agent.prepared_projection import _collect_checkpoint
     from management.services.agent.stream import serialize_stream_unit_content
+
     answer = "".join(event.get("content", "") for event in output if event.get("type") == "final_answer")
-    mid = message(conversation, index, "assistant", answer)
-    units = []
+    units, checkpoints = [], []
     for event in output:
         if event.get("type") == "history_summary":
+            _collect_checkpoint(checkpoints, event.get("content"))
             continue
         content = event.get("content", "")
         if not isinstance(content, str):
@@ -144,10 +153,12 @@ def record_output(conversation, index, output):
             "unit_index": len(units), "unit_type": event["type"],
             "unit_content": serialize_stream_unit_content(event, content), "unit_status": "completed",
             "tool_call_id": event.get("tool_call_id"), "invocation_id": event.get("invocation_id")})
-    from management.db.conversation.repository import update_message_unit_status
-    for unit_id in create_message_units(units, mid, conversation, "owner"):
-        update_message_unit_status(unit_id, "completed", user_id="owner")
-    return mid
+    return persist_prepared_assistant_projection(
+        projection_run_id=uuid.uuid4().hex, message_index=index, conversation_id=conversation,
+        message_source=MessageSource.CHAT, user_id="owner", tenant_id="spike-tenant",
+        message_content=answer, terminal_status="completed", message_units=units,
+        search_records=[], image_urls=[], skill_files=[], automation_proposals=[], history_checkpoints=checkpoints,
+    )
 
 
 async def run_context_scenario(monkeypatch, engine, original="smolagents", protocol="native", cm=False,
@@ -198,7 +209,7 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
                     return
                 source = str(body["messages"])
                 markers = sorted(set(re.findall(r"\b(?=[A-Za-z0-9-]*\d)[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+){2,}\b", source)))
-                content, tool_calls = ("Invalid summary" if fault == "invalid_summary" else
+                content, tool_calls = ("" if fault == "invalid_summary" else
                                        markdown + "\nPreserved identifiers: " + " ".join(markers)), []
             else:
                 calls.append((phase["value"], body))
@@ -215,11 +226,13 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
                     content, tool_calls = ("OLD_FACT_ALPHA" if phase["value"] == "seed" else "FOLLOWUP_ALPHA"), []
                     if core == "smolagents":
                         content = "<final_answer>" + content + "</final_answer>"
+            # A completed physical request supplies the authoritative compaction signal.
+            input_tokens = 36000 if phase["value"] == "followup" and not is_summary else 20
             value = {"id": "context-response", "model": body["model"], "object": "chat.completion",
                 "choices": [{"index": 0, "message": {"role": "assistant", "content": content,
                     **({"tool_calls": tool_calls} if tool_calls else {})},
                     "finish_reason": "tool_calls" if tool_calls else "stop"}],
-                "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30}}
+                "usage": {"prompt_tokens": input_tokens, "completion_tokens": 10, "total_tokens": input_tokens + 10}}
             if body.get("stream"):
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
                 delta = value["choices"][0]["message"]

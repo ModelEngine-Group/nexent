@@ -1,8 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Hierarchy and complete-subtree metric arithmetic, isolated from file I/O."""
 
+import json
+
 import pytest
+
 from infrastructure.trace.trajectory_io import TrajectoryCorrupt
+from infrastructure.trace.trajectory_reader import Text
 from ops.services.trajectory.nodes import build_nodes
 
 TRACE = "a" * 32
@@ -26,6 +30,76 @@ def span(identity, parent=None, kind="AGENT", **attrs):
 
 def request(*spans):
     return [{"resourceSpans": [{"scopeSpans": [{"spans": list(spans)}]}]}]
+
+
+def test_failed_model_keeps_safe_reason_and_partial_output():
+    failed = span(
+        "failed", "root", "LLM",
+        **{
+            "nexent.business_status": "failed",
+            "nexent.error": json.dumps({
+                "safe_message": "The model request timed out.",
+                "category": "MODEL_TIMEOUT",
+                "raw": "private provider response",
+            }),
+            "nexent.provider.response.format": "openai_chat",
+            "nexent.provider.response.value": '{"choices":[{"delta":{"content":"partial"}}]}',
+        },
+    )
+    failed["status"] = {"code": 2, "message": "MODEL_TIMEOUT"}
+    retried = span("retried", "root", "LLM", **{"nexent.business_status": "completed"})
+    nodes, _, _ = build_nodes(request(span("root"), failed, retried), conversation_id="123")
+    indexed = {node["id"]: node for node in nodes}
+    assert indexed["failed"]["failure_reason"] == "The model request timed out."
+    assert '"content":"partial"' in indexed["failed"]["_bodies"]["output"]
+    assert "failure_reason" not in indexed["retried"]
+
+
+@pytest.mark.parametrize(("error", "expected"), [
+    ('{"category":"model_timeout"}', "model_timeout"),
+    ('{"diagnostic_code":"MODEL_RESPONSE_INCOMPLETE","category":"MODEL_PROTOCOL_ERROR"}',
+     "MODEL_RESPONSE_INCOMPLETE"),
+    ("invalid json", "MODEL_PROTOCOL_ERROR"),
+    ("[]", "MODEL_PROTOCOL_ERROR"),
+    (None, "MODEL_PROTOCOL_ERROR"),
+    ("truncated", "MODEL_PROTOCOL_ERROR"),
+])
+def test_failed_model_falls_back_to_recorded_diagnostic_or_status(error, expected):
+    if error == "truncated":
+        preview = '{"safe_message":"misleading prefix"}'
+        error = Text(preview, start=0, end=128, byte_count=128, char_count=128)
+    model = span("model", "root", "LLM", **{"nexent.error": error})
+    model["status"] = {"code": "STATUS_CODE_ERROR", "message": "MODEL_PROTOCOL_ERROR"}
+    nodes, _, _ = build_nodes(request(span("root"), model), conversation_id="123")
+    assert next(node for node in nodes if node["id"] == "model")["failure_reason"] == expected
+
+
+@pytest.mark.parametrize(("attrs", "expected"), [
+    ({"error.message": "  service refused access  ", "error.type": "PermissionError"}, "service refused access"),
+    ({"error.message": "", "error.type": "TimeoutError"}, "TimeoutError"),
+    ({"error.message": "错" * 1025}, "错" * 1023 + "…"),
+    ({}, None),
+])
+def test_failed_tool_uses_recorded_reason_without_replacing_output(attrs, expected):
+    tool = span("tool", "root", "TOOL", **{"output.value": "partial output", **attrs})
+    tool["status"] = {"code": 2}
+    nodes, _, _ = build_nodes(request(span("root"), tool), conversation_id="123")
+    node = next(node for node in nodes if node["id"] == "tool")
+    assert node.get("failure_reason") == expected
+    assert node["_bodies"]["output"] == "partial output"
+
+
+def test_tool_success_flag_fallback_and_cancelled_status_precedence():
+    tool = span("tool", "root", "TOOL", **{"error.message": "recorded error"})
+    tool["attributes"].append({"key": "agent.tool.success", "value": {"boolValue": False}})
+    nodes, _, _ = build_nodes(request(span("root"), tool), conversation_id="123")
+    node = next(node for node in nodes if node["id"] == "tool")
+    assert node["status"] == "failed" and node["failure_reason"] == "recorded error"
+
+    tool["attributes"].append({"key": "nexent.business_status", "value": {"stringValue": "cancelled"}})
+    nodes, _, _ = build_nodes(request(span("root"), tool), conversation_id="123")
+    node = next(node for node in nodes if node["id"] == "tool")
+    assert node["status"] == "cancelled" and "failure_reason" not in node
 
 
 def test_nested_parallel_metrics_deduplicate_exports():
@@ -130,6 +204,28 @@ def test_shared_attempt_keeps_provider_total_and_generation_rate(generation_rate
 
     assert nodes[1]["usage"] == {"input": 0, "output": 2, "total": None, "complete": False}
     assert nodes[1]["throughput"] == (float(generation_rate) if generation_rate is not None else None)
+
+
+@pytest.mark.parametrize(("missing_field", "expected_input", "expected_output"), [
+    (None, 13_000, 610),
+    ("llm.token_count.prompt", None, 610),
+    ("llm.token_count.completion", 13_000, None),
+])
+def test_agent_keeps_reported_total_when_model_breakdown_is_partial(missing_field, expected_input, expected_output):
+    first = {"llm.token_count.prompt": "7000", "llm.token_count.completion": "600", "llm.token_count.total": "7600"}
+    second = {"llm.token_count.prompt": "6000", "llm.token_count.completion": "10", "llm.token_count.total": "6010"}
+    second.pop(missing_field, None)
+    nodes, _, coverage = build_nodes(request(
+        span("root"), span("first", "root", "LLM", **first), span("child", "root"),
+        span("second", "child", "LLM", **second),
+    ), conversation_id="1")
+
+    root = next(node for node in nodes if node["id"] == "root")
+    usage = root["usage"]
+    assert coverage["complete"] and root["model_call_count"] == 2
+    assert (usage["input"], usage["output"]) == (expected_input, expected_output)
+    assert usage["known"]["total"] == usage["total"] == 13_610
+    assert usage["complete"] is (missing_field is None)
 
 
 def test_invocation_association_is_preserved_in_node_details():
@@ -319,8 +415,11 @@ def test_duplicate_large_bodies_compare_full_content_not_preview(tmp_path):
 def test_dropped_otlp_facts_make_subtree_metrics_partial(dropped):
     record = span("root")
     record[dropped] = 1
-    nodes, _, coverage = build_nodes(
-        request(record, span("m", "root", "LLM")), conversation_id="1"
-    )
+    model = span("m", "root", "LLM", **{
+        "llm.token_count.prompt": "13000", "llm.token_count.completion": "610", "llm.token_count.total": "13610",
+    })
+    nodes, _, coverage = build_nodes(request(record, model), conversation_id="1")
     assert not coverage["complete"] and coverage["capture_gap"]
+    assert nodes[1]["usage"]["complete"]
     assert nodes[0]["model_call_count"] is None and not nodes[0]["usage"]["complete"]
+    assert nodes[0]["usage"]["total"] is None and nodes[0]["usage"]["known"]["total"] == 13_610

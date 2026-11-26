@@ -129,6 +129,7 @@ export interface TrajectoryNode {
   kind: "agent" | "model" | "tool" | "phase" | string;
   name: string;
   status: string;
+  failure_reason?: string;
   agent_version_no: number | null;
   agent_version_name: string | null;
   started_at: string | null;
