@@ -101,7 +101,7 @@ Agent 仓库是同租户内共享、管理与审核智能体的中心。您可�
 
 在「全部」筛选且无搜索条件时，页面会提供 **新建智能体** 入口，跳转到智能体配置页创建新智能体。
 
-> 💡 如需导入已有的智能体配置（JSON/ZIP），请前往「智能体配置」页面或「智能体市场」使用导入向导；「我的 Agent」页面不再提供导入入口。
+> 💡 如需导入已有的智能体配置（JSON/ZIP），请前往「智能体配置」页面使用导入向导；「我的 Agent」页面不再提供导入入口。
 
 <div style="display: flex; justify-content: left;">
   <img src="../assets/resource-repository/mine-list.png" style="width: 80%; height: auto;" alt="我的 Agent 列表" />

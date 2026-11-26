@@ -101,7 +101,7 @@ The **My Agents** tab manages agents you can edit, including agents you created 
 
 When the filter is **All** and there is no search query, the page provides a **Create agent** entry that jumps to the Agent Configuration page.
 
-> 💡 To import an existing agent configuration (JSON/ZIP), use the import wizard on the Agent Configuration page or the Agent Market; the My Agents page no longer provides an import entry.
+> 💡 To import an existing agent configuration (JSON/ZIP), use the import wizard on the Agent Configuration page; the My Agents page no longer provides an import entry.
 
 <div style="display: flex; justify-content: left;">
   <img src="../assets/resource-repository/mine-list.png" style="width: 80%; height: auto;" alt="My Agents list" />

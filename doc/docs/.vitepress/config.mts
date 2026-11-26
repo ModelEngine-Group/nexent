@@ -195,10 +195,6 @@ export default defineConfig({
                         "link": "/en/user-guide/resource-repository/custom-file-generation-skill"
                       }
                     ]
-                  },
-                  {
-                    "text": "Agent Market (Review Pending)",
-                    "link": "/en/user-guide/agent-market"
                   }
                 ]
               },
@@ -638,10 +634,6 @@ export default defineConfig({
                         "link": "/zh/user-guide/resource-repository/custom-file-generation-skill"
                       }
                     ]
-                  },
-                  {
-                    "text": "智能体市场（待核对）",
-                    "link": "/zh/user-guide/agent-market"
                   }
                 ]
               },
