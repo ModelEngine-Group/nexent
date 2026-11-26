@@ -66,6 +66,9 @@ STORAGE_CLASS_NAME=""
 LOCAL_PATH="/var/lib/nexent-data"
 LOCAL_NODE_NAME=""
 EXISTING_CLAIM_PREFIX=""
+RUNTIME_REPLICAS="1"
+SAVED_RUNTIME_CHART_REPLICAS=""
+DIRECT_UPGRADE="false"
 K8S_WAIT_TIMEOUT_SECONDS="${NEXENT_K8S_WAIT_TIMEOUT_SECONDS:-600}"
 
 # Parse command line arguments. The optional "apply" command is kept as a deploy alias.
@@ -151,6 +154,23 @@ while [[ $# -gt 0 ]]; do
       K8S_EXISTING_CLAIM_PREFIX_EXPLICIT="true"
       shift 2
       ;;
+    --runtime-replicas)
+      if [ $# -lt 2 ]; then
+        echo "Error: --runtime-replicas requires a replica count." >&2
+        exit 1
+      fi
+      RUNTIME_REPLICAS="$2"
+      K8S_RUNTIME_REPLICAS_EXPLICIT="true"
+      shift 2
+      ;;
+    --direct-upgrade)
+      DIRECT_UPGRADE="true"
+      shift
+      ;;
+    --retry-runtime-maintenance)
+      echo "Error: --retry-runtime-maintenance was removed. Rerun the application deployment during an idle window." >&2
+      exit 1
+      ;;
     --wait-timeout)
       K8S_WAIT_TIMEOUT_SECONDS="$2"
       shift 2
@@ -216,6 +236,10 @@ apply_deployment_common_config() {
     esac
 
     validate_persistence_mode || return 1
+    if release_scope_includes_nexent && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        resolve_runtime_replicas || return 1
+    fi
+    validate_runtime_replica_options || return 1
     deployment_print_summary k8s
     echo "Helm release scope: $RELEASE_SCOPE"
     case "$RELEASE_SCOPE" in
@@ -316,6 +340,67 @@ validate_persistence_mode() {
       return 1
       ;;
   esac
+}
+
+read_runtime_chart_replicas() (
+    local reader_chart
+    reader_chart=$(mktemp -d) || return 1
+    trap 'rm -rf -- "$reader_chart"' EXIT
+    mkdir "$reader_chart/templates" || return 1
+    printf 'apiVersion: v2\nname: nexent-runtime-values\nversion: 0.1.0\n' > "$reader_chart/Chart.yaml" || return 1
+    cat > "$reader_chart/templates/replicas.yaml" <<'EOF' || return 1
+{{- $runtime := get .Values "nexent-runtime" -}}
+{{- if not (hasKey .Values "nexent-runtime") }}
+replicaCount: unset
+{{- else if not (kindIs "map" $runtime) }}
+replicaCount: invalid
+{{- else if not (hasKey $runtime "replicaCount") }}
+replicaCount: unset
+{{- else }}
+{{- $count := get $runtime "replicaCount" | toJson }}
+replicaCount: {{ ternary $count "invalid" (and (regexMatch "^[1-9][0-9]{0,9}$" $count) (le (int64 $count) 2147483647)) }}
+{{- end }}
+EOF
+    local rendered
+    rendered=$(helm template nexent-runtime-values "$reader_chart" -f "$APPLICATION_CHART_DIR/values.yaml") || return 1
+    sed -n 's/^replicaCount: //p' <<< "$rendered"
+)
+
+resolve_runtime_replicas() {
+    local chart_replicas
+    chart_replicas=$(read_runtime_chart_replicas) || return 1
+    if [ -z "$chart_replicas" ]; then
+        echo "Error: unable to read nexent-runtime.replicaCount from the application chart values.yaml." >&2
+        return 1
+    fi
+    # Keep the previous chart count separate from the effective count saved by the deployment.
+    # Older options predate this field and use the original chart default as their baseline.
+    local previous_chart_replicas="${SAVED_RUNTIME_CHART_REPLICAS:-1}"
+    if [ -z "${K8S_RUNTIME_REPLICAS_EXPLICIT:-}" ] && [ "$chart_replicas" != "unset" ] &&
+        { [ "$chart_replicas" = "invalid" ] || [ "$chart_replicas" != "$previous_chart_replicas" ]; }; then
+        RUNTIME_REPLICAS="$chart_replicas"
+    fi
+    SAVED_RUNTIME_CHART_REPLICAS="$chart_replicas"
+}
+
+validate_runtime_replica_options() {
+    if [[ ! "$RUNTIME_REPLICAS" =~ ^[1-9][0-9]{0,9}$ ]] || [ "$RUNTIME_REPLICAS" -gt 2147483647 ]; then
+        echo "Error: Runtime replica count (--runtime-replicas or nexent-runtime.replicaCount in values.yaml) must be a positive integer no greater than 2147483647." >&2
+        return 1
+    fi
+    if ! release_scope_includes_nexent || ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        return 0
+    fi
+    if [ "$RUNTIME_REPLICAS" -gt 1 ]; then
+        if [ "$PERSISTENCE_MODE" = "local" ]; then
+            echo "Error: multiple Runtime replicas require dynamic or existing shared RWX storage, not local hostPath." >&2
+            return 1
+        fi
+        if [ "$PERSISTENCE_MODE" = "dynamic" ] && { [ -z "$STORAGE_CLASS_NAME" ] || [ "$STORAGE_CLASS_NAME" = "nexent-local" ]; }; then
+            echo "Error: multiple Runtime replicas in dynamic mode require an explicit RWX --storage-class." >&2
+            return 1
+        fi
+    fi
 }
 
 render_persistence_values() {
@@ -483,6 +568,10 @@ persist_deploy_options() {
     printf '  storageClassName: %s\n' "$(yaml_quote "$STORAGE_CLASS_NAME")"
     printf '  localPath: %s\n' "$(yaml_quote "$LOCAL_PATH")"
     printf '  existingClaimPrefix: %s\n' "$(yaml_quote "$EXISTING_CLAIM_PREFIX")"
+    printf '  runtimeReplicas: %s\n' "$RUNTIME_REPLICAS"
+    if [ -n "$SAVED_RUNTIME_CHART_REPLICAS" ]; then
+      printf '  runtimeChartReplicas: %s\n' "$(yaml_quote "$SAVED_RUNTIME_CHART_REPLICAS")"
+    fi
   } >> "$DEPLOY_OPTIONS_FILE"
 }
 
@@ -524,6 +613,12 @@ apply_loaded_deploy_option() {
       ;;
     EXISTING_CLAIM_PREFIX|existingClaimPrefix)
       [ -n "${K8S_EXISTING_CLAIM_PREFIX_EXPLICIT:-}" ] || EXISTING_CLAIM_PREFIX="$value"
+      ;;
+    RUNTIME_REPLICAS|runtimeReplicas)
+      [ -n "${K8S_RUNTIME_REPLICAS_EXPLICIT:-}" ] || RUNTIME_REPLICAS="$value"
+      ;;
+    runtimeChartReplicas)
+      SAVED_RUNTIME_CHART_REPLICAS="$value"
       ;;
   esac
 }
@@ -644,52 +739,145 @@ ensure_namespace() {
     fi
 }
 
-helm_upgrade_application_release() {
-    local paused="${1:-false}"
-    helm upgrade --install "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
+helm_application_chart() {
+    local paused="$1" bootstrap_run_id="$2"
+    shift 2
+    helm "$@" "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
         --namespace "$NAMESPACE" \
         -f "$GENERATED_VALUES" \
         -f "$GENERATED_RUNTIME_VALUES" \
         -f "$GENERATED_PERSISTENCE_VALUES" \
         -f "$GENERATED_SECRETS_VALUES" \
         --set global.businessPaused="$paused" \
+        --set-string global.bootstrapRunId="$bootstrap_run_id" \
+        --set nexent-runtime.replicaCount="$RUNTIME_REPLICAS" \
         --set global.systemBootstrapTimeoutSeconds="$((K8S_WAIT_TIMEOUT_SECONDS * 3))" \
         --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
         --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
 }
 
+helm_upgrade_application_release() {
+    helm_application_chart "$1" "$2" upgrade --install
+}
+
 validate_application_release() {
-    local paused
+    local bootstrap_run_id="$1" paused
     for paused in true false; do
-        helm template "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
-            --namespace "$NAMESPACE" \
-            -f "$GENERATED_VALUES" -f "$GENERATED_RUNTIME_VALUES" \
-            -f "$GENERATED_PERSISTENCE_VALUES" -f "$GENERATED_SECRETS_VALUES" \
-            --set global.businessPaused="$paused" \
-            --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
-            --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
-            --set nexent-common.secrets.ssh.password="$SSH_PASSWORD" >/dev/null || return 1
+        helm_application_chart "$paused" "$bootstrap_run_id" template >/dev/null || return 1
     done
 }
 
+stop_runtime_deploy_lock() {
+    if [ -n "${deployment_db_write:-}" ]; then
+        exec {deployment_db_write}>&-
+    fi
+    if [ -n "${deployment_db_read:-}" ]; then
+        exec {deployment_db_read}<&-
+    fi
+    kill "$deployment_db_pid" 2>/dev/null || true
+    wait "$deployment_db_pid" 2>/dev/null || true
+}
+
+runtime_deploy_db_query() {
+    local result
+    printf '%s\n' "$1" >&"$deployment_db_write" &&
+        IFS= read -r -t "$K8S_WAIT_TIMEOUT_SECONDS" -u "$deployment_db_read" result &&
+        printf '%s\n' "$result"
+}
+
+start_runtime_deploy_lock() {
+    local password
+    password=$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321") || return 1
+    coproc RUNTIME_DEPLOY_DB {
+        exec kubectl exec -i -n "$NAMESPACE" deployment/nexent-postgresql -c postgresql -- \
+            sh -c 'IFS= read -r PGPASSWORD || exit 1; export PGPASSWORD PGCONNECT_TIMEOUT=10; exec "$@"' \
+            runtime-deploy-lock psql -X -qAt -w -v ON_ERROR_STOP=1 \
+            -h "${POSTGRES_HOST:-nexent-postgresql}" -p "${POSTGRES_PORT:-5432}" \
+            -U "${POSTGRES_USER:-root}" -d "${POSTGRES_DB:-nexent}"
+    }
+    deployment_db_pid="${RUNTIME_DEPLOY_DB_PID:-}"
+    [ -n "$deployment_db_pid" ] || return 1
+    trap 'stop_runtime_deploy_lock' EXIT
+    trap 'exit 1' HUP INT TERM
+    trap '' PIPE
+    exec {deployment_db_write}>&"${RUNTIME_DEPLOY_DB[1]}" || return 1
+    exec {deployment_db_read}<&"${RUNTIME_DEPLOY_DB[0]}" || return 1
+
+    [[ "$password" != *$'\n'* ]] && printf '%s\n' "$password" >&"$deployment_db_write" || return 1
+    if ! deployment_db_owner=$(runtime_deploy_db_query "SELECT CASE WHEN pg_try_advisory_lock(hashtextextended('nexent:runtime:deployment', 0)) THEN pg_backend_pid()::text ELSE 'busy' END;"); then
+        echo "Error: could not establish the Runtime deployment lock." >&2
+        return 1
+    fi
+    if ! [[ "$deployment_db_owner" =~ ^[0-9]+$ ]]; then
+        echo "Error: another application deployment holds the Runtime deployment lock." >&2
+        return 1
+    fi
+}
+
+require_runtime_deploy_lock() {
+    local owner
+    if ! owner=$(runtime_deploy_db_query "SELECT pg_backend_pid() WHERE EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted);") ||
+        [ "$owner" != "$deployment_db_owner" ]; then
+        echo "Error: Runtime deployment lock could not be verified." >&2
+        return 1
+    fi
+}
+
+require_previous_deployment_jobs_stopped() {
+    # An older release may still have a maintenance Job writing shared data.
+    local selector="app in (nexent-system-bootstrap,nexent-runtime-maintenance),app.kubernetes.io/instance=$APPLICATION_RELEASE_NAME"
+    local jobs pods name complete failed phase
+    jobs=$(kubectl get jobs -n "$NAMESPACE" -l "$selector" -o \
+        'jsonpath={range .items[*]}{.metadata.name}{":"}{.status.conditions[?(@.type=="Complete")].status}{":"}{.status.conditions[?(@.type=="Failed")].status}{"\n"}{end}') || return 1
+    while IFS=: read -r name complete failed; do
+        if [ -n "$name" ] && [ "$complete" != True ] && [ "$failed" != True ]; then
+            echo "Error: previous deployment Job $NAMESPACE/$name is not terminal." >&2
+            return 1
+        fi
+    done <<< "$jobs"
+
+    pods=$(kubectl get pods -n "$NAMESPACE" -l "$selector" -o \
+        'jsonpath={range .items[*]}{.metadata.name}{":"}{.status.phase}{"\n"}{end}') || return 1
+    while IFS=: read -r name phase; do
+        if [ -n "$name" ] && [ "$phase" != Succeeded ] && [ "$phase" != Failed ]; then
+            echo "Error: previous deployment Pod $NAMESPACE/$name is not terminal." >&2
+            return 1
+        fi
+    done <<< "$pods"
+}
+
 stop_old_business_workloads() {
-    local deployment found pods elapsed
-    local existing=()
-    for deployment in nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process; do
+    local deployment found pods elapsed state generation observed desired replicas reconciled
+    local business=(nexent-gateway nexent-web nexent-northbound nexent-config nexent-runtime nexent-mcp nexent-data-process)
+    local -A existing=()
+    for deployment in "${business[@]}"; do
         found=$(kubectl get deployment "$deployment" -n "$NAMESPACE" --ignore-not-found -o name) || return 1
-        [ -z "$found" ] || existing+=("$deployment")
+        [ -z "$found" ] || existing[$deployment]=1
     done
-    for deployment in "${existing[@]}"; do
+    for deployment in "${business[@]}"; do
+        [ -n "${existing[$deployment]:-}" ] || continue
         kubectl scale "deployment/$deployment" -n "$NAMESPACE" --replicas=0 || return 1
     done
-    for deployment in "${existing[@]}"; do
+    for deployment in "${business[@]}"; do
         elapsed=0
         while true; do
-            pods=$(kubectl get pods -n "$NAMESPACE" -l "app=$deployment" -o name) || return 1
-            [ -n "$pods" ] || break
+            reconciled=true
+            if [ -n "${existing[$deployment]:-}" ]; then
+                state=$(kubectl get deployment "$deployment" -n "$NAMESPACE" -o \
+                    'jsonpath={.metadata.generation}:{.status.observedGeneration}:{.spec.replicas}:{.status.replicas}') || return 1
+                IFS=: read -r generation observed desired replicas <<< "$state"
+                if ! [[ "$generation" =~ ^[1-9][0-9]*$ && "$observed" = "$generation" &&
+                    "$desired" = 0 && "${replicas:-0}" = 0 ]]; then
+                    reconciled=false
+                fi
+            fi
+            if [ "$reconciled" = true ]; then
+                pods=$(kubectl get pods -n "$NAMESPACE" -l "app=$deployment" -o name) || return 1
+                [ -n "$pods" ] || break
+            fi
             if [ "$elapsed" -ge "$K8S_WAIT_TIMEOUT_SECONDS" ]; then
-                echo "Error: old $deployment Pods did not stop; migration will not run." >&2
+                echo "Error: old $deployment Pods did not stop; migration will not run until scale-to-zero is reconciled and no Pods remain." >&2
                 return 1
             fi
             sleep 2
@@ -707,9 +895,9 @@ bootstrap_job_failed() {
 }
 
 run_system_agent_bootstrap() {
-    local jobs job pod status elapsed
+    local bootstrap_run_id="$1" replicas="${2:-1}" jobs job pod status elapsed
     jobs=$(kubectl get jobs -n "$NAMESPACE" \
-        -l "app=nexent-system-bootstrap,app.kubernetes.io/instance=$APPLICATION_RELEASE_NAME" \
+        -l "app=nexent-system-bootstrap,app.kubernetes.io/instance=$APPLICATION_RELEASE_NAME,nexent.io/bootstrap-run-id=$bootstrap_run_id" \
         --sort-by=.metadata.creationTimestamp \
         -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}') || return 1
     job=$(printf '%s\n' "$jobs" | sed -n '$p')
@@ -731,7 +919,12 @@ run_system_agent_bootstrap() {
         sleep 2
         elapsed=$((elapsed + 2))
     done
+    if [ "$replicas" -gt 1 ]; then
+        require_runtime_shared_storage || { bootstrap_job_failed "$job"; return 1; }
+    fi
+    require_runtime_deploy_lock || return 1
     sync_official_skills_to_workspace "$pod" || { bootstrap_job_failed "$job"; return 1; }
+    require_runtime_deploy_lock || return 1
     kubectl exec -n "$NAMESPACE" "$pod" -c nexent-config -- sh -c ': > /tmp/nexent-bootstrap-start' || { bootstrap_job_failed "$job"; return 1; }
     elapsed=0
     while true; do
@@ -749,15 +942,96 @@ run_system_agent_bootstrap() {
     done
 }
 
-deploy_application_release() {
-    validate_application_release || return 1
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-        stop_old_business_workloads || return 1
-        helm_upgrade_application_release true || return 1
-        run_system_agent_bootstrap || return 1
+require_runtime_rwx_claim() {
+    local claim="$1" pvc pv volume pvc_modes pv_modes volume_mode phase local_path
+    if ! pvc=$(kubectl get pvc "$claim" -n "$NAMESPACE" -o \
+        'jsonpath={.status.phase}:{.spec.volumeName}:{range .spec.accessModes[*]}{@}{","}{end}:{.spec.volumeMode}'); then
+        echo "Error: cannot inspect shared Runtime claim $NAMESPACE/$claim." >&2
+        return 1
     fi
-    helm_upgrade_application_release false || return 1
-    wait_for_nexent_ready || return 1
+    IFS=: read -r phase volume pvc_modes volume_mode <<< "$pvc"
+    if [ "$phase" != "Bound" ] || [ -z "$volume" ] || [[ ",$pvc_modes" != *,ReadWriteMany,* ]] || \
+        [ "${volume_mode:-Filesystem}" != "Filesystem" ]; then
+        echo "Error: Runtime claim $NAMESPACE/$claim must be Bound with ReadWriteMany access and Filesystem volume mode." >&2
+        return 1
+    fi
+    if ! pv=$(kubectl get pv "$volume" -o \
+        'jsonpath={.status.phase}:{range .spec.accessModes[*]}{@}{","}{end}:{.spec.volumeMode}:{.spec.local.path}'); then
+        echo "Error: cannot inspect volume $volume bound to Runtime claim $NAMESPACE/$claim." >&2
+        return 1
+    fi
+    IFS=: read -r phase pv_modes volume_mode local_path <<< "$pv"
+    if [ "$phase" != "Bound" ] || [[ ",$pv_modes" != *,ReadWriteMany,* ]] || \
+        [ "${volume_mode:-Filesystem}" != "Filesystem" ]; then
+        echo "Error: Runtime volume $volume must be Bound with ReadWriteMany access and Filesystem volume mode." >&2
+        return 1
+    fi
+    if [ -n "$local_path" ]; then
+        echo "Error: Runtime volume $volume uses spec.local. Select a shared RWX volume." >&2
+        return 1
+    fi
+}
+
+require_runtime_shared_storage() {
+    local claim configured_claim
+    for claim in nexent-workspace nexent-skills nexent-logs nexent-memory-plugins nexent-trajectory; do
+        configured_claim="$claim"
+        case "$claim" in
+            nexent-workspace|nexent-skills|nexent-logs)
+                configured_claim=$(persistence_existing_claim "$claim")
+                configured_claim="${configured_claim:-$claim}"
+                ;;
+        esac
+        require_runtime_rwx_claim "$configured_claim" || return 1
+    done
+}
+
+deploy_application_release() {
+    (
+        set -o pipefail
+        local bootstrap_run_id='' deployment_db_read deployment_db_write deployment_db_pid deployment_db_owner
+        if [ "${DIRECT_UPGRADE:-false}" = "true" ] && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+            helm_application_chart false "" template >/dev/null || return 1
+            start_runtime_deploy_lock || return 1
+            require_direct_upgrade_target || return 1
+            require_previous_deployment_jobs_stopped || return 1
+            if [ "$RUNTIME_REPLICAS" -gt 1 ]; then
+                require_runtime_shared_storage || return 1
+            fi
+            require_runtime_deploy_lock || return 1
+            helm_application_chart false "" upgrade || return 1
+            require_runtime_deploy_lock || return 1
+            wait_for_nexent_ready || return 1
+            require_runtime_deploy_lock || return 1
+            return 0
+        fi
+        if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+            if ! IFS= read -r bootstrap_run_id < /proc/sys/kernel/random/uuid; then
+                bootstrap_run_id=$(uuidgen | tr '[:upper:]' '[:lower:]') || return 1
+            fi
+        fi
+        validate_application_release "$bootstrap_run_id" || return 1
+        if [ -n "$bootstrap_run_id" ]; then
+            start_runtime_deploy_lock || return 1
+            require_previous_deployment_jobs_stopped || return 1
+            require_runtime_deploy_lock || return 1
+            if [ "$RUNTIME_REPLICAS" -gt 1 ] && [ "$PERSISTENCE_MODE" = "existing" ]; then
+                require_runtime_shared_storage || return 1
+                require_runtime_deploy_lock || return 1
+            fi
+            stop_old_business_workloads || return 1
+            require_runtime_deploy_lock || return 1
+            helm_upgrade_application_release true "$bootstrap_run_id" || return 1
+            require_runtime_deploy_lock || return 1
+            run_system_agent_bootstrap "$bootstrap_run_id" "$RUNTIME_REPLICAS" || return 1
+            require_runtime_deploy_lock || return 1
+        fi
+        helm_upgrade_application_release false "" || return 1
+        if [ -n "$bootstrap_run_id" ]; then
+            require_runtime_deploy_lock || return 1
+        fi
+        wait_for_nexent_ready || return 1
+    )
 }
 
 helm_upgrade_infrastructure_release() {
@@ -943,6 +1217,24 @@ sync_official_skills_to_workspace() {
 helm_release_exists() {
     local release_name="$1"
     helm status "$release_name" --namespace "$NAMESPACE" >/dev/null 2>&1
+}
+
+require_direct_upgrade_target() {
+    local state owner owner_namespace replicas
+    if ! helm_release_exists "$APPLICATION_RELEASE_NAME"; then
+        echo "Error: --direct-upgrade requires an existing '$APPLICATION_RELEASE_NAME' Helm release. Use the default deployment for initial setup." >&2
+        return 1
+    fi
+
+    if state=$(kubectl get deployment nexent-config -n "$NAMESPACE" -o \
+        'jsonpath={.metadata.annotations.meta\.helm\.sh/release-name}:{.metadata.annotations.meta\.helm\.sh/release-namespace}:{.spec.replicas}'); then
+        IFS=: read -r owner owner_namespace replicas <<< "$state"
+        if [[ "$owner" = "$APPLICATION_RELEASE_NAME" && "$owner_namespace" = "$NAMESPACE" && "$replicas" =~ ^[1-9][0-9]*$ ]]; then
+            return 0
+        fi
+    fi
+    echo "Error: --direct-upgrade requires an active nexent-config Deployment owned by the '$APPLICATION_RELEASE_NAME' Helm release. Use the default deployment to complete bootstrap." >&2
+    return 1
 }
 
 reject_legacy_single_release() {
@@ -1293,9 +1585,15 @@ apply() {
     # Step 1: Select deployment components, port policy and image source.
     apply_deployment_common_config
 
+    if [ "$DIRECT_UPGRADE" = "true" ] && release_scope_includes_nexent &&
+        deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        require_direct_upgrade_target || exit 1
+    fi
+
     # Step 2: Render release-specific values with image tags and persistence settings.
     update_values_yaml
-    if release_scope_includes_nexent && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+    if [ "$DIRECT_UPGRADE" = "false" ] && release_scope_includes_nexent &&
+        deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
         validate_official_skills_source || exit 1
     fi
     persist_deploy_options
@@ -1348,10 +1646,10 @@ apply() {
         echo "Checking for stale PersistentVolumes..."
     fi
     local stale_pvs=""
-    if release_scope_includes_infrastructure; then
+    if [ "$PERSISTENCE_MODE" = "local" ] && release_scope_includes_infrastructure; then
         stale_pvs="nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv"
     fi
-    if release_scope_includes_nexent; then
+    if [ "$PERSISTENCE_MODE" = "local" ] && release_scope_includes_nexent; then
         stale_pvs="$stale_pvs nexent-workspace-pv nexent-skills-pv nexent-project-config-pv"
     fi
     for pv in $stale_pvs; do
@@ -1462,7 +1760,7 @@ apply() {
     render_runtime_secret_values
     recreate_legacy_nexent_secret_for_helm_management
 
-    # Step 8: Pause business Pods, run the bootstrap Job, then activate the release.
+    # Step 8: Deploy the application release using the selected upgrade flow.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
     else
@@ -1531,6 +1829,8 @@ print_usage() {
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
         echo "  --persistence-mode MODE    local、dynamic 或 existing"
+        echo "  --runtime-replicas COUNT   设置 Runtime 固定副本数"
+        echo "  --direct-upgrade           直接更新现有应用，跳过全局缩零和系统初始化 Job"
         echo "  --storage-class NAME       用于 PV/PVC 绑定的 StorageClass（别名：--storageclass、--storage-class-name、--sc）"
         echo "  --local-path PATH          本地 PV 基础路径"
         echo "  --local-node-name NAME     已废弃；local 模式使用 hostPath，不需要 nodeAffinity"
@@ -1565,6 +1865,8 @@ print_usage() {
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"
+    echo "  --runtime-replicas COUNT   Set the fixed Runtime replica count"
+    echo "  --direct-upgrade           Upgrade an existing application without scaling to zero or running bootstrap"
     echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"
     echo "  --local-path PATH          Base path for local PVs"
     echo "  --local-node-name NAME     Deprecated; local mode uses hostPath and does not require nodeAffinity"

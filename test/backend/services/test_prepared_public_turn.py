@@ -8,13 +8,17 @@ from unittest.mock import AsyncMock
 import pytest
 from starlette.responses import StreamingResponse
 
-from contracts.agent import AgentRequest
-from contracts.agentos import AgentLegacyResume, AgentRunLookup, AgentRunReference, AgentStop, CompatibilityConversationRun
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
+from contracts.agentos import (
+    AgentLegacyResume, AgentRunLookup, AgentRunReference, AgentStop, CompatibilityConversationRun,
+    ModelBindings, RunModelBinding,
+)
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     AppException, NorthboundStopInProgressError, RuntimeMetadataVersionConflict,
     RuntimeServiceUnavailableError, RuntimeUpstreamError,
 )
+from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from management.services.agent import prepared_turn, runtime_client
 
 
@@ -76,6 +80,31 @@ async def test_public_prepared_stages_confirms_and_uses_signed_journal(flow):
     assert result.headers["run_id"] == REFERENCE.run_id and result.headers["conversation_id"] == "42"
     assert result.headers["X-Runtime-Metadata-Version"] == "2"
     assert b"".join([chunk async for chunk in result.body_iterator]) == b"data: answer\n\n"
+
+
+@pytest.mark.asyncio
+async def test_workbench_automation_stages_the_resolved_model(flow, mocker):
+    operations, compile_snapshot, client, _ = flow
+    config = WorkbenchSessionConfig(mode="generic_chat")
+    mocker.patch.object(prepared_turn, "_prepare_workbench", return_value=SimpleNamespace(
+        config=config, knowledge=None, version=2, previous_version=1,
+    ))
+    mocker.patch.object(prepared_turn, "reject_unstaged_turn")
+    snapshot = compile_snapshot.return_value
+    snapshot.resource = SimpleNamespace(
+        agent_id=7, version_no=3, workbench_skill_refs=[],
+        tools=[SimpleNamespace(tool_id=AUTOMATION_PROPOSAL_TOOL)],
+    )
+    snapshot.models = ModelBindings(llm=RunModelBinding(model_id=21, alias="root", revision="v1"))
+    request = AgentRequest.model_validate({
+        **PAYLOAD.request, "entrypoint": "workbench", "enable_automation_tool": True,
+    })
+
+    result = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
+
+    assert operations == ["stage", "start", "confirm"]
+    assert prepared_turn.store.stage_turn.call_args.args[5]["automation"]["model_id"] == 21
+    assert result.headers["run_id"] == REFERENCE.run_id
 
 
 @pytest.mark.asyncio

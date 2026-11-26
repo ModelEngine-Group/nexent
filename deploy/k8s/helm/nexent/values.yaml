@@ -1,13 +1,14 @@
 # Default values for nexent helm chart.
 global:
-  # Kubernetes SYSTEM execution is opt-in; multi-Runtime admission stays gated.
+  # Kubernetes SYSTEM execution is opt-in.
   sandboxProvider: "docker"
   # Only for local verification; sandbox Pods stay on the Runtime node.
   sandboxSingleNodeDevelopment: false
   # Confirm only after the target cluster passes the network-policy negative probe.
   sandboxNetworkPolicyVerified: false
-  # Deployment scripts keep business Pods stopped until the bootstrap Job succeeds.
+  # Deployment scripts keep business Pods stopped until bootstrap succeeds.
   businessPaused: false
+  bootstrapRunId: ""
   systemBootstrapTimeoutSeconds: 1800
   namespace: nexent
   dataDir: "/var/lib/nexent-data"

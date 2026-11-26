@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: NEXENT-CONFIG-STATE-D3-001
+  feature_id: NEXENT-SERVICE-REPLICAS
+  requirement_ids:
+  - NEXENT-FIXED-REPLICAS-20261106
+  business_rule_ids:
+  - NEXENT-SERVICE-REPLICAS-RULE-08
+  title: 跨 Config 的配置、配额与文件发布保持权威一致
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明真实 DB/共享文件与鉴权路径能让不同 Config 读取同一配置并在并发配额边界安全接纳。
+  preconditions:
+  - 产品和本 Case 固定脚本/执行绑定尚未实现，当前阻塞；实施后仅使用本次拥有的独立实例和专属 DB/Redis 数据域。
+  - Config A/B 使用真实 PostgreSQL、Redis、对象存储和共享卷；普通 JWT/内部签名使用同一套测试 Secret，不运行 CAS/OAuth 用户旅程。
+  - 可指定访问 A/B，另行验证稳定 Service；测试凭据与连接参数在机器本地配置，输出脱敏。
+  test_data:
+    config: 测试租户、模型档案、权限、Skill/插件/仓库文件；版本与校验和逐次记录。
+    quota: 专属租户设置仅够一份操作的空间/对象配额，在 A/B 预先建立缓存。
+    preparation: 现有准备目录没有多应用副本集群工厂；实施时补齐真实 families 或自包含准备依据，当前不虚构支持。
+  steps:
+  - order: 1
+    action: 通过 A 修改租户、模型档案和权限，在 B 通过实际鉴权读取/使用；再反向修改。
+    expected: 需要权威读取的路径在提交后见到当前事实；模型目录缓存按版本收敛；撤销权限后的操作被拒绝，不依赖单 Pod 本地状态。
+  - order: 2
+    action: 在配额仅够一份的边界，用 A/B 屏障并发提交两份占用，故意保留一个实例的旧 usage cache。
+    expected: 共享权威事务仅允许符合总配额的占用；本地缓存不能放大限额；被拒请求没有业务对象/存储副作用。
+  - order: 3
+    action: 并发安装或更新同名 Skill、插件和仓库文件；交错读取并制造一次写入失败。
+    expected: 读者只读到完整版本或明确失败；写入锁/版本条件防止静默覆盖；DB 与文件失败有可识别状态和可重试补偿。
+  - order: 4
+    action: 轮流经 A/B 验证同一正常 JWT、内部 token 与跨租户访问，再重启一个实例并复核文件/密钥。
+    expected: 合法操作兼容，越权被拒；重启不重置配置/密钥或损坏共享文件，正常请求不受实例选择影响。
+  - order: 5
+    action: 释放本次配额、配置与文件，停止实例并检查测试目录/对象和连接。
+    expected: 本次余额回到初值，无临时锁、半写文件或连接遗留；未拥有的数据与外部卷保留。
+  expected_results:
+  - 配置/权限与共享版本跨实例正确可见，鉴权和密钥兼容。
+  - 并发接纳不超配额；文件发布完整，失败可补偿且没有静默丢更新。
+  - 配额和全部本次资源释放，外部数据保持原样。
+  forbidden_side_effects:
+  - 以 Redis/本地 usage cache 作为唯一配额接纳依据，或通过增加副本放大上限。
+  - 泄露其他租户配置/文件、重写密钥、半写共享文件或覆盖未基于当前版本的修改。
+  - 为清理执行全局 Redis/PVC 清空或删除其他用户文件。
+  acceptance:
+  - id: AC-APP-008
+    description: Config 配置/权限/Skill 跨实例可见，配额依赖权威事务；共享卷/日志/密钥及启用的辅助服务满足副本契约，总资源不超预算。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  tags:
+  - phase-2
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本、执行绑定与隔离准备/清理能力尚未实现。
+    primary_domain: system
+    preparation_plan: 测试独占 A/B 实例、DB/Redis 键域与本次身份/对象；受控协议仅替代外部提供者；记录资源 owner 和前置检查。
+    cleanup_plan: finally 停止本次运行/worker/连接，按本次标识回收数据/实例；核对无锁/预约/对象遗留，不清空外部 PVC/共享 Redis。
+  integration_boundary:
+  - 两个 Config→真实 JWT/权限与配置服务→共享 PostgreSQL 事务/目录版本→对象存储和共享文件发布。
+  observations:
+  - A/B 的版本/内容/权限响应、配额占用总和及拒绝后的副作用计数、对象/文件校验和、锁/连接与清理前后差异。
+  cleanup:
+  - 按测试资源标签关闭本次实例、连接与后台任务，回收本次数据及临时文件；保留外部基础设施与卷，并核对未拥有数据校验和。

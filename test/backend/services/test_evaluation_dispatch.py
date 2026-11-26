@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from contracts.errors.exceptions import AppException
 from contracts.evaluation import EvalRunStatus
 from management.services.evaluation import dispatch as service, execution
-from management.services.evaluation.dispatch import dispatch_agent_evaluation_run
+from management.services.evaluation.dispatch import EvaluationSubmissionError, dispatch_agent_evaluation_run
 
 
 def test_dispatch_claims_pending_run_and_submits_management_worker(monkeypatch):
@@ -167,7 +167,7 @@ def test_dispatch_maps_management_pool_submission_failure(monkeypatch):
 
     release = MagicMock()
     monkeypatch.setattr(service, "release_agent_evaluation_claim", release)
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(EvaluationSubmissionError) as exc_info:
         dispatch_agent_evaluation_run(7, "u1", "t1")
 
     assert exc_info.value.status_code == 500

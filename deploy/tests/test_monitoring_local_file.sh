@@ -89,29 +89,33 @@ case "$(get_third_party_images)" in *opentelemetry-collector-contrib*) ;; *) fai
 
 # Render actual Helm templates without contacting a cluster.
 CHART="$SCRIPT_DIR/../k8s/helm/nexent"
-helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only > "$TEST_DIR/default.yaml"
-helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+render_chart() {
+  helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+    --set nexent-runtime.replicaCount=1 --set global.sandboxProvider=docker "$@"
+}
+render_chart > "$TEST_DIR/default.yaml"
+render_chart \
   --set global.monitoring.localFileEnabled=false --set global.monitoring.enabled=false > "$TEST_DIR/disabled.yaml"
-helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+render_chart \
   --set global.monitoring.localFileEnabled=false --set global.monitoring.provider=otlp \
   --set global.monitoring.enabled=true --set nexent-monitoring.enabled=true > "$TEST_DIR/remote_only.yaml"
 for provider in otlp phoenix langfuse langsmith; do
-  helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+  render_chart \
     --set global.monitoring.enabled=true --set global.monitoring.provider="$provider" \
     --set nexent-monitoring.enabled=true --set nexent-monitoring.phoenix.enabled=true \
     --set nexent-monitoring.langfuse.enabled=true > "$TEST_DIR/$provider.yaml"
 done
 for provider in local_file grafana zipkin both; do
-  if helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+  if render_chart \
     --set global.monitoring.provider="$provider" --set nexent-monitoring.enabled=true > "$TEST_DIR/rejected.log" 2>&1; then
     fail "Helm accepted removed provider: $provider"
   fi
 done
-if helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+if render_chart \
   --set global.monitoring.provider=local_file > "$TEST_DIR/rejected.log" 2>&1; then
   fail "Helm accepted the removed provider without the monitoring chart"
 fi
-helm template test "$CHART" --set nexent-common.secrets.jwtSecret=synthetic-test-only \
+render_chart \
   --set global.monitoring.trajectoryRootDir=/custom/trajectory > "$TEST_DIR/custom.yaml"
 "$PROJECT_ROOT/backend/.venv/bin/python" - "$TEST_DIR" "$PROJECT_ROOT" <<'PY'
 import sys

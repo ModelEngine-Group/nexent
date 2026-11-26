@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-AUTOSCALING-20261105
+  change_type: requirement
+  requirement_id: RUNTIME-AUTOSCALING-20261105
+  title: Runtime 第三阶段：自动扩缩容与在线排空
+  description: '依赖第一、二阶段验收；按逐 Pod 指标 HPA 伸缩，增加有限排空和失联 owner 收敛；其他应用保持固定副本。本次仅设计，SPEC: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md。'
+  affected_features:
+    existing: []
+    added:
+    - RUNTIME-AUTOSCALING
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - RUNTIME-METRICS-D3-001
+    - RUNTIME-AUTOSCALE-D5-001
+    - RUNTIME-DRAIN-RECOVERY-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 逐 Pod 周期指标、根运行去重、零值刷新、准备/收尾与过期样本语义。
+    - 自动伸缩配置、上下界、模式互斥及维护冻结失败路径。
+    - 关闭新接纳但保留控制 I/O、收尾后释放、排空截止、失联判定、定向收敛和旧 owner/旧代次拒绝。
+    reason: 现有线程诊断和取消式 drain 不提供 HPA、自然排空和实例失联协议；需新增状态与配置规则的 UT，并保留既有线程/生命周期测试。真实控制器和故障由 D3/D5 证明。
+  notes: Feature planned，Case blocked，尚无脚本/绑定或运行通过证据。默认责任 runtime；停机部署、共享存储、HPA Case 归 deployment，调度 Case 归 task。未增加
+    D1，保留历史全部 D1；D4 无新增用户流程。设计验证仅证明结构与引用一致，实施后补齐真实选择器、准备/清理与逐 AC 断言证据。

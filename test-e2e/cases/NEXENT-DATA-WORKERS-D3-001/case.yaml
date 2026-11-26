@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: NEXENT-DATA-WORKERS-D3-001
+  feature_id: NEXENT-SERVICE-REPLICAS
+  requirement_ids:
+  - NEXENT-FIXED-REPLICAS-20261106
+  business_rule_ids:
+  - NEXENT-SERVICE-REPLICAS-RULE-02
+  - NEXENT-SERVICE-REPLICAS-RULE-06
+  title: 多 Data Process 的本地预热和文件版本提交不相互冒领
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明真实 Redis/Celery 多 worker 对本地 readiness、文件处理生命周期与摘要的跨进程协调。
+  preconditions:
+  - 产品和本 Case 固定脚本/执行绑定尚未实现，当前阻塞；实施后仅使用本次拥有的独立实例和专属 DB/Redis 数据域。
+  - Data Process A/B 与真实 Celery children、外部 Redis broker/backend、PostgreSQL、对象存储及搜索写入路径；不替换被测 worker 或文件 CAS。
+  - 可指定访问 A/B，另行验证稳定 Service；测试凭据与连接参数在机器本地配置，输出脱敏。
+  test_data:
+    identity: 刻意创建两个容器中相同 child PID、不同 Pod/generation；指定 warmup 控制队列。
+    files: 专属知识库同文件两个版本、重复投递/迟到任务、取消/删除墓碑，parse/process/forward 各阶段屏障。
+    preparation: 现有准备目录没有多应用副本集群工厂；实施时补齐真实 families 或自包含准备依据，当前不虚构支持。
+  steps:
+  - order: 1
+    action: 同时启动 A/B，使 child PID 重合并阻塞 A 的预热，让 B 完成；再完成 A；重启 A 产生新 generation。
+    expected: B 预热不使 A Ready；各控制任务只被所属 worker 消费；Ready 要求本 Pod 当前 generation 的全部目标 child，旧标记失效。
+  - order: 2
+    action: 向共享业务队列提交一组文件并对同 file/version 重复投递，交错解析、聚合与转发。
+    expected: A/B 能分担工作；每版本仅一次有效提交，确定性对象/索引结果不重复；实际 ACK/故障语义明确，不宣称恰好一次。
+  - order: 3
+    action: 在 parse/process/forward 各边界交错更新版本、取消和删除，并释放旧 attempt 的迟到提交。
+    expected: 旧版本/attempt 不覆盖新结果；删除墓碑阻止文件复活；取消后无新的有效转发或摘要提交。
+  - order: 4
+    action: A 执行文件/上传时重启 B；并从 A/B 同时触发同一输入版本的手动和自动摘要。
+    expected: B 不全局失败 A 的任务或清理上传；摘要共享预约只允许一个有效结果，输入变化和旧 owner 提交被校验。
+  - order: 5
+    action: 等待所有本次 Celery children/队列任务结束，删除本次文件/索引/摘要并停止实例。
+    expected: 本次无活动任务、预约、预热标记或临时对象，外部 broker/PVC 及其他数据保留。
+  expected_results:
+  - 每 Pod/代次本地预热正确；共享队列在多 worker 下实际分担。
+  - 文件版本/attempt、取消/删除/转发和摘要保持唯一有效结果，迟到结果不能复活旧文件。
+  - 单实例启动不恢复健康任务，清理完整。
+  forbidden_side_effects:
+  - 用其他 Pod 的 PID/预热任务使本 Pod Ready，或把 prefork child autoscale 当作容器伸缩。
+  - 盲改 ACK 选项声称恰好一次、迟到写入覆盖新版本/删除墓碑、摘要重复提交。
+  - 重启全局恢复其他 worker、清理他人上传、清空共享队列/外部存储。
+  acceptance:
+  - id: AC-APP-002
+    description: Config/Northbound/Data Process 普通启动不执行全局恢复、上传清理或重复迁移；维护失败保持停止，健康 owner 的任务不变。
+    steps:
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  - id: AC-APP-006
+    description: Data Process 多 worker 共享队列但预热只指向本实例；file/version/attempt 条件提交，取消/删除与摘要只产生唯一有效结果。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  tags:
+  - phase-2
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本、执行绑定与隔离准备/清理能力尚未实现。
+    primary_domain: knowledge
+    preparation_plan: 测试独占 A/B 实例、DB/Redis 键域与本次身份/对象；受控协议仅替代外部提供者；记录资源 owner 和前置检查。
+    cleanup_plan: finally 停止本次运行/worker/连接，按本次标识回收数据/实例；核对无锁/预约/对象遗留，不清空外部 PVC/共享 Redis。
+  integration_boundary:
+  - Data Process A/B API→真实 Redis broker/backend→多个 Celery prefork worker→文件生命周期 DB/对象与索引→摘要共享预约。
+  observations:
+  - Pod/generation/child 与 warmup 消费者、队列分配、file/version/attempt/owner、对象/索引数、墓碑及摘要输入版本、上传哨兵。
+  cleanup:
+  - 按测试资源标签关闭本次实例、连接与后台任务，回收本次数据及临时文件；保留外部基础设施与卷，并核对未拥有数据校验和。

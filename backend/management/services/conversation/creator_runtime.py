@@ -6,6 +6,7 @@ import json
 import logging
 import time
 import uuid
+from concurrent.futures import Future
 from contextlib import suppress
 from threading import Event
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from redis.exceptions import RedisError
 from contracts.errors.exceptions import (
     AgentRunAlreadyActiveError,
     RuntimeCapacityExceededError,
+    RuntimeCoordinationUnavailableError,
     RuntimeQueueTimeoutError,
 )
 from infrastructure.agent_stream_channels import streaming_channel_manager
@@ -28,10 +30,13 @@ from management.db.conversation.repository import (
     get_conversation_history,
     get_message_units,
 )
-from infrastructure.redis.run_state import runtime_state_service
+from infrastructure.redis.run_state import creator_runtime_state_service as runtime_state_service
+from management.services.agent.admission import shutdown_creator_settlements
+from management.services.agent.control import get_owned_execution
+from management.services.agent.replay import ExecutionReplayUnavailable, follow_execution_replay
 from nexent.core.agents.orchestration.entry import DeferredAgentRun
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope, run_blocking
-from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadQueueTimedOut
+from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadManagerError, ThreadQueueTimedOut
 
 logger = logging.getLogger(__name__)
 class CreatorExecutionRegistry(LocalExecutionRegistry):
@@ -41,6 +46,33 @@ class CreatorExecutionRegistry(LocalExecutionRegistry):
 agent_run_manager = CreatorExecutionRegistry()
 _producers: set[asyncio.Task] = set()
 _request_claims: dict[str, float] = {}
+
+
+async def wait_creator_step(operation):
+    """Let a submitted preparation write settle before unwinding its owner."""
+    task = asyncio.create_task(operation)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled():
+            task.exception()
+        raise
+
+
+async def required_creator_redis(operation, *args, **kwargs):
+    try:
+        if not runtime_state_service.enabled:
+            raise RuntimeError("Runtime Redis is disabled")
+        return await operation(*args, **kwargs)
+    except Exception as exc:
+        raise RuntimeCoordinationUnavailableError("Creator Redis coordination is unavailable") from exc
 
 
 async def claim_request(key, ttl):
@@ -72,6 +104,24 @@ class CreatorControl:
         self.deferred = DeferredAgentRun()
         self.execution = None
         self.info = None
+        self.durable = None
+        self.transport_done = Future()
+        self.producer_started = False
+
+    def close_transport(self):
+        if not self.transport_done.done():
+            self.transport_done.set_result(None)
+
+    def bind_reservation(self, reservation):
+        self.durable = reservation
+        self.generation = reservation.run_id
+
+    async def is_cancelled(self, conversation_id, user_id):
+        if self.durable is not None:
+            return await runtime_state_service.is_execution_cancelled_async(
+                user_id, conversation_id, self.durable.run_id, self.generation,
+            )
+        return await runtime_state_service.is_cancelled_async(user_id, conversation_id)
 
     def configure(self, info):
         self.info = info
@@ -101,8 +151,8 @@ class CreatorControl:
 
         return asyncio.create_task(renew())
 
-    async def admit(self):
-        if self.info is None:
+    async def admit(self, *, early=False):
+        if self.execution is not None or (self.info is None and not early):
             return
         try:
             self.execution = runtime_thread_manager.submit(
@@ -142,12 +192,16 @@ class CreatorControl:
         )
 
 
-async def claim_creator(conversation_id, user_id, generation):
+async def claim_creator(conversation_id, user_id, generation, *, execution_id=None):
     reservation = agent_run_manager.reserve_agent_run(conversation_id, user_id)
     try:
-        if not await runtime_state_service.claim_creator_run_async(
-            user_id, conversation_id, generation
-        ):
+        claim = runtime_state_service.claim_creator_run_async
+        args = (user_id, conversation_id, generation)
+        claimed = (
+            await required_creator_redis(claim, *args, execution_id=execution_id)
+            if execution_id is not None else await claim(*args)
+        )
+        if not claimed:
             raise AgentRunAlreadyActiveError(
                 "Creator conversation already has an active execution"
             )
@@ -171,6 +225,7 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
     )
     channel.generation = control.generation
     channel.is_creator = True
+    channel.durable_replay = control.durable is not None
     info = control.registered_info()
     agent_run_manager.register_agent_run(conversation_id, info, user_id, reservation)
     started = asyncio.Event()
@@ -178,6 +233,47 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
     async def produce():
         status = "completed"
         producer = asyncio.current_task()
+
+        async def finalize():
+            nonlocal status
+
+            def release(_future=None):
+                agent_run_manager.unregister_agent_run(
+                    conversation_id, user_id, status, agent_run_info=info
+                )
+
+            try:
+                try:
+                    await stream.aclose()
+                except Exception:
+                    status = "failed"
+                    logger.exception("Creator stream cleanup failed conversation_id=%s", conversation_id)
+                channel.complete(status)
+                event_count = channel.durable_event_count
+                await runtime_state_service.mark_stream_completed_async(
+                    user_id, conversation_id, status, generation=control.generation,
+                    **({"event_count": event_count} if event_count is not None else {}),
+                )
+                await runtime_state_service._run_managed(
+                    "creator-finish", runtime_state_service.mark_run_finished,
+                    user_id, conversation_id, status, control.generation,
+                )
+            finally:
+                try:
+                    await streaming_channel_manager.remove_channel(
+                        conversation_id, user_id, expected_channel=channel
+                    )
+                finally:
+                    try:
+                        if control.execution is not None and not control.execution.future.done():
+                            control.execution.future.add_done_callback(release)
+                        else:
+                            release()
+                    finally:
+                        if control.durable is not None:
+                            control.close_transport()
+                            control.durable.outcome = status
+                            control.durable.close()
 
         async def watch_cancel():
             try:
@@ -188,9 +284,7 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
                     if (
                         not alive
                         or control.stop_event.is_set()
-                        or await runtime_state_service.is_cancelled_async(
-                            user_id, conversation_id
-                        )
+                        or await control.is_cancelled(conversation_id, user_id)
                     ):
                         control.cancel()
                         producer.cancel()
@@ -242,44 +336,13 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
             watcher.cancel()
             with suppress(asyncio.CancelledError):
                 await watcher
-
-            def release(_future=None):
-                agent_run_manager.unregister_agent_run(
-                    conversation_id, user_id, status, agent_run_info=info
-                )
-
-            try:
-                try:
-                    await stream.aclose()
-                except Exception:
-                    status = "failed"
-                    logger.exception(
-                        "Creator stream cleanup failed conversation_id=%s",
-                        conversation_id,
-                    )
-                channel.complete(status)
-                await runtime_state_service.mark_stream_completed_async(
-                    user_id, conversation_id, status, generation=control.generation
-                )
-                await runtime_state_service._run_managed(
-                    "creator-finish", runtime_state_service.mark_run_finished,
-                    user_id, conversation_id, status, control.generation,
-                )
-            finally:
-                try:
-                    await streaming_channel_manager.remove_channel(
-                        conversation_id, user_id, expected_channel=channel
-                    )
-                finally:
-                    if (
-                        control.execution is not None
-                        and not control.execution.future.done()
-                    ):
-                        control.execution.future.add_done_callback(release)
-                    else:
-                        release()
+            if control.durable is not None:
+                await wait_creator_step(finalize())
+            else:
+                await finalize()
 
     task = asyncio.create_task(produce())
+    control.producer_started = True
     _producers.add(task)
 
     def finished(completed):
@@ -296,6 +359,44 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
     # immediate shutdown executes its terminal persistence and ownership cleanup.
     await started.wait()
     return channel.subscribe_with_history(0, include_replay_checkpoint=True)
+
+
+async def resume_owned_creator(conversation_id, user_id, tenant_id, execution_id, snapshot, message_id, *, agent_scope):
+    """Replay an owned Creator generation without ever recovering or mutating the producer."""
+    last_index = -1
+    unavailable = False
+
+    async def is_active():
+        current = await get_owned_execution(
+            tenant_id, user_id, conversation_id, agent_scope=agent_scope, active_only=True,
+        )
+        return current is not None and current[0] == execution_id and await runtime_state_service.creator_lease_async(
+            user_id, conversation_id, snapshot["generation"],
+        )
+
+    if snapshot is not None and (snapshot["checkpoint"] is not None or not snapshot["terminal_status"]):
+        try:
+            async for frame, _outcome in follow_execution_replay(
+                runtime_state_service, user_id, conversation_id, execution_id, snapshot, is_active=is_active,
+            ):
+                if frame is None:
+                    return
+                for line in frame.splitlines():
+                    if line.startswith("data: "):
+                        last_index = max(last_index, json.loads(line[6:]).get("unit_index", -1))
+                yield frame
+        except (RedisError, ThreadManagerError, RuntimeCoordinationUnavailableError, ExecutionReplayUnavailable):
+            unavailable = True
+
+    if message_id is not None:
+        units = await run_blocking("creator-owned-resume-units", get_message_units, message_id)
+        context = {}
+        for unit in units:
+            event = unit_event(unit, context)
+            if unit["unit_index"] > last_index:
+                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+    if unavailable:
+        yield 'data: {"type":"error","content":"Shared Creator replay unavailable; showing saved history."}\n\n'
 
 
 async def resume_creator(conversation_id, user_id):
@@ -478,10 +579,12 @@ async def stop_creator(conversation_id, user_id, expected_generation=None):
 
 
 async def shutdown_creator_streams(timeout):
-    """Cancel owned producers before the runtime thread manager shuts down."""
+    """Cancel producers and join settlements before the thread manager shuts down."""
+    deadline = time.monotonic() + max(0, timeout)
     pending = list(_producers)
     for task in pending:
         task.cancel()
     if pending:
-        await asyncio.wait(pending, timeout=max(0, timeout))
-    return sum(not task.done() for task in pending)
+        await asyncio.wait(pending, timeout=max(0, deadline - time.monotonic()))
+    pending_settlements = await shutdown_creator_settlements(deadline - time.monotonic())
+    return pending_settlements + sum(not task.done() for task in pending)
