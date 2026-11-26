@@ -997,7 +997,7 @@ class _ToolBridge:
 
     def _bridge_host(self) -> str:
         """Return the runtime address reachable from the sandbox container."""
-        return "nexent-runtime" if _is_containerized_runtime() else "host.docker.internal"
+        return SANDBOX_RUNTIME_ALIAS if _is_containerized_runtime() else "host.docker.internal"
 
     def proxy_code(self, tools: dict[str, Any], bridge_host: Optional[str] = None) -> str:
         validate_callable_names(tools)
@@ -1385,6 +1385,7 @@ def cleanup_executor(executor: Any, logger_: logging.Logger, timeout: float = 5.
 
 SANDBOX_CONTAINER_NAME = "nexent-runtime-sandbox"
 SANDBOX_NETWORK_NAME = "nexent_sandbox_control"
+SANDBOX_RUNTIME_ALIAS = "nexent-runtime"
 SANDBOX_JUPYTER_PORT = 8888
 SANDBOX_SESSION_CONTAINER_PREFIX = "nexent-runtime-sandbox-session"
 SANDBOX_NAMESPACE_LABEL = "com.nexent.sandbox.namespace"
@@ -1483,7 +1484,7 @@ def _ensure_sandbox_control_network(client: Any, network_name: str = SANDBOX_NET
         runtime_container = client.containers.get(socket.gethostname())
         connected = (network.attrs or {}).get("Containers") or {}
         if runtime_container.id not in connected:
-            network.connect(runtime_container)
+            network.connect(runtime_container, aliases=[SANDBOX_RUNTIME_ALIAS])
             network.reload()
     return network
 

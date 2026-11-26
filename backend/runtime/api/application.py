@@ -20,7 +20,7 @@ from runtime.agentos.debug import stop_agentos_debug
 from runtime.agentos.ephemeral import create_ephemeral_run_router
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
-from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from infrastructure.system_configuration.runtime import (
     start_system_configuration,
@@ -87,18 +87,21 @@ async def runtime_lifespan(_app):
                     close_hook=local_trajectory_processor.request_stop,
                 ),
             )
-        await runtime_thread_manager.run(
-            "control-io",
-            ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
-            fail_detecting_models_on_startup,
-        )
-        await recover_runtime_state()
-        reconciler = asyncio.create_task(watch_executions(runtime_thread_manager))
+        reconciler = None
+        if not EVOLUTION_REPLAY_RUNTIME:
+            await runtime_thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
+                fail_detecting_models_on_startup,
+            )
+            await recover_runtime_state()
+            reconciler = asyncio.create_task(watch_executions(runtime_thread_manager))
         try:
             yield
         finally:
-            reconciler.cancel()
-            await asyncio.gather(reconciler, return_exceptions=True)
+            if reconciler is not None:
+                reconciler.cancel()
+                await asyncio.gather(reconciler, return_exceptions=True)
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 
@@ -135,12 +138,13 @@ async def runtime_lifespan(_app):
                             clear_default_thread_manager(runtime_thread_manager)
 
 
-local_trajectory_processor = configure_runtime_trajectory()
+local_trajectory_processor = None if EVOLUTION_REPLAY_RUNTIME else configure_runtime_trajectory()
 
 app = create_app(
     title="Nexent Runtime API",
     description="Runtime APIs",
     lifespan=runtime_lifespan,
+    enable_monitoring=not EVOLUTION_REPLAY_RUNTIME,
     gateway_identity_audience="runtime",
 )
 if hasattr(app, "state"):
@@ -157,10 +161,11 @@ app.add_middleware(ExceptionHandlerMiddleware)
 app.add_middleware(AgentOSMiddleware)
 
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
-app.include_router(create_memory_store_router())
-app.include_router(create_model_administration_router())
 app.include_router(create_evaluation_router())
-app.include_router(create_run_lifecycle_router())
-app.include_router(create_prepared_run_router())
-app.include_router(create_ephemeral_run_router())
-app.include_router(voice_router)
+if not EVOLUTION_REPLAY_RUNTIME:
+    app.include_router(create_memory_store_router())
+    app.include_router(create_model_administration_router())
+    app.include_router(create_run_lifecycle_router())
+    app.include_router(create_prepared_run_router())
+    app.include_router(create_ephemeral_run_router())
+    app.include_router(voice_router)

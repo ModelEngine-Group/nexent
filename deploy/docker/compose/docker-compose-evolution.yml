@@ -1,0 +1,53 @@
+# Overlay for an existing Docker deployment. Use with docker-compose.yml or docker-compose.prod.yml.
+# Run Compose with deploy/env/.env as the interpolation environment, and include this file on upgrades.
+services:
+  nexent-config:
+    environment:
+      MONITORING_PROVIDER: local_file
+      NEXENT_EVOLUTION_REPLAY_RUNTIME_URL: http://nexent-evolution-replay:5014
+
+  nexent-runtime:
+    environment:
+      MONITORING_PROVIDER: local_file
+      ENABLE_TELEMETRY: "true"
+      NEXENT_EVOLUTION_REPLAY_RUNTIME: "false"
+
+  nexent-evolution-replay:
+    image: ${NEXENT_RUNTIME_IMAGE:-nexent/nexent-runtime:latest}
+    restart: always
+    env_file:
+      - ../../env/.env
+    environment:
+      GATEWAY_AUTH_ENABLED: "true"
+      NEXENT_SQL_STARTUP_MODE: "off"
+      NEXENT_EVOLUTION_REPLAY_RUNTIME: "true"
+      NEXENT_EVOLUTION_CONFIRMATION_BUCKET: ""
+      MONITORING_PROVIDER: otlp
+      ENABLE_TELEMETRY: "false"
+      OPS_MONITORING_ENABLED: "false"
+      TRAJECTORY_READ_ENABLED: "false"
+      AGENT_WORKSPACE_ROOT: /mnt/nexent-replay/workdir
+      NEXENT_SANDBOX_WORKSPACE_VOLUME: nexent-evolution-replay-workspace
+      NEXENT_SANDBOX_DOCKER_NAMESPACE: evolution-replay
+      NEXENT_SANDBOX_WORKSPACE_MODE: legacy
+      NEXENT_SANDBOX_FAILURE_POLICY: error
+      skip_proxy: "true"
+      UMASK: "0022"
+    volumes:
+      - nexent_evolution_replay_workspace:/mnt/nexent-replay/workdir
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Same sandbox control boundary as the business Runtime.
+    depends_on:
+      nexent-config:
+        condition: service_healthy
+    networks:
+      - nexent
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.runtime_service"]
+
+volumes:
+  nexent_evolution_replay_workspace:
+    name: nexent-evolution-replay-workspace

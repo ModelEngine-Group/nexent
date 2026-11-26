@@ -94,5 +94,27 @@ for file in ('docker-compose.yml', 'docker-compose.prod.yml'):
     compose = yaml.safe_load((Path(sys.argv[2]) / 'deploy/docker/compose' / file).read_text())
     for name in ('nexent-runtime', 'nexent-config'):
         assert '${ROOT_DIR}/trajectory:${TRAJECTORY_ROOT_DIR:-/mnt/nexent-data/trajectory}' in compose['services'][name]['volumes']
+compose = yaml.safe_load((Path(sys.argv[2]) / 'deploy/docker/compose/docker-compose-evolution.yml').read_text())
+overlay = compose['services']
+management = overlay['nexent-config']['environment']
+runtime = overlay['nexent-runtime']['environment']
+replay = overlay['nexent-evolution-replay']
+assert management['MONITORING_PROVIDER'] == runtime['MONITORING_PROVIDER'] == 'local_file'
+assert runtime['ENABLE_TELEMETRY'] == 'true'
+assert runtime['NEXENT_EVOLUTION_REPLAY_RUNTIME'] == 'false'
+assert management['NEXENT_EVOLUTION_REPLAY_RUNTIME_URL'] == 'http://nexent-evolution-replay:5014'
+assert replay['environment']['NEXENT_EVOLUTION_REPLAY_RUNTIME'] == 'true'
+assert replay['environment']['NEXENT_EVOLUTION_CONFIRMATION_BUCKET'] == ''
+assert replay['environment']['ENABLE_TELEMETRY'] == replay['environment']['TRAJECTORY_READ_ENABLED'] == 'false'
+assert replay['environment']['OPS_MONITORING_ENABLED'] == 'false'
+assert 'ports' not in replay
+assert replay['networks'] == ['nexent']
+assert set(replay['volumes']) == {
+    'nexent_evolution_replay_workspace:/mnt/nexent-replay/workdir',
+    '/var/run/docker.sock:/var/run/docker.sock:ro',
+}
+assert replay['environment']['NEXENT_SANDBOX_DOCKER_NAMESPACE'] == 'evolution-replay'
+assert replay['environment']['NEXENT_SANDBOX_FAILURE_POLICY'] == 'error'
+assert compose['volumes']['nexent_evolution_replay_workspace']['name'] == replay['environment']['NEXENT_SANDBOX_WORKSPACE_VOLUME']
 PY
 printf 'All local_file deployment option tests passed.\n'

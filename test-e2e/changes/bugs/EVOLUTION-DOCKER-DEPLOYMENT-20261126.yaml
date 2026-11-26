@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: EVOLUTION-DOCKER-DEPLOYMENT-20261126
+  change_type: bugfix
+  bug_id: EVOLUTION-DOCKER-DEPLOYMENT-20261126
+  title: 应用部署接通自演进取证与开发回放
+  description: Docker 自演进部署同时配置共享本地轨迹和无公开端口的开发回放 Runtime。
+  observed_behavior: 浏览器可登记 Skill 建议，但开发评测缺少回放地址。标准 Compose 未提供独立回放服务，普通部署默认也不采集本地轨迹。接入回放后，Docker 沙箱按主 Runtime 的 DNS 名访问工具桥，独立回放收不到工具调用。
+  expected_behavior: 应用部署叠加自演进配置后，Management 可从授权的本地轨迹出题，并通过独立 Runtime 执行开发评测。回放进程不接管正式会话恢复，沙箱工具回调只到达所属控制网络上的 Runtime。
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_boundary
+    description: 已有用例分别验证无 Ops 取证和回放恢复，却未验证 Docker 将管理服务、共享轨迹与独立回放接通。
+  feature_contract_changed: false
+  affected_features:
+    existing: [AGENT-EVOLUTION-ONLINE, AGENT-EVOLUTION-REPLAY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-DEVELOPMENT-RECOVERY-D5-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/app/test_runtime_application_lifespan.py
+    - test/backend/services/test_evolution_replay.py
+    - test/sdk/core/agents/test_sandbox.py
+    behaviors:
+    - 回放进程保留试跑和模型能力及资源清理，不启动正式会话恢复、轨迹采集或语音服务。
+    - 普通 Runtime 拒绝开发试跑，回放 Runtime 拒绝普通评测请求，均在装配资源前拒绝。
+    - 普通及独立回放的控制网络为各自的 Runtime 注入工具桥使用的 DNS 别名。
+    reason: 在已有测试中覆盖普通模式、回放模式和不匹配请求。部署连通性另用隔离服务验证。
+  notes: See nexent-doc/docs/Developing/management-agent-self-evolution/design.md, section 7.1. Reuse existing functional cases and verify the Compose wiring separately in an isolated Docker environment.

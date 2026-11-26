@@ -324,19 +324,21 @@ class TestSandboxSkillScriptRunner:
         assert sandbox_module._ensure_sandbox_control_network(client) is network
         network.connect.assert_not_called()
 
-    def test_internal_network_attaches_containerized_runtime_when_missing(self, monkeypatch):
+    @pytest.mark.parametrize("namespace", ["", "evolution-replay"])
+    def test_internal_network_attaches_containerized_runtime_when_missing(self, monkeypatch, namespace):
         network = MagicMock(attrs={"Internal": True, "Containers": {}})
-        runtime_container = SimpleNamespace(id="runtime-id")
+        runtime_container = SimpleNamespace(id="runtime-id", name=namespace or "nexent-runtime")
         client = MagicMock()
         client.networks.get.return_value = network
         client.containers.get.return_value = runtime_container
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
         monkeypatch.setattr(sandbox_module.socket, "gethostname", lambda: "runtime-host")
 
-        assert sandbox_module._ensure_sandbox_control_network(client) is network
+        network_name = sandbox_module._namespaced_sandbox_name(sandbox_module.SANDBOX_NETWORK_NAME, namespace)
+        assert sandbox_module._ensure_sandbox_control_network(client, network_name) is network
 
         client.containers.get.assert_called_once_with("runtime-host")
-        network.connect.assert_called_once_with(runtime_container)
+        network.connect.assert_called_once_with(runtime_container, aliases=["nexent-runtime"])
         assert network.reload.call_count == 2
 
     def test_attach_sandbox_reuses_existing_control_network_membership(self, monkeypatch):

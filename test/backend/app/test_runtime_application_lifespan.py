@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[3] / "backend"
 
@@ -60,7 +62,8 @@ class RuntimeThreadManager:
         return {"service_name": "runtime", "active_count": 0}
 
 
-def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
+@pytest.mark.parametrize("replay_only", [False, True])
+def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch, replay_only):
     start_configuration = AsyncMock()
     stop_configuration = AsyncMock()
     monkeypatch.setitem(
@@ -75,7 +78,8 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
         "contracts.constants.environment",
-        _module("contracts.constants.environment", RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1),
+        _module("contracts.constants.environment", RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1,
+                EVOLUTION_REPLAY_RUNTIME=replay_only),
     )
     manager = RuntimeThreadManager()
     shutdown_streams = AsyncMock(return_value=[])
@@ -203,22 +207,31 @@ def test_runtime_lifespan_owns_configuration_recovery_and_shutdown(monkeypatch):
     start_configuration.assert_awaited_once()
     configuration_io = start_configuration.call_args.args[0]
     assert asyncio.run(configuration_io(lambda: "loaded")) == "loaded"
-    trajectory_processor.start.assert_called_once()
-    assert trajectory_processor.start.call_args.args[0] is manager
-    assert (
-        trajectory_processor.deleted_conversation_check is conversation_deleted
-    )
-    trajectory_processor.request_stop.assert_called_once_with()
-    trajectory_processor.shutdown.assert_called_once_with()
-    recover_models.assert_called_once_with()
-    recover.assert_called_once_with()
-    cleanup.assert_called_once_with()
+    assert len(application.app.routers) == (2 if replay_only else 8)
+    if replay_only:
+        assert application.local_trajectory_processor is None
+        trajectory_processor.start.assert_not_called()
+        trajectory_processor.shutdown.assert_not_called()
+        recover_models.assert_not_called()
+        recover.assert_not_called()
+        watch.assert_not_called()
+        cleanup.assert_not_called()
+    else:
+        trajectory_processor.start.assert_called_once()
+        assert trajectory_processor.start.call_args.args[0] is manager
+        assert trajectory_processor.deleted_conversation_check is conversation_deleted
+        trajectory_processor.request_stop.assert_called_once_with()
+        trajectory_processor.shutdown.assert_called_once_with()
+        recover_models.assert_called_once_with()
+        recover.assert_called_once_with()
+        cleanup.assert_called_once_with()
     shutdown_streams.assert_awaited_once()
     assert 0 <= shutdown_streams.await_args.kwargs["timeout"] <= 1
     stop_configuration.assert_awaited_once_with()
     manager.shutdown.assert_awaited_once()
     assert 0 <= manager.shutdown.await_args.kwargs["timeout"] <= 1
-    assert [call[0] for call in shutdown_order.mock_calls] == [
-        "agents", "trajectory", "configuration", "thread_manager",
-    ]
+    expected_shutdown = ["agents", "configuration", "thread_manager"]
+    if not replay_only:
+        expected_shutdown.insert(1, "trajectory")
+    assert [call[0] for call in shutdown_order.mock_calls] == expected_shutdown
     clear_default.assert_called_once_with(manager)
