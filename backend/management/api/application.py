@@ -138,6 +138,7 @@ async def automation_lifespan():
 async def config_lifespan(_app):
     from management.services.agent.prepared_turn import prepared_turn_lifespan
     from management.services.evaluation.experiments import experiment_lifespan
+    from management.services.evaluation.online_observation import observation_lifespan
     from management.services.conversation.creator_runtime import shutdown_creator_streams
 
     # One Management manager owns ordinary and Northbound requests and recovery.
@@ -152,7 +153,12 @@ async def config_lifespan(_app):
             await validate_external_service_configuration()
             dreaming_started = True
             await start_dreaming_scheduler()
-            async with automation_lifespan(), prepared_turn_lifespan(), experiment_lifespan():
+            async with (
+                automation_lifespan(),
+                observation_lifespan(config_thread_manager),
+                prepared_turn_lifespan(),
+                experiment_lifespan(),
+            ):
                 yield
         finally:
             try:

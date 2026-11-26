@@ -3,13 +3,18 @@
 
 import logging
 import re
+from contextlib import asynccontextmanager
 
+from contracts.constants import environment as config
 from contracts.errors.trajectory import QueryError
+from infrastructure.trace.trajectory_archive import Archive
+from infrastructure.trace.trajectory_budget import Budget
+from infrastructure.trace.trajectory_nodes import build_nodes
 from infrastructure.trace.trajectory_reader import JSONReader
-from ops.db.trajectory import evolution as queue
-
-from .nodes import build_nodes
-from .runtime import get_service
+from infrastructure.trace.trajectory_runtime import authorize_capture
+from infrastructure.trace.trajectory_store import TrajectoryFileStore
+from management.db.conversation import evolution_observation as queue
+from nexent.core.concurrency import ManagedThreadSpec
 
 logger = logging.getLogger(__name__)
 CORRECTION = re.compile(r"(?:刚才|上次|你给的|这份结果|你的回答).{0,16}(?:不对|漏了|有误|错了)|你漏了|you (?:missed|omitted)", re.I)
@@ -87,11 +92,10 @@ def _track_root_execution(requests, roots):
         yield request
 
 
-def inspect_archive(job, message):
-    service = get_service()
-    budget = service.budget()
+def inspect_archive(archive, budget, job, message):
+    budget.check()
     identity = {**job, "conversation_id": str(job["conversation_id"]), "agent_id": str(job["agent_id"])}
-    with service.archive.opened(identity, job["trajectory_id"], budget) as (fd, _, run):
+    with archive.opened(identity, job["trajectory_id"], budget) as (fd, _, run):
         if (run.get("root_agent_id"), run.get("root_agent_version_no")) != (identity["agent_id"], job["agent_version_no"]):
             return observation(message, unavailable="trajectory_mismatch")
         source = run.get("source_message_id")
@@ -113,22 +117,20 @@ def inspect_archive(job, message):
 
 
 class EvolutionReviewWorker:
-    def __init__(self):
-        self.stopping = False
-
-    def request_stop(self):
-        self.stopping = True
+    def __init__(self, archive, *, max_bytes):
+        self.archive = archive
+        self.max_bytes = max_bytes
 
     def run(self, cancel_event):
-        while not self.stopping and not cancel_event.is_set():
+        while not cancel_event.is_set():
             try:
-                busy = self.tick()
+                busy = self.tick(cancel_event)
             except Exception as error:
                 logger.warning("evolution.review.deferred exception_type=%s", type(error).__name__)
                 busy = False
             cancel_event.wait(0.1 if busy else 3)
 
-    def tick(self):
+    def tick(self, cancel_event=None):
         job = queue.claim()
         if job is None:
             return False
@@ -137,7 +139,8 @@ class EvolutionReviewWorker:
             queue.finish(job, observation(message or {}))
             return True
         try:
-            facts = inspect_archive(job, message)
+            budget = Budget(max_bytes=self.max_bytes, cancel_event=cancel_event)
+            facts = inspect_archive(self.archive, budget, job, message)
         except QueryError as error:
             unavailable = "trajectory_expired" if error.code == "content_expired" else None
             queue.finish(job, observation(message, unavailable=unavailable),
@@ -147,3 +150,32 @@ class EvolutionReviewWorker:
         else:
             queue.finish(job, facts)
         return True
+
+
+def create_review_worker(settings):
+    store = TrajectoryFileStore(
+        settings.TRAJECTORY_ROOT_DIR,
+        authorize=authorize_capture,
+        retention_days=settings.TRAJECTORY_RETENTION_DAYS,
+        storage_mode=settings.TRAJECTORY_STORAGE_MODE,
+        initialize_storage=False,
+    )
+    return EvolutionReviewWorker(Archive(store), max_bytes=settings.TRAJECTORY_QUERY_MAX_BYTES)
+
+
+@asynccontextmanager
+async def observation_lifespan(manager):
+    """Read local capture without starting the operations query service."""
+    if config.MONITORING_PROVIDER != "local_file" and not config.TRAJECTORY_READ_ENABLED:
+        yield
+        return
+    worker = create_review_worker(config)
+    execution = manager.register_service(
+        ManagedThreadSpec(task_name="evolution-online-observations", owner=__name__),
+        worker.run,
+    )
+    try:
+        manager.start_service(execution.execution_id)
+        yield
+    finally:
+        manager.cancel(execution.execution_id, reason="evolution observation shutdown")

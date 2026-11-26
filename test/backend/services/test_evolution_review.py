@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ops.services.trajectory import evolution
-from ops.services.trajectory.evolution import observation
-from management.db.conversation.evolution_review import _batch_view, summarize_batch
 from contracts.errors.trajectory import QueryError
+from management.db.conversation.evolution_review import _batch_view, summarize_batch
+from management.services.evaluation import online_observation as evolution
+from management.services.evaluation.online_observation import observation
 
 
 @pytest.mark.parametrize(("source", "executions", "coverage"), [
@@ -27,7 +27,6 @@ def test_review_correlates_archived_root_with_the_authorized_original_run(mocker
                 "confirmed_bytes": 10, "capture_state": "ready"}
     archive = mocker.Mock()
     archive.opened.return_value = nullcontext((0, None, manifest))
-    mocker.patch.object(evolution, "get_service", return_value=SimpleNamespace(archive=archive, budget=mocker.Mock()))
     spans = []
     for index, execution in enumerate(executions):
         attrs = [{"key": "nexent.trajectory.root", "value": {"boolValue": True}}]
@@ -39,7 +38,7 @@ def test_review_correlates_archived_root_with_the_authorized_original_run(mocker
     reader.return_value.requests.return_value = iter(requests)
     job = {"conversation_id": 1, "agent_id": 3, "agent_version_no": 1, "source_message_id": 19,
            "run_id": "a" * 32, "trajectory_id": "7ac1b2c9-3770-431c-8437-91205db79e6e"}
-    facts = evolution.inspect_archive(job, {})
+    facts = evolution.inspect_archive(archive, mocker.Mock(), job, {})
     assert facts["coverage"] == coverage
     assert facts.get("unavailable") == ("trajectory_mismatch" if coverage == "missing" else None)
 
@@ -52,7 +51,7 @@ def test_expired_archive_is_reported_without_retry_or_tool_evidence(mocker):
     mocker.patch.object(evolution, "inspect_archive", side_effect=QueryError("content_expired", 410))
     job["attempts"] = 1
 
-    assert evolution.EvolutionReviewWorker().tick()
+    assert evolution.EvolutionReviewWorker(mocker.Mock(), max_bytes=1024).tick()
     finish.assert_called_once_with(job, {"coverage": "missing", "signals": ["negative_feedback"],
         "failed_tool_count": 0, "node_refs": [], "unavailable": "trajectory_expired"}, retry=False)
 
@@ -106,3 +105,30 @@ def test_batch_view_waits_for_diagnosis_and_drops_revoked_rows():
     assert result["draft_turns"] == [{"turn_id": 11, "use_previous_task": True}]
     visible["diagnosis"] = {"status": "needs_evidence", "reason": "model_unavailable"}
     assert _batch_view(3, [visible])["missing"] == 1
+
+
+@pytest.mark.parametrize(("provider", "public_reads", "starts"), [
+    ("local_file", False, True),
+    ("otlp", True, True),
+    ("otlp", False, False),
+])
+async def test_management_starts_observation_independently_of_ops(mocker, provider, public_reads, starts):
+    mocker.patch.object(evolution.config, "MONITORING_PROVIDER", provider)
+    mocker.patch.object(evolution.config, "TRAJECTORY_READ_ENABLED", public_reads)
+    create = mocker.patch.object(evolution, "create_review_worker")
+    manager = mocker.Mock()
+    manager.register_service.return_value = SimpleNamespace(execution_id="observe")
+    async with evolution.observation_lifespan(manager):
+        if starts:
+            create.assert_called_once_with(evolution.config)
+            spec, run = manager.register_service.call_args.args
+            assert spec.task_name == "evolution-online-observations"
+            assert run is create.return_value.run
+            manager.start_service.assert_called_once_with("observe")
+        else:
+            create.assert_not_called()
+            manager.register_service.assert_not_called()
+    if starts:
+        manager.cancel.assert_called_once_with("observe", reason="evolution observation shutdown")
+    else:
+        manager.cancel.assert_not_called()

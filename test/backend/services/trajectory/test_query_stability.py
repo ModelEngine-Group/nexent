@@ -151,7 +151,7 @@ def test_unchanged_archive_reuses_checksum_but_file_changes_are_rejected(
     store, _, run_id, row = archived
     archive = Archive(store)
     hashed = mocker.patch(
-        "ops.services.trajectory.archive.prefix_hash", wraps=prefix_hash
+        "infrastructure.trace.trajectory_archive.prefix_hash", wraps=prefix_hash
     )
     for _ in range(2):
         with archive.opened(row, run_id, Budget()):

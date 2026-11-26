@@ -63,7 +63,7 @@ def test_cleanup_days_boundaries(value):
 
 def test_cache_hard_byte_limit_lru_and_expiry(mocker):
     now = mocker.patch(
-        "ops.services.trajectory.cache.time.monotonic", return_value=0
+        "infrastructure.trace.trajectory_cache.time.monotonic", return_value=0
     )
     cache = ByteCache(max_bytes=10, ttl=10)
     assert not cache.put("large", object(), 11)

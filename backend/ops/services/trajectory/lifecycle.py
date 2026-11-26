@@ -8,7 +8,6 @@ from infrastructure.trace.trajectory_store import TrajectoryFileStore
 from infrastructure.rdb.trajectory.repository import ExecutionRepository
 from nexent.core.concurrency import ManagedTaskSpec, ManagedThreadSpec
 from ops.services.trajectory.cleanup_schedule import read_policies
-from ops.services.trajectory.evolution import EvolutionReviewWorker
 from ops.services.trajectory.statistics import StatisticsWorker, SummaryWorker
 
 
@@ -32,7 +31,6 @@ class TrajectoryWorkers:
         for name, worker in (
             ("trajectory-summary-compensation", SummaryWorker(store, repository)),
             ("trajectory-statistics-refresh", StatisticsWorker(store, repository)),
-            ("evolution-online-observations", EvolutionReviewWorker()),
         ):
             self.workers.append(worker)
             execution = manager.register_service(

@@ -20,7 +20,7 @@ change:
     test_selectors:
     - test/backend/database/test_agent_execution_release.py
     - test/backend/database/test_evolution_consent.py
-    - test/backend/ops/test_evolution_review.py
+    - test/backend/services/test_evolution_review.py
     - test/backend/services/test_evolution_online_diagnosis.py
     - test/backend/services/test_evolution_access.py
     - test/backend/services/test_evolution_suggestion.py

@@ -123,6 +123,7 @@ class TestConfigAppRouterConfiguration:
             return {}
 
         router_modules = {
+            "management.api.evaluation.evolution": {"router": APIRouter()},
             "management.api.identity.gateway_identity": {"router": APIRouter()},
             "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.agent.agent": {"agent_config_router": APIRouter()},
@@ -331,6 +332,26 @@ class TestConfigAppRouterConfiguration:
         monkeypatch.setitem(sys.modules, "management.services.agent.prepared_turn", types.SimpleNamespace(
             prepared_turn_lifespan=prepared_lifespan,
         ))
+        observation_events = []
+
+        @asynccontextmanager
+        async def observation_lifespan(manager):
+            observation_events.append(("start", manager))
+            try:
+                yield
+            finally:
+                observation_events.append(("stop", manager))
+
+        @asynccontextmanager
+        async def experiment_lifespan():
+            yield
+
+        monkeypatch.setitem(sys.modules, "management.services.evaluation.online_observation", types.SimpleNamespace(
+            observation_lifespan=observation_lifespan,
+        ))
+        monkeypatch.setitem(sys.modules, "management.services.evaluation.experiments", types.SimpleNamespace(
+            experiment_lifespan=experiment_lifespan,
+        ))
         shutdown_creators = AsyncMock()
         monkeypatch.setitem(sys.modules, "management.services.conversation.creator_runtime", types.SimpleNamespace(
             shutdown_creator_streams=shutdown_creators,
@@ -383,6 +404,7 @@ class TestConfigAppRouterConfiguration:
         shutdown_creators.assert_awaited_once_with(timeout=1)
         assert config_app.app.lifespan is config_app.config_lifespan
         assert prepared_events == ["start", "stop"]
+        assert observation_events == [("start", config_app.config_thread_manager), ("stop", config_app.config_thread_manager)]
         migration.migrate_legacy_outlets.assert_called_once_with()
         concurrency_module.run_blocking.assert_awaited_once_with(
             "model-outlet-upgrade", migration.migrate_legacy_outlets

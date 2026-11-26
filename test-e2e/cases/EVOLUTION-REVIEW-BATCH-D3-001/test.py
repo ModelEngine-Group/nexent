@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import asyncio
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -12,17 +14,19 @@ from local_auth_http import native_runtime, register, runtime
 @pytest.mark.case_id("EVOLUTION-REVIEW-BATCH-D3-001")
 @pytest.mark.stage("D3")
 def test_review_batch(runtime, tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "ops", None)
+    from contracts.constants import environment as config
     from contracts.evolution import ReplayCaseRequest
     from contracts.errors.exceptions import AppException
     from infrastructure.rdb.client import db_client, get_db_session
     from infrastructure.system_configuration.runtime import load_system_configuration
     from infrastructure.trace.trajectory_store import CaptureIdentity, TrajectoryFileStore, timestamp
+    from management.db.conversation import evolution_observation as queue
     from management.db.conversation import evolution_review as registrar, prepared_turn
     from management.db.conversation.repository import update_message_opinion
+    from management.services.evaluation import online_observation as reader
     from management.services.evaluation.replay_cases import freeze_development_case, preview_trace_case
-    from ops.db.trajectory import evolution as queue
-    from ops.services.trajectory import evolution as reader
-    from ops.services.trajectory.service import TrajectoryService
+    from nexent.core.concurrency import LanePolicy, ThreadManager
     from test.backend.utils.test_trajectory_file_store import request as otlp_request
 
     identity, _, _, models = runtime
@@ -47,8 +51,10 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
                 name="meeting-actions", created_by=owner, updated_by=owner, delete_flag="N", ingroup_permission="PRIVATE"))
             session.flush()
     store = TrajectoryFileStore(tmp_path / "archive", authorize=lambda _: None)
-    service = TrajectoryService(store, None, None)
-    monkeypatch.setattr(reader, "get_service", lambda: service)
+    monkeypatch.setattr(config, "TRAJECTORY_ROOT_DIR", str(store.root))
+    monkeypatch.setattr(config, "TRAJECTORY_STORAGE_MODE", "single_node")
+    monkeypatch.setattr(config, "MONITORING_PROVIDER", "local_file")
+    monkeypatch.setattr(config, "TRAJECTORY_READ_ENABLED", False)
 
     def seed(chat, ordinal, *, correction=False, query="整理会议待办"):
         grant = prepared_turn.evolution_setting(chat, owner, tenant)["enabled"]
@@ -87,16 +93,27 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
         with engine.connect() as conn:
             return conn.scalar(text(query))
 
+    async def observe_first_turn():
+        lane = LanePolicy(name="background-service", max_workers=1, max_queue_size=0)
+        manager = ThreadManager("management-observation-test", {lane.name: lane})
+        manager.start()
+        try:
+            async with reader.observation_lifespan(manager), asyncio.timeout(12):
+                while (observation := scalar("SELECT observation FROM nexent.evolution_review_turn_t")) is None:
+                    await asyncio.sleep(0.1)
+                return observation
+        finally:
+            await manager.shutdown(timeout=5)
+
     for chat in (1, 2, 3):
         prepared_turn.evolution_setting(chat, owner, tenant, True)
-    worker = reader.EvolutionReviewWorker()
+    worker = reader.create_review_worker(config)
     replies = []
     for i, (chat, ordinal) in enumerate(((1, 1), (1, 2), (2, 1), (3, 1), (3, 2)), start=1):
         replies.append(seed(chat, ordinal, correction=i in (1, 5)))
         registrar.enqueue_review_batches()
         if i == 1:
-            assert worker.tick()
-            observation = scalar("SELECT observation FROM nexent.evolution_review_turn_t")
+            observation = asyncio.run(observe_first_turn())
             assert observation["coverage"] == "complete" and observation["signals"] == ["user_correction"]
         assert scalar("SELECT count(*) FROM nexent.evolution_review_batch_t") == int(i == 5)
     prepared_turn.evolution_setting(1, owner, tenant, False)
