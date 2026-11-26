@@ -19,6 +19,10 @@ export type MonitoringRange = [start: string, end: string];
 export const dateFormat = "YYYY-MM-DD";
 export const maxRangeDays = 366;
 
+export function getMonitoringToday(now = new Date()): string {
+  return dayjs.utc(now).format(dateFormat);
+}
+
 interface MonitoringFilters {
   tenant: string;
   group: string;
@@ -69,7 +73,8 @@ export function updateMonitoringFilters(
       if (action.value) {
         const [start, end] = action.value;
         const days = dayjs.utc(end).diff(dayjs.utc(start), "day");
-        if (!(days >= 0 && days < maxRangeDays)) return state;
+        if (!(days >= 0 && days < maxRangeDays) || end > getMonitoringToday())
+          return state;
       }
       return { ...state, customRange: action.value };
     }
@@ -85,10 +90,13 @@ export function getMonitoringRange(
 ): MonitoringRange | null {
   if (preset === "custom") return custom;
   // The deployed Ops default is UTC. Send calendar dates without timestamp conversion.
-  const today = dayjs.utc(now);
+  const today = getMonitoringToday(now);
   const days = preset === "week" ? 7 : 30;
   return [
-    today.subtract(days - 1, "day").format(dateFormat),
-    today.format(dateFormat),
+    dayjs
+      .utc(today)
+      .subtract(days - 1, "day")
+      .format(dateFormat),
+    today,
   ];
 }

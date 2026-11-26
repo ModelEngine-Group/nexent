@@ -354,9 +354,11 @@
 }
 
 .displayNameHeader {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 8px;
   white-space: nowrap;
 }
 

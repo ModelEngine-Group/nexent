@@ -43,6 +43,7 @@ import { SkillMonitoring } from "./components/skill/SkillMonitoring";
 import {
   dateFormat,
   getMonitoringRange,
+  getMonitoringToday,
   initialMonitoringFilters,
   maxRangeDays,
   monitoringTabs,
@@ -458,6 +459,7 @@ function MonitoringScope({
             : null
         }
         disabledDate={(date, { from }) =>
+          date.format(dateFormat) > getMonitoringToday() ||
           Boolean(
             from &&
             Math.abs(date.startOf("day").diff(from.startOf("day"), "day")) >=

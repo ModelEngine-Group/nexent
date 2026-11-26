@@ -1,5 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getMonitoringRange,
   initialMonitoringFilters,
@@ -7,6 +7,30 @@ import {
 } from "@/app/ops/dashboard/monitoringFilters";
 
 describe("monitoring dates", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("allows UTC today and rejects future custom dates after local midnight", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2027-01-01T00:15:00+08:00"));
+    const today = updateMonitoringFilters(initialMonitoringFilters, {
+      type: "customRange",
+      value: ["2026-12-31", "2026-12-31"],
+    });
+    expect(today.customRange).toEqual(["2026-12-31", "2026-12-31"]);
+    expect(
+      updateMonitoringFilters(today, {
+        type: "customRange",
+        value: ["2026-12-31", "2027-01-01"],
+      })
+    ).toBe(today);
+    expect(
+      updateMonitoringFilters(today, {
+        type: "customRange",
+        value: ["2027-01-01", "2027-01-01"],
+      })
+    ).toBe(today);
+  });
+
   it("counts seven and thirty inclusive UTC dates across a year boundary", () => {
     const now = new Date("2027-01-01T00:15:00+08:00");
     expect(getMonitoringRange("week", null, now)).toEqual([
