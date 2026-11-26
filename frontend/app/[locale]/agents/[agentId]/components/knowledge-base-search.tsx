@@ -462,7 +462,11 @@ function KnowledgeRetrievalTest({
   );
   const [testIds, setTestIds] = useState(() => sources.map(({ id }) => id));
   const [pickerOpen, setPickerOpen] = useState(false);
-  const selected = sources.filter(({ id }) => testIds.includes(id));
+  const sourcesById = new Map(sources.map((source) => [source.id, source]));
+  const selected = testIds.flatMap((id) => {
+    const source = sourcesById.get(id);
+    return source ? [source] : [];
+  });
   const tool = useMemo(() => {
     const inputs = parseToolInputs(state.knowledgeSearchTool.inputs || "");
     return {
@@ -506,6 +510,7 @@ function KnowledgeRetrievalTest({
           testPanelKbDisplayNames={selected.map(
             ({ displayName }) => displayName
           )}
+          onTestPanelKbIdsChange={(ids) => setTestIds(ids)}
           onOpenKbSelector={() => setPickerOpen(true)}
           onTestPanelKbRemove={(index) =>
             setTestIds((ids) => ids.filter((id) => id !== selected[index]?.id))

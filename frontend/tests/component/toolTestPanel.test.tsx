@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ToolTestPanel from "@/app/agents/components/capability/tool/ToolTestPanel";
@@ -126,6 +127,92 @@ describe("bound knowledge in the shared tool test panel", () => {
     ).toBeVisible();
     expect(validateTool).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["knowledge_base_search", "index_names"],
+    ["aidp_search", "kds_list"],
+  ] as const)(
+    "synchronizes %s JSON scope with the parent selection",
+    async (name, scopeParam) => {
+      vi.mocked(parseToolInputs).mockReturnValue({
+        query: { type: "string", description: "Search query" },
+        [scopeParam]: { type: "array" },
+      });
+      const boundIds = ["policy", "handbook"];
+      const displayNames: Record<string, string> = {
+        policy: "Travel Policy",
+        handbook: "Staff Handbook",
+      };
+      const setScope = vi.fn();
+      function Fixture() {
+        const [ids, setIds] = useState(boundIds);
+        return (
+          <ToolTestPanel
+            {...props}
+            tool={{ ...tool, name }}
+            configParams={[]}
+            toolRequiresKbSelection
+            toolKbType={name}
+            boundKnowledgeIds={boundIds}
+            testPanelKbIds={ids}
+            testPanelKbDisplayNames={ids.map((id) => displayNames[id])}
+            onTestPanelKbIdsChange={(nextIds) => {
+              setScope(nextIds);
+              setIds(nextIds);
+            }}
+          />
+        );
+      }
+      render(<Fixture />);
+      const editScope = (ids: string[]) =>
+        fireEvent.change(screen.getByRole("textbox"), {
+          target: {
+            value: JSON.stringify({ query: "travel", [scopeParam]: ids }),
+          },
+        });
+      const switchToForm = () =>
+        fireEvent.click(screen.getByText("toolConfig.toolTest.form"));
+      fireEvent.click(await screen.findByText("JSON"));
+      editScope(["unbound"]);
+      switchToForm();
+      expect(
+        await screen.findByText("agent.knowledge.test.invalidInputs")
+      ).toBeVisible();
+      expect(setScope).not.toHaveBeenCalled();
+      expect(validateTool).not.toHaveBeenCalled();
+
+      editScope(["handbook", "handbook"]);
+      switchToForm();
+      expect(await screen.findByText("Staff Handbook")).toBeVisible();
+      expect(screen.queryByText("Travel Policy")).not.toBeInTheDocument();
+      expect(setScope).toHaveBeenLastCalledWith(["handbook"]);
+      const run = screen.getByRole("button", {
+        name: "agent.knowledge.test.run",
+      });
+      await waitFor(() => expect(run).toBeEnabled());
+      fireEvent.click(run);
+      await waitFor(() =>
+        expect(validateTool).toHaveBeenCalledExactlyOnceWith(
+          name,
+          "local",
+          "",
+          { query: "travel", [scopeParam]: ["handbook"] },
+          { [scopeParam]: ["handbook"] },
+          "zh"
+        )
+      );
+
+      fireEvent.click(screen.getByText("JSON"));
+      editScope([]);
+      switchToForm();
+      expect(setScope).toHaveBeenLastCalledWith([]);
+      expect(screen.queryByText("Staff Handbook")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "agent.knowledge.test.run" })
+      ).toBeDisabled();
+      expect(validateTool).toHaveBeenCalledTimes(1);
+    }
+  );
 });
 
 describe("tool testing in the split configuration dialog", () => {

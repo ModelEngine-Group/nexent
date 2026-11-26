@@ -11,6 +11,7 @@ from contracts.constants.constants import (
     STATUS_DISABLED,
     STATUS_RELEASED,
 )
+from contracts.errors.exceptions import ValidationError
 from contracts.roles import has_any_role, roles_from_record
 from management.db.a2a import repository as a2a_repository
 from management.db.agent.repository import (
@@ -872,10 +873,17 @@ async def list_published_agents_impl(tenant_id: str, user_id: str) -> list[dict]
 
 
 def _published_knowledge_sources(agent_id: int, tenant_id: str, version_no: int) -> Dict[str, bool]:
-    """Load the effective-tool resolver only for published configuration projection."""
+    """Keep a dependency validation failure local to the affected list entry."""
     from management.services.knowledge_base.scope import get_agent_knowledge_sources
 
-    return get_agent_knowledge_sources(agent_id, tenant_id, version_no)
+    try:
+        return get_agent_knowledge_sources(agent_id, tenant_id, version_no)
+    except ValidationError as exc:
+        logger.warning(
+            "Skipping knowledge source projection for published Agent %s version %s: %s",
+            agent_id, version_no, exc,
+        )
+        return {"local": False, "aidp": False}
 
 
 def _list_published_agents_sync(

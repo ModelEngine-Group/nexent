@@ -32,6 +32,16 @@ import { getLocalizedDescription, mapKbIdsToDisplayNames } from "@/lib/utils";
 
 const { Text, Title } = Typography;
 
+function isBoundKnowledgeScope(
+  value: unknown,
+  boundIds: readonly string[]
+): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((id) => typeof id === "string" && boundIds.includes(id))
+  );
+}
+
 // Component to display KB selector
 const KbSelectorDisplay = ({
   selectedKbIds,
@@ -181,6 +191,7 @@ export default function ToolTestPanel({
   const [isParseSuccessful, setIsParseSuccessful] = useState<boolean>(false);
   const isAidpRuntimeSelection =
     toolKbType === "aidp_search" || toolKbType === "ind_aidp_search";
+  const knowledgeScopeParam = isAidpRuntimeSelection ? "kds_list" : "index_names";
   const isKnowledgeBaseSearchTool =
     tool?.origin_name === "knowledge_base_search" ||
     tool?.name === "knowledge_base_search";
@@ -481,7 +492,8 @@ export default function ToolTestPanel({
       // Transitioned from manual → parsed mode
       if (
         (isAidpRuntimeSelection || isKnowledgeBaseSearchTool) &&
-        onTestPanelKbIdsChange
+        onTestPanelKbIdsChange &&
+        !boundKnowledgeIds
       ) {
         try {
           const parsed = JSON.parse(manualJsonInput);
@@ -503,6 +515,7 @@ export default function ToolTestPanel({
     isAidpRuntimeSelection,
     isKnowledgeBaseSearchTool,
     onTestPanelKbIdsChange,
+    boundKnowledgeIds,
   ]);
 
   // Close test panel
@@ -760,22 +773,23 @@ export default function ToolTestPanel({
       );
 
       if (boundKnowledgeIds) {
-        const scopeParam = isAidpRuntimeSelection ? "kds_list" : "index_names";
         const searchQuery =
           typeof toolParams.query === "string" ? toolParams.query.trim() : "";
-        const ids = toolParams[scopeParam] ?? testPanelKbIds;
+        const ids =
+          toolParams[knowledgeScopeParam] === undefined
+            ? testPanelKbIds
+            : toolParams[knowledgeScopeParam];
         if (
           !searchQuery ||
-          !Array.isArray(ids) ||
-          ids.length === 0 ||
-          ids.some((id) => !boundKnowledgeIds.includes(id))
+          !isBoundKnowledgeScope(ids, boundKnowledgeIds) ||
+          ids.length === 0
         ) {
           setTestResult(t("agent.knowledge.test.invalidInputs"));
           return;
         }
         toolParams.query = searchQuery;
-        toolParams[scopeParam] = ids;
-        kbSelectionConfig = { [scopeParam]: ids };
+        toolParams[knowledgeScopeParam] = ids;
+        kbSelectionConfig = { [knowledgeScopeParam]: ids };
       }
 
       // Merge KB selection config into configs
@@ -874,7 +888,9 @@ export default function ToolTestPanel({
                 ]}
                 onChange={(value) => {
                   const newMode = value === "json";
-                  setIsManualInputMode(newMode);
+                  if (newMode || !boundKnowledgeIds) {
+                    setIsManualInputMode(newMode);
+                  }
 
                   if (newMode) {
                     // Switching to manual mode - get values from form
@@ -956,6 +972,17 @@ export default function ToolTestPanel({
                     // Switching to parsed mode - parse manual JSON and set to form
                     try {
                       const manualParams = JSON.parse(manualJsonInput);
+                      if (boundKnowledgeIds) {
+                        const ids =
+                          manualParams[knowledgeScopeParam] === undefined
+                            ? testPanelKbIds
+                            : manualParams[knowledgeScopeParam];
+                        if (!isBoundKnowledgeScope(ids, boundKnowledgeIds)) {
+                          setTestResult(t("agent.knowledge.test.invalidInputs"));
+                          return;
+                        }
+                        manualParams[knowledgeScopeParam] = [...new Set(ids)];
+                      }
                       const formValues: Record<string, any> = {};
 
                       Object.keys(parameterValues).forEach((paramName) => {
@@ -1003,7 +1030,20 @@ export default function ToolTestPanel({
                         }
                       });
                       form.setFieldsValue(formValues);
+                      if (boundKnowledgeIds) {
+                        const ids = manualParams[knowledgeScopeParam];
+                        onTestPanelKbIdsChange?.(ids, ids);
+                        setTestResult((result) =>
+                          result === t("agent.knowledge.test.invalidInputs")
+                            ? ""
+                            : result
+                        );
+                        setIsManualInputMode(false);
+                      }
                     } catch (error) {
+                      if (boundKnowledgeIds) {
+                        setTestResult(t("agent.knowledge.test.invalidInputs"));
+                      }
                       log.error(
                         "Failed to sync manual input to parsed mode:",
                         error

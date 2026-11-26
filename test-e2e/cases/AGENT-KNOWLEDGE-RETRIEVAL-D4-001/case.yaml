@@ -18,9 +18,10 @@ case:
     profile: mock
   steps:
   - order: 1
-    action: Open the Agent knowledge test and enter a query.
+    action: Open the Agent knowledge test, enter a query, and clear and restore its scope in JSON mode.
     expected: The shared tool test column retains its background, input spacing and result divider.
-      Scope defaults to the bound knowledge bases. Opening and typing issue no retrieval request.
+      Scope defaults to the bound knowledge bases. Returning from JSON mode updates the visible
+      selections and disables testing while the scope is empty. Editing issues no retrieval request.
   - order: 2
     action: Run retrieval and close the dialog after results are displayed.
     expected: One validation request uses the current knowledge scope and settings and displays the retrieved text.

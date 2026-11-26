@@ -59,7 +59,10 @@ journey(
         .getByRole("button", { name: label("agent.knowledge.test.title") })
         .click();
       const testColumn = dialog.locator('[data-config-part="test-column"]');
-      await expect(testColumn).toHaveCSS("background-color", "rgb(250, 250, 250)");
+      await expect(testColumn).toHaveCSS(
+        "background-color",
+        "rgb(250, 250, 250)",
+      );
       await expect(
         testColumn.locator('[data-config-part="test-inputs"]'),
       ).toHaveCSS("padding", "20px 24px");
@@ -71,6 +74,23 @@ journey(
       await dialog
         .getByPlaceholder(label("agent.knowledge.test.query"))
         .fill("benefits");
+      await expect(runButton).toBeEnabled();
+      const formMode = dialog.getByText(label("toolConfig.toolTest.form"), {
+        exact: true,
+      });
+      const jsonMode = dialog.getByText("JSON", { exact: true });
+      const setJsonScope = async (ids: string[]) => {
+        await jsonMode.click();
+        await dialog
+          .getByRole("textbox")
+          .fill(JSON.stringify({ query: "benefits", index_names: ids }));
+        await formMode.click();
+      };
+      await setJsonScope([]);
+      await expect(dialog.getByText("Fixture Knowledge Base")).toHaveCount(0);
+      await expect(runButton).toBeDisabled();
+      await setJsonScope(["fixture-kb"]);
+      await expect(dialog.getByText("Fixture Knowledge Base")).toBeVisible();
       await expect(runButton).toBeEnabled();
       expect(requests).toEqual([]);
     });
