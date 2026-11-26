@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, text, update
+from sqlalchemy import create_engine, inspect, text, update
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
@@ -30,7 +30,10 @@ with patch(
 ), patch("nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None):
     from management.api.conversation import conversation_management as routes
     from management.db.conversation import repository as db
-    from management.db.identity import user_tenant as user_tenant_db
+    from infrastructure.rdb.account_record import UserAccount
+    from infrastructure.rdb.trajectory.models import TrajectoryExecution, TrajectoryStatistics
+    from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
+    from management.db.identity import membership
     from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage, ConversationSourceSearch, UserTenant
     from management.services.conversation import service
 
@@ -61,7 +64,7 @@ class TitleProbe:
     def during_model(self, action):
         started, release = threading.Event(), threading.Event()
 
-        def model(*_args):
+        async def model(*_args, **_kwargs):
             started.set()
             assert release.wait(10), "The title model gate was not released"
             return "Generated title"
@@ -97,11 +100,13 @@ def probe(monkeypatch):
     try:
         with engine.begin() as connection:
             for model in (ConversationRecord, ConversationMessage, ConversationMessageUnit,
-                          ConversationSourceSearch, ConversationSourceImage, UserTenant):
+                          ConversationSourceSearch, ConversationSourceImage, UserTenant,
+                          UserAccount, TrajectoryExecution, TrajectoryStatistics):
                 model.__table__.create(connection)
         value = TitleProbe(engine, schema, monkeypatch)
         monkeypatch.setattr(db, "get_db_session", value.sessions)
-        monkeypatch.setattr(user_tenant_db, "get_db_session", value.sessions)
+        monkeypatch.setattr(membership, "get_db_session", value.sessions)
+        monkeypatch.setattr(db, "get_config_snapshot", lambda: DEFAULT_CATALOG.defaults)
         monkeypatch.setattr(routes, "get_current_user_info", lambda **_k: ("owner", "tenant", "en"))
         with value.sessions() as session:
             previous = datetime.now(timezone.utc) - timedelta(days=1)
@@ -116,8 +121,11 @@ def probe(monkeypatch):
                 message_content="", status="streaming", message_source="CHAT",
                 created_by="owner", updated_by="owner", delete_flag="N",
             ))
+            session.add(UserAccount(
+                user_id="owner", user_roles=["USER"], created_by="owner", delete_flag="N",
+            ))
             session.add(UserTenant(
-                user_tenant_id=1, user_id="owner", tenant_id="tenant", user_role="USER",
+                user_tenant_id=1, user_id="owner", tenant_id="tenant",
                 created_by="owner", updated_by="owner", delete_flag="N",
             ))
         app = FastAPI()
@@ -223,6 +231,7 @@ def test_additive_title_revision_migration_preserves_rows_and_replays(probe):
                             f"created_by, updated_by, delete_flag, last_activity_time "
                             f"FROM {probe.schema}.conversation_record_t ORDER BY conversation_id")
         before = list(connection.execute(snapshot_sql))
+        tables_before = set(inspect(connection).get_table_names(schema=probe.schema))
         connection.exec_driver_sql(sql)
         assert list(connection.execute(snapshot_sql)) == before
         assert list(connection.execute(text(f"SELECT title_version FROM {probe.schema}.conversation_record_t"))) == [(0,), (0,)]
@@ -238,5 +247,5 @@ def test_additive_title_revision_migration_preserves_rows_and_replays(probe):
         connection.exec_driver_sql(f"INSERT INTO {probe.schema}.conversation_record_t "
                                    "(conversation_id, conversation_title) VALUES (3, 'New row')")
         assert connection.scalar(text(f"SELECT title_version FROM {probe.schema}.conversation_record_t WHERE conversation_id=3")) == 0
-        assert connection.scalar(text("SELECT count(*) FROM pg_tables WHERE schemaname=:schema"), {"schema": probe.schema}) == 6
+        assert set(inspect(connection).get_table_names(schema=probe.schema)) == tables_before
     assert renamed["version"] == 1 and probe.state() == renamed

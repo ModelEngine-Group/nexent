@@ -2,6 +2,7 @@
 
 // @ts-nocheck
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -33,16 +34,14 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('antd', () => ({
-  Typography: new Proxy({}, { get: () => (props: any) => props.children }),
-  message: {
-    error: () => {},
-    success: () => {},
-    warning: () => {},
-    info: () => {},
-    loading: () => {},
-  },
-}));
+vi.mock('antd', () => {
+  const message = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn() };
+  return {
+    App: { useApp: () => ({ message }) },
+    Typography: new Proxy({}, { get: () => (props: any) => props.children }),
+    message,
+  };
+});
 
 vi.mock('react-shiki', () => ({
   useShikiHighlighter: () => ({
@@ -56,6 +55,10 @@ vi.mock('@assistant-ui/react', () => {
   const passthrough = (props: any) =>
     typeof props.children === 'function' ? props.children({}) : props.children;
   const primitives = new Proxy({}, { get: () => passthrough });
+  const viewport = {
+    subscribe: () => () => {},
+    getState: () => ({ isAtBottom: true, scrollToBottom: vi.fn() }),
+  };
   return {
     ThreadPrimitive: primitives,
     MessagePrimitive: primitives,
@@ -70,6 +73,7 @@ vi.mock('@assistant-ui/react', () => {
       modelContext: () => ({ register: () => {} }),
     }),
     useAuiState: (selector: any) => selector(auiState),
+    useThreadViewportStore: () => viewport,
   };
 });
 
@@ -134,15 +138,16 @@ const baseAgent = (overrides: Record<string, unknown> = {}) => ({
 const noop = () => {};
 
 function renderThread(agent: any, extra: Record<string, unknown> = {}) {
-  const result = render(
-    <TooltipProvider>
-      <Thread agent={agent} chatMode='planning' onChatModeChange={noop} {...extra} />
-    </TooltipProvider>
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: React.PropsWithChildren) => (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>{children}</TooltipProvider>
+    </QueryClientProvider>
   );
-  const rawRerender = result.rerender;
-  result.rerender = (ui: React.ReactNode) =>
-    rawRerender(<TooltipProvider>{ui}</TooltipProvider>);
-  return result;
+  return render(
+    <Thread agent={agent} chatMode='planning' onChatModeChange={noop} {...extra} />,
+    { wrapper },
+  );
 }
 
 describe(' 线程模型选择器', () => {

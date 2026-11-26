@@ -49,7 +49,7 @@ def test_trusted_outlet_postgres_lifecycle(monkeypatch):
         else:
             raise AssertionError("Isolated PostgreSQL did not become ready")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres", echo=False)
-        from management.db import client
+        from infrastructure.rdb import client
         from infrastructure.rdb.client import get_db_session
         from management.db.models import ModelRecord
         from management.db.model.repository import create_model_record, get_model_by_model_id

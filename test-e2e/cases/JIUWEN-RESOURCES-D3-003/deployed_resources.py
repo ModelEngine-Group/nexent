@@ -13,7 +13,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
-from infrastructure.rdb.client import get_db_session, minio_client
+from infrastructure.object_storage.client import minio_client
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentInfo, AgentRelation, ConversationRecord
 from management.services.permission.identity.session import (
     generate_session_jwt,
@@ -45,9 +46,11 @@ def main():
         with get_db_session() as session:
             draft = session.query(AgentInfo).filter_by(agent_id=agent, version_no=0).one()
             row = session.query(AgentInfo).filter_by(agent_id=agent, version_no=draft.current_version_no).one()
-            return row.version_no, row.agent_core, list(row.model_ids)
+            version, models = row.version_no, list(row.model_ids)
+        return version, deployed_core, models
 
     def clone(source, label, core, model, **patch):
+        assert core == deployed_core, "The required parent/child Core combination is outside this deployment policy"
         exported = helper.export_agent(config, source)
         snapshots[source] = (helper.digest(helper.source_rows(source)), helper.digest(exported))
         assert len(exported["agent_info"]) == 1
@@ -58,7 +61,7 @@ def main():
         agent = result["agent_id"]
         owned.append(agent)
         helper.checked(config.post("/agent/update", json={
-            "agent_id": agent, "agent_core": core, "model_ids": [model], "enable_context_manager": False,
+            "agent_id": agent, "model_ids": [model], "enable_context_manager": False,
             "provide_run_summary": False, "verification_config": {"enabled": False},
             "enable_protocol_repair_retry": False, **patch}))
         return agent, publish(agent)
@@ -70,7 +73,7 @@ def main():
         response = runtime.post("/agent/run", json=body)
         assert response.status_code == 200, f"Run HTTP {response.status_code}"
         conversation = conversation or int(response.headers["conversation_id"])
-        events = [json.loads(line[5:].strip()) for line in response.text.splitlines() if line.startswith("data:")]
+        events = [json.loads(line[5:].strip()) for line in response.text.splitlines() if line.startswith("data:") and line[5:].strip() != "[DONE]"]
         (directory / (label + ".private.json")).write_text(json.dumps(events))
         assert not [e for e in events if e.get("type") == "error"], "Run error event"
         for _ in range(100):
@@ -134,8 +137,10 @@ def main():
                 "source_history": {str(cid): helper.history(cid) for cid in original},
                 "access_token": generate_session_jwt(inputs["user_id"], expires_in=3600)}
         headers = {"Authorization": "Bearer " + state["access_token"]}
-        config = httpx.Client(base_url="http://nexent-config:5010", headers=headers, trust_env=False, timeout=90)
-        runtime = httpx.Client(base_url="http://nexent-runtime:5014", headers=headers, trust_env=False, timeout=600)
+        config = httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=90)
+        runtime = httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=600)
+        deployed_core = helper.checked(config.get("/tenant_config/deployment_version"))["agent_core"]
+        assert deployed_core == "jiuwen", "Jiuwen deployment is required for the real resource phases"
         source_skills = helper.checked(config.get("/skills/instance/list", params={
             "agent_id": source, "version_no": state["source_version"]}))["instances"]
         enabled = [skill for skill in source_skills if skill.get("enabled")]

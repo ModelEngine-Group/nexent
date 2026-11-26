@@ -16,15 +16,15 @@ case:
   objective: Prove real provider execution on deployed source and persisted conversation
     continuity.
   preconditions:
-  - Current-source deployment, saved native/text real model outlets, authenticated
-    authorized test tenant; only run-owned temporary agents/conversations/resources
-    are created.
+  - Isolated current-source deployment with a test-runner Core switch that preserves the
+    owned database and artifacts; saved native/text real model outlets and an authenticated,
+    memory-disabled actor in the authorized test tenant. Only run-owned resources are created.
   test_data:
     profile: real_smoke
   steps:
   - order: 1
-    action: Execute deployed authenticated HTTP turns, publish configuration-side
-      Core changes, reload the same conversation and continue. Send empty client history
+    action: Execute authenticated HTTP turns and switch the isolated deployment Core through
+      its runner. Reopen the same published Agent and conversation, then send empty client history
       on follow-up to prove database-owned ordering.
     expected: Both Core directions preserve earlier messages and remember the synthetic
       marker without re-executing past tasks; snapshot and explicit terminal semantics
@@ -46,7 +46,7 @@ case:
     or false pass from HTTP 200 alone.
   acceptance:
   - id: AC-01
-    description: Real outlet execution and persisted published-Core conversation continuity.
+    description: Real outlet execution and persisted conversation continuity across deployment Core switches.
     steps:
     - 1
     - 2

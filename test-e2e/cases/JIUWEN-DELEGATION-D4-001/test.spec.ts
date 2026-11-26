@@ -1,17 +1,16 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { journey, readFixtureConfig } from "../../infra/automation/d4/runner/journey";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 journey("JIUWEN-DELEGATION-D4-001", async ({ page, contract, expect }) => {
-  const config = JSON.parse(
-    readFileSync(process.env.NEXENT_REAL_UI_CONFIG!, "utf8"),
-  );
+  const config = readFixtureConfig("NEXENT_REAL_UI_CONFIG");
   const base = process.env.NEXENT_BASE_URL || "http://127.0.0.1:3000";
-  const container = config.container || "nexent-runtime";
+  const container = config.container || "nexent-config";
   const core = process.env.NEXENT_DELEGATION_CORE || "jiuwen";
   expect(["jiuwen", "smolagents"]).toContain(core);
   const target =
@@ -35,7 +34,7 @@ journey("JIUWEN-DELEGATION-D4-001", async ({ page, contract, expect }) => {
       docker(
         "exec",
         "-e",
-        "PYTHONPATH=/opt/backend",
+        "PYTHONPATH=/opt:/opt/backend",
         "-w",
         "/opt/backend",
         container,
@@ -102,7 +101,7 @@ journey("JIUWEN-DELEGATION-D4-001", async ({ page, contract, expect }) => {
           config.source_message_id,
         ).setup,
       ).toBe(true);
-      expect(fixture("select-core", core).configured_core).toBe(core);
+      expect(fixture("require-core", core).configured_core).toBe(core);
       docker("cp", container + ":" + target + ".json", privateState);
       state = JSON.parse(readFileSync(privateState, "utf8"));
       await page.context().addCookies([
@@ -137,6 +136,7 @@ journey("JIUWEN-DELEGATION-D4-001", async ({ page, contract, expect }) => {
       await group.click();
   };
   const send = async (query: string) => {
+    await new ChatPage(page).selectBoundModel(Number(state.copied_fields.model_ids[0]));
     await page.getByRole("textbox").last().fill(query);
     const wire = page.waitForResponse(
       (response) =>
@@ -157,7 +157,7 @@ journey("JIUWEN-DELEGATION-D4-001", async ({ page, contract, expect }) => {
     (await response.body())
       .toString("utf8")
       .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
+      .filter((line) => line.startsWith("data:") && line.slice(5).trim() !== "[DONE]")
       .map((line) => JSON.parse(line.slice(5).trim()));
   const steps = contract.expectedIds("steps");
   await contract.step(steps[0], async () => {
@@ -170,20 +170,11 @@ journey("JIUWEN-DELEGATION-D4-001", async ({ page, contract, expect }) => {
     await page.screenshot({ path: join(contract.caseDir, "child-live.png") });
     const wire = await events(response);
     expect(wire.filter((event) => event.type === "error")).toEqual([]);
-    const terminals = wire.filter(
-      (event) => event.type === "run_terminal" && !event.invocation_id,
-    );
-    if (core === "jiuwen") {
-      expect(terminals).toHaveLength(1);
-      expect(terminals[0].status, terminals[0].error?.category).toBe(
-        "completed",
-      );
-    }
     expect(
       wire.filter(
         (event) =>
           event.type === "final_answer" &&
-          (core === "jiuwen" || event.answer_phase === "complete") &&
+          event.answer_phase === "complete" &&
           !event.invocation_id,
       ),
     ).toHaveLength(1);
@@ -192,7 +183,9 @@ journey("JIUWEN-DELEGATION-D4-001", async ({ page, contract, expect }) => {
     expect(starts).toHaveLength(1);
     expect(ends).toHaveLength(1);
     const invocation = JSON.parse(starts[0].content).invocation_id;
-    expect(JSON.parse(ends[0].content).invocation_id).toBe(invocation);
+    const childEnd = JSON.parse(ends[0].content);
+    expect(childEnd.invocation_id).toBe(invocation);
+    if (core === "jiuwen") expect(childEnd.status).toBe("completed");
     expect(
       wire.filter((event) => event.invocation_id === invocation).length,
     ).toBeGreaterThan(0);

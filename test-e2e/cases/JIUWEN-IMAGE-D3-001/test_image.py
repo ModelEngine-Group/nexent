@@ -14,7 +14,7 @@ pytestmark = [pytest.mark.case_id("JIUWEN-IMAGE-D3-001"), pytest.mark.stage("D3"
 
 def test_deployed_image_and_followup():
     here = Path(__file__).resolve().parent
-    container = os.environ.get("NEXENT_REAL_SMOKE_CONTAINER", "nexent-runtime")
+    container = os.environ.get("NEXENT_REAL_SMOKE_CONTAINER", "nexent-config")
     values = [
         os.environ.get(key)
         for key in (
@@ -24,7 +24,8 @@ def test_deployed_image_and_followup():
             "NEXENT_IMAGE_EXPECTED_FACT",
         )
     ]
-    assert all(values), "Authorized image fixture IDs and expected visual fact are required"
+    if not all(values):
+        pytest.skip("Set the authorized NEXENT_IMAGE_* fixture IDs and NEXENT_IMAGE_EXPECTED_FACT")
     target = "/tmp/jiuwen_image_case.py"
     subprocess.run(
         ["docker", "cp", str(here / "deployed_image.py"), container + ":" + target], check=True, capture_output=True
@@ -35,13 +36,14 @@ def test_deployed_image_and_followup():
                 "docker",
                 "exec",
                 "-e",
-                "PYTHONPATH=/opt/backend",
+                "PYTHONPATH=/opt:/opt/backend",
                 "-w",
                 "/opt/backend",
                 container,
                 "/opt/backend/.venv/bin/python",
                 target,
                 *values,
+                os.environ.get("NEXENT_IMAGE_MODEL_ID", ""),
             ],
             capture_output=True,
             text=True,

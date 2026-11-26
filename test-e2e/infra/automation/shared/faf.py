@@ -49,7 +49,10 @@ async def prepare_faf_agents(identity, case_id):
                                     retain_for_batch=True, owner_case_id=case_id,
                                     registry_role='faf_' + kind, cleanup_identity=identity.id,
                                     **model_options) as (agent_id, body):
-                fixtures[kind] = {'agent_id': agent_id, 'name': body['name'], 'display_name': body['display_name']}
+                fixtures[kind] = {
+                    'agent_id': agent_id, 'name': body['name'], 'display_name': body['display_name'],
+                    'model_id': body['model_ids'][0],
+                }
                 prompt = PROMPTS.get(kind)
                 extra = {}
                 if kind == 'subagent':
