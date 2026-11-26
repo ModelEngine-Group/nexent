@@ -93,6 +93,20 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 
 > 本地上传镜像需管理员在部署中开启「上传镜像」功能后才会显示。
 
+#### 在 Kubernetes 中上传镜像
+
+1. 管理员将 MCP 镜像发布到集群节点可访问的镜像仓库，或以相同的镜像引用预加载到所有可能调度 MCP Pod 的节点。
+2. 对将要上传的原始 `.tar` 文件运行 `sha256sum image.tar`。在 Nexent 部署的 `.env` 中配置对应关系，并更新部署，使 Config 服务读取新配置。
+
+   ```dotenv
+   ENABLE_UPLOAD_IMAGE=true
+   NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES='{"<tar 文件的 64 位小写 SHA-256>":"registry.example.com/mcp/echo:1.0"}'
+   ```
+
+3. 在「本地上传镜像」中选择同一份 `.tar` 文件并提交。Nexent 按文件摘要查找管理员配置的镜像引用，并用它创建 Pod。重新导出的文件如果摘要不同，需要在部署配置中重新登记。
+
+直接通过 Helm 配置 `nexent-common.envFiles.rootData` 时，按 Helm 的环境文件约定传入 Base64 编码后的 JSON 值。镜像引用可使用仓库镜像摘要，以固定实际运行的镜像版本。
+
 #### 端口说明
 
 端口行为根据 Nexent 自身的部署方式自动区分：

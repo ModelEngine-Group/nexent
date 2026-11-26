@@ -93,6 +93,20 @@ Four deployment types are supported:
 
 > Local image upload is only shown after an administrator enables the **Upload Image** feature in the deployment.
 
+#### Uploading an image on Kubernetes
+
+1. Publish the MCP image to a registry the cluster nodes can access, or preload it under the same image reference on every node eligible to run MCP Pods.
+2. Run `sha256sum image.tar` on the exact `.tar` file users will upload. Add the mapping to the Nexent deployment's `.env` and update the deployment so the Config service reads it.
+
+   ```dotenv
+   ENABLE_UPLOAD_IMAGE=true
+   NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES='{"<tar file SHA-256 as 64 lowercase hex digits>":"registry.example.com/mcp/echo:1.0"}'
+   ```
+
+3. Choose the same `.tar` file under **Local Image Upload** and submit it. Nexent looks up the image reference by archive hash and uses that reference to create the Pod. Register a new mapping if a new export produces a different hash.
+
+If you configure `nexent-common.envFiles.rootData` directly in Helm, provide the JSON value encoded as Base64, as required for Helm environment-file data. Use a registry digest in the image reference to pin which version runs.
+
 #### Port Notes
 
 Port behavior is automatically determined by how Nexent itself is deployed:

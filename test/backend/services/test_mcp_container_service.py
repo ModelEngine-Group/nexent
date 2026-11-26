@@ -4,6 +4,8 @@ Unit tests for mcp_container_service.py
 Tests the MCPContainerManager class with comprehensive coverage
 """
 
+import hashlib
+import json
 import sys
 import os
 import tempfile
@@ -37,7 +39,7 @@ patch('infrastructure.object_storage.client.MinioClient', return_value=minio_moc
 patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-from contracts.errors.exceptions import MCPContainerError, MCPConnectionError
+from contracts.errors.exceptions import MCPContainerError, MCPConnectionError, McpValidationError
 from management.services.mcp.containers import MCPContainerManager
 from nexent.container import ContainerError, ContainerConnectionError
 
@@ -1416,6 +1418,53 @@ class TestLoadImageFromTarFile:
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
+
+    @pytest.mark.asyncio
+    async def test_kubernetes_starts_with_approved_archive(self, mock_manager, monkeypatch, tmp_path):
+        archive = tmp_path / "image.tar"
+        archive.write_bytes(b"approved image archive")
+        approved_image = "registry.example.com/mcp/echo:v1"
+        monkeypatch.setattr("management.services.mcp.containers.IS_DEPLOYED_BY_KUBERNETES", True)
+        monkeypatch.setattr(
+            "management.services.mcp.containers.NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES",
+            json.dumps({hashlib.sha256(archive.read_bytes()).hexdigest(): approved_image}),
+            raising=False,
+        )
+        mock_manager.start_mcp_container = AsyncMock()
+
+        await mock_manager.start_mcp_container_from_tar(str(archive), "echo", "tenant", "user")
+
+        assert mock_manager.start_mcp_container.await_args.kwargs["image"] == approved_image
+        mock_manager.client.client.images.load.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("approved_archives", "message"),
+        [
+            ("{}", "Kubernetes MCP image upload requires"),
+            ("{", "must be a JSON object"),
+            ("[]", "must be a JSON object"),
+            (json.dumps({"a" * 64: "registry.example.com/mcp/echo:v1"}), "archive is not approved"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_kubernetes_rejects_unapproved_archive(
+        self, mock_manager, monkeypatch, tmp_path, approved_archives, message,
+    ):
+        archive = tmp_path / "image.tar"
+        archive.write_bytes(b"unapproved image archive")
+        monkeypatch.setattr("management.services.mcp.containers.IS_DEPLOYED_BY_KUBERNETES", True)
+        monkeypatch.setattr(
+            "management.services.mcp.containers.NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES",
+            approved_archives,
+            raising=False,
+        )
+        mock_manager.start_mcp_container = AsyncMock()
+
+        with pytest.raises(McpValidationError, match=message):
+            await mock_manager.start_mcp_container_from_tar(str(archive), "echo", "tenant", "user")
+
+        mock_manager.start_mcp_container.assert_not_awaited()
+        mock_manager.client.client.images.load.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_load_image_from_tar_file_success_with_tags(self, mock_manager):

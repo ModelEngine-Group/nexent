@@ -348,26 +348,26 @@ async def upload_and_start_mcp_image(
     if parsed_env_vars:
         authorization_token = parsed_env_vars.get("authorization_token")
 
-    if on_container_started:
-        await on_container_started(container_info)
-
-    if not wait_for_ready:
-        readiness_error: MCPConnectionError | None = None
-        for _ in range(30):
-            try:
-                await mcp_server_health(
-                    remote_mcp_server=container_info["mcp_url"],
-                    authorization_token=authorization_token,
-                )
-                readiness_error = None
-                break
-            except MCPConnectionError as exc:
-                readiness_error = exc
-                await asyncio.sleep(5)
-        if readiness_error:
-            raise readiness_error
-
     try:
+        if on_container_started:
+            await on_container_started(container_info)
+
+        if not wait_for_ready:
+            readiness_error: MCPConnectionError | None = None
+            for _ in range(30):
+                try:
+                    await mcp_server_health(
+                        remote_mcp_server=container_info["mcp_url"],
+                        authorization_token=authorization_token,
+                    )
+                    readiness_error = None
+                    break
+                except MCPConnectionError as exc:
+                    readiness_error = exc
+                    await asyncio.sleep(5)
+            if readiness_error:
+                raise readiness_error
+
         mcp_id = await add_remote_mcp_server_list(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -382,9 +382,7 @@ async def upload_and_start_mcp_image(
         )
     except Exception as exc:
         logger.warning(
-            f"Failed to register uploaded-image MCP service: {exc}; "
-            "cleaning up the started container so it does not become an orphan "
-            "that keeps occupying the host port"
+            f"Uploaded-image MCP deployment failed: {exc}. Cleaning up its container."
         )
         try:
             await container_manager.stop_mcp_container(container_info["container_id"])
