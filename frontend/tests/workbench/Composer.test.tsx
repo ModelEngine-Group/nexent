@@ -83,7 +83,7 @@ beforeEachI18n(async () => {
 const runtime = vi.hoisted(() => ({
   thread: { isRunning: false, messages: [] },
   threads: { mainThreadId: "fixture-thread" },
-  composer: { text: "question", dictation: false, attachments: [] },
+  composer: { text: "question", dictation: false, attachments: [] as { id: string }[] },
   cancel: vi.fn(),
 }));
 beforeEach(() => {
@@ -91,6 +91,7 @@ beforeEach(() => {
   deployment.isDeploymentReady = true;
   runtime.thread.isRunning = false;
   runtime.composer.text = "question";
+  runtime.composer.attachments = [];
   runtime.cancel.mockReset();
   vi.mocked(conversationService.getKnowledgeCapabilities).mockReset();
   resourceQueries.knowledge.mockClear();
@@ -201,7 +202,7 @@ it("caps the workbench model selector width so long names truncate on one row", 
 });
 
 vi.mock("@/app/newchat/ui/attachment", () => ({
-  ComposerAttachments: () => null,
+  ComposerAttachments: () => <div data-testid="attachment-preview" />,
   ComposerAddAttachment: ({
     label,
     tooltip,
@@ -291,6 +292,36 @@ const base = {
   onChatModeChange: vi.fn(),
   knowledgeCapabilities: capabilities,
 };
+
+it("shows the ordinary Agent chat's selected knowledge without loading its catalog", async () => {
+  const onKnowledgeScopeChange = vi.fn();
+  const { container } = render(
+    <Composer
+      {...base}
+      knowledgeAgent={{ id: 41, versionNo: 1, sources: { local: true, aidp: false } }}
+      knowledgeScope={{
+        schema_version: 1,
+        local: { mode: "override", knowledge_ids: ["2", "3"] },
+        aidp: { mode: "disabled", kds_ids: [] },
+      }}
+      knowledgePreview={{
+        local: { disabled: false, knowledge_ids: ["3", "2"], display_names: ["Sales", "Support"] },
+        aidp: { disabled: true, kds_ids: [], display_names: [] },
+      }}
+      onKnowledgeScopeChange={onKnowledgeScopeChange}
+    />
+  );
+  const chips = container.querySelector<HTMLElement>('[data-slot="composer-resources"]')!;
+  expect(chips).toHaveTextContent("SupportSales");
+  const support = within(chips).getByText("Support").parentElement!;
+  await userEvent.click(within(support).getByRole("button"));
+  expect(onKnowledgeScopeChange).toHaveBeenCalledWith(
+    expect.objectContaining({ local: { mode: "override", knowledge_ids: ["3"] } }),
+    expect.objectContaining({ local: { disabled: false, knowledge_ids: ["3"], display_names: ["Sales"] } })
+  );
+  expect(conversationService.getKnowledgeCapabilities).not.toHaveBeenCalled();
+  expect(resourceQueries.knowledge).not.toHaveBeenCalledWith(true, false);
+});
 
 const lazyKnowledgeProps = {
   ...base,
@@ -978,15 +1009,19 @@ it.each(["skill_create", "agent_create"] as const)(
     runtime.composer.text = "question";
   }
 );
-it("UT-FE-WB-014 composer shows resource counts in its ordered toolbar", async () => {
+it("UT-FE-WB-014 composer shows named resources above attachments and preserves toolbar counts", async () => {
   runtime.thread.isRunning = false;
+  runtime.composer.attachments = [{ id: "attachment" }];
   const onChatModeChange = vi.fn();
   const onSelectAgent = vi.fn();
-  render(
+  const onRemoveAgent = vi.fn();
+  const onRemoveSkill = vi.fn();
+  const onKnowledgeScopeChange = vi.fn();
+  const { container } = render(
     <Composer
       {...base}
       onChatModeChange={onChatModeChange}
-      onKnowledgeScopeChange={vi.fn()}
+      onKnowledgeScopeChange={onKnowledgeScopeChange}
       onOpenWorkbenchSkillPicker={vi.fn()}
       workbenchPresentation={{
         mode: "generic_chat",
@@ -995,14 +1030,20 @@ it("UT-FE-WB-014 composer shows resource counts in its ordered toolbar", async (
         actions: <button>Skill 创建</button>,
       }}
       workbenchResources={{
-        agentCount: 8,
-        skillCount: 2,
+        agents: Array.from({ length: 8 }, (_, id) => ({ id, name: `Agent ${id}` })),
+        skills: [{ id: 1, name: "Skill One" }, { id: 2, name: "Skill Two" }],
         onSelectAgent,
+        onRemoveAgent,
+        onRemoveSkill,
       }}
       knowledgeScope={{
         schema_version: 1,
         local: { mode: "override", knowledge_ids: ["3"] },
         aidp: { mode: "disabled", kds_ids: [] },
+      }}
+      knowledgePreview={{
+        local: { disabled: false, knowledge_ids: ["3"], display_names: ["Sales Handbook"] },
+        aidp: { disabled: true, kds_ids: [], display_names: [] },
       }}
     >
       <ComposerAttachment />
@@ -1016,6 +1057,28 @@ it("UT-FE-WB-014 composer shows resource counts in its ordered toolbar", async (
   const mode = screen.getByRole("button", {
     name: "chat.composer.executionMode",
   });
+  const chips = container.querySelector<HTMLElement>('[data-slot="composer-resources"]')!;
+  const attachmentPreview = screen.getByTestId("attachment-preview");
+  before(chips, attachmentPreview);
+  before(attachmentPreview, screen.getByRole("textbox"));
+  for (const name of ["Agent 0", "Sales Handbook", "Skill One"]) {
+    const chip = within(chips).getByText(name).parentElement!;
+    expect(chip.querySelector('[aria-hidden="true"] svg')).toBeInTheDocument();
+    await userEvent.click(within(chip).getByRole("button"));
+  }
+  expect(onRemoveAgent).toHaveBeenCalledExactlyOnceWith(0);
+  expect(onRemoveSkill).toHaveBeenCalledExactlyOnceWith(1);
+  expect(onKnowledgeScopeChange).toHaveBeenCalledExactlyOnceWith(
+    {
+      schema_version: 1,
+      local: { mode: "disabled", knowledge_ids: [] },
+      aidp: { mode: "disabled", kds_ids: [] },
+    },
+    {
+      local: { disabled: true, knowledge_ids: [], display_names: [] },
+      aidp: { disabled: true, kds_ids: [], display_names: [] },
+    }
+  );
   expect(
     screen.getByRole("button", { name: "Skill 创建" })
   ).toBeInTheDocument();

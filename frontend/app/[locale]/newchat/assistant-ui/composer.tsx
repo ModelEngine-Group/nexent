@@ -14,6 +14,7 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ComposerAttachment, ComposerDictation } from "./composer-tools";
 import { CreationExamples } from "@/features/workbench/components/CreationExamples";
+import { SelectedResourceTags } from "@/features/workbench/components/SelectedResourceTags";
 import {
   Send,
   CircleStop,
@@ -348,6 +349,7 @@ export const Composer: FC<ComposerProps> = ({
   );
   const runtime = aui.threads().__internal_getAssistantRuntime?.();
   const [sendError, setSendError] = useState("");
+  const [removingResource, setRemovingResource] = useState(false);
   const prepareSend = (event?: { preventDefault: () => void }) => {
     if (!runtime || runtime.thread.getState().isRunning) return;
     const threadId = runtime.threads.getState().mainThreadId;
@@ -562,16 +564,102 @@ export const Composer: FC<ComposerProps> = ({
   const hasAttachments = useAuiState(
     (state) => state.composer.attachments.length > 0
   );
-  const agentCount = workbenchResources?.agentCount ?? 0;
-  const skillCount = workbenchResources?.skillCount ?? 0;
-  const knowledgeCount =
+  const agentCount = workbenchResources?.agents.length ?? 0;
+  const skillCount = workbenchResources?.skills.length ?? 0;
+  const knowledgeIds =
     knowledgeSource === "local"
       ? knowledgeScope?.local.mode === "override"
-        ? knowledgeScope.local.knowledge_ids.length
-        : 0
+        ? knowledgeScope.local.knowledge_ids
+        : []
       : knowledgeScope?.aidp.mode === "override"
-        ? knowledgeScope.aidp.kds_ids.length
-        : 0;
+        ? knowledgeScope.aidp.kds_ids
+        : [];
+  const knowledgeCount = knowledgeIds.length;
+  const knowledgePreviewIds =
+    knowledgeSource === "local"
+      ? knowledgePreview?.local.knowledge_ids
+      : knowledgePreview?.aidp.kds_ids;
+  const knowledgePreviewNames =
+    knowledgePreview?.[knowledgeSource].display_names;
+  const knowledgeNamesById = new Map(
+    knowledgePreviewIds?.map((id, index) => [id, knowledgePreviewNames?.[index]])
+  );
+  const knowledgeResources = knowledgeIds.map((id) => ({
+    id,
+    name: knowledgeNamesById.get(id) || `#${id}`,
+  }));
+  const removeKnowledge = (id: string) => {
+    if (!knowledgeScope || !onKnowledgeScopeChange) return;
+    const remaining = knowledgeResources.filter((item) => item.id !== id);
+    const ids = remaining.map((item) => item.id);
+    const display_names = remaining.map((item) => item.name);
+    const mode = ids.length > 0 ? "override" : "disabled";
+    const local = knowledgeSource === "local";
+    const nextScope: ConversationKnowledgeScope = {
+      ...knowledgeScope,
+      local: local ? { mode, knowledge_ids: ids } : knowledgeScope.local,
+      aidp: local ? knowledgeScope.aidp : { mode, kds_ids: ids },
+    };
+    return onKnowledgeScopeChange(nextScope, {
+      local: local
+        ? { disabled: !ids.length, knowledge_ids: ids, display_names }
+        : knowledgePreview?.local ?? {
+            disabled: nextScope.local.mode === "disabled",
+            knowledge_ids: [],
+            display_names: [],
+          },
+      aidp: local
+        ? knowledgePreview?.aidp ?? {
+            disabled: nextScope.aidp.mode === "disabled",
+            kds_ids: [],
+            display_names: [],
+          }
+        : { disabled: !ids.length, kds_ids: ids, display_names },
+    });
+  };
+  const resourceTags = [
+    ...(toolbar.agent && workbenchResources
+      ? workbenchResources.agents.map(({ id, name }) => ({
+          id: `agent:${id}`,
+          name,
+          icon: <Bot className="size-3.5" />,
+          remove: () => workbenchResources.onRemoveAgent(id),
+        }))
+      : []),
+    ...(toolbar.knowledge
+      ? knowledgeResources.map(({ id, name }) => ({
+          id: `knowledge:${id}`,
+          name,
+          icon: <KnowledgeBookIcon className="size-3.5" />,
+          remove: () => removeKnowledge(id),
+        }))
+      : []),
+    ...(toolbar.skill && workbenchResources
+      ? workbenchResources.skills.map(({ id, name }) => ({
+          id: `skill:${id}`,
+          name,
+          icon: <SkillStackIcon className="size-3.5" />,
+          remove: () => workbenchResources.onRemoveSkill(id),
+        }))
+      : []),
+  ];
+  const onRemoveResource = async (id: string) => {
+    const resource = resourceTags.find((item) => item.id === id);
+    if (!resource || removingResource || disabled || isRunning) return;
+    setRemovingResource(true);
+    setSendError("");
+    try {
+      await resource.remove();
+    } catch (error) {
+      setSendError(
+        error instanceof Error
+          ? error.message
+          : t("workbench.controls.saveConfigFailed")
+      );
+    } finally {
+      setRemovingResource(false);
+    }
+  };
 
   const hasIncompatibleScope = Boolean(
     isDeploymentReady &&
@@ -723,7 +811,17 @@ export const Composer: FC<ComposerProps> = ({
               }
             }}
           >
-            {hasAttachments && <ComposerAttachments />}
+            {(resourceTags.length > 0 || hasAttachments) && (
+              <div className="flex min-w-0 flex-col gap-2">
+                <SelectedResourceTags
+                  items={resourceTags}
+                  compact
+                  disabled={disabled || isRunning || removingResource}
+                  onRemove={(id) => void onRemoveResource(id)}
+                />
+                {hasAttachments && <ComposerAttachments />}
+              </div>
+            )}
             <ComposerAnnotationChip
               annotations={annotations?.annotations ?? []}
               disabled={isRunning || disabled}
@@ -773,7 +871,7 @@ export const Composer: FC<ComposerProps> = ({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={isRunning || disabled}
+                    disabled={isRunning || disabled || removingResource}
                     className={resourceButtonClass(agentCount)}
                     onClick={toolbar.agent}
                     aria-label={t("workbench.controls.agents", "智能体")}
@@ -795,7 +893,7 @@ export const Composer: FC<ComposerProps> = ({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={isRunning || disabled}
+                    disabled={isRunning || disabled || removingResource}
                     className={resourceButtonClass(knowledgeCount)}
                     onClick={() => setKnowledgeModalOpen(true)}
                     aria-label={t("chat.composer.knowledgeBase")}
@@ -818,7 +916,7 @@ export const Composer: FC<ComposerProps> = ({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={isRunning || disabled}
+                    disabled={isRunning || disabled || removingResource}
                     className={resourceButtonClass(skillCount)}
                     onClick={toolbar.skill}
                     aria-label={t("chat.composer.skills")}

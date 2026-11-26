@@ -56,9 +56,11 @@ export interface WorkbenchBootstrap {
 }
 
 export interface WorkbenchResourceControls {
-  agentCount: number;
-  skillCount: number;
+  agents: Array<{ id: number; name: string }>;
+  skills: Array<{ id: number; name: string }>;
   onSelectAgent: () => void;
+  onRemoveAgent: (id: number) => Promise<void>;
+  onRemoveSkill: (id: number) => Promise<void>;
 }
 
 export interface WorkbenchComposerPresentation {

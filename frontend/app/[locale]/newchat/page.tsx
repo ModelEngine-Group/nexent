@@ -708,7 +708,7 @@ const HomeContent: FC<{
             scope
           );
           conversationDetails.invalidate(String(numericConversationId));
-          nextPreview = result.effective_preview;
+          nextPreview = result.effective_preview ?? nextPreview;
           showKnowledgeScopeWarnings(result.warnings);
         }
         if (activeThreadId) {

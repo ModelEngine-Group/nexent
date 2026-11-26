@@ -663,7 +663,7 @@ const HomeContent: FC = () => {
         let restoredPreview =
           readKnowledgeCache(activeThreadId)?.preview ?? null;
         try {
-          restoredPreview = await restoreKnowledgeDisplay(restoredScope, false);
+          restoredPreview ??= await restoreKnowledgeDisplay(restoredScope, false);
         } catch (error) {
           log.warn("Knowledge display lookup failed", error);
         }
@@ -1271,7 +1271,10 @@ const HomeContent: FC = () => {
   ]);
 
   const applyAgentMounts = useCallback(
-    async (mounts: import("@/features/workbench").WorkbenchAgentMount[]) => {
+    async (
+      mounts: import("@/features/workbench").WorkbenchAgentMount[],
+      chosenAgent?: Agent
+    ) => {
       const nextConfig = {
         ...workbenchState.config,
         mode: deriveConversationMode(mounts),
@@ -1289,7 +1292,9 @@ const HomeContent: FC = () => {
       }
       const first = mounts[0];
       const agent =
-        first && agents.find((item) => Number(item.id) === first.agent_id);
+        first &&
+        (agents.find((item) => Number(item.id) === first.agent_id) ??
+          (Number(chosenAgent?.id) === first.agent_id ? chosenAgent : null));
       onRestoreAgent(
         agent ? { ...agent, current_version_no: first.version_no } : null
       );
@@ -1313,9 +1318,10 @@ const HomeContent: FC = () => {
           agent.current_version_no
         );
         await changeAgentTopology(runtime, () =>
-          applyAgentMounts([
-            { agent_id: preview.agent_id, version_no: preview.version_no },
-          ])
+          applyAgentMounts(
+            [{ agent_id: preview.agent_id, version_no: preview.version_no }],
+            agent
+          )
         );
       } catch (error) {
         message.error(
@@ -1536,9 +1542,37 @@ const HomeContent: FC = () => {
                 isCreating
                   ? undefined
                   : {
-                      agentCount: workbenchState.config.agent_mounts.length,
-                      skillCount: workbenchState.config.skill_mounts.length,
+                      agents: workbenchState.config.agent_mounts.map(({ agent_id }) => {
+                        const agent =
+                          agents.find(({ id }) => Number(id) === agent_id) ??
+                          (Number(selectedAgent?.id) === agent_id ? selectedAgent : null);
+                        return {
+                          id: agent_id,
+                          name: agent?.display_name || agent?.name || `#${agent_id}`,
+                        };
+                      }),
+                      skills: workbenchState.config.skill_mounts.map(
+                        ({ skill_id }) => ({
+                          id: skill_id,
+                          name: workbenchState.skillNames[skill_id] || `#${skill_id}`,
+                        })
+                      ),
                       onSelectAgent: () => setAgentPickerOpen(true),
+                      onRemoveAgent: (id) =>
+                        changeAgentTopology(runtime, () =>
+                          applyAgentMounts(
+                            workbenchState.config.agent_mounts.filter(
+                              ({ agent_id }) => agent_id !== id
+                            )
+                          )
+                        ),
+                      onRemoveSkill: (id) =>
+                        handleReplaceWorkbenchSkills(
+                          workbenchState.config.skill_mounts.filter(
+                            ({ skill_id }) => skill_id !== id
+                          ),
+                          []
+                        ),
                     }
               }
               onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
