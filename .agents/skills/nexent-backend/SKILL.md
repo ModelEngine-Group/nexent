@@ -12,7 +12,7 @@ Repository paths below are relative to the root; reference links resolve from th
 
 | Work | Reference |
 | --- | --- |
-| HTTP routes, validation, identity, response/error mapping | [HTTP layer](references/http.md) |
+| HTTP routes, validation, identity, response/error mapping, external API failures returned to the frontend | [HTTP layer](references/http.md) |
 | Business orchestration and domain errors | [Services](references/services.md) |
 | Relational schema design, models, keys/indexes, queries, transactions, SQL migrations | [Database](references/database.md) |
 | Environment configuration and SDK configuration parameters | [Configuration](references/configuration.md) |
