@@ -20,6 +20,7 @@ import {
   type AidpDroppedFile,
 } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpDropFiles";
 import { normalizeFolderPath } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpFolderUtils";
+import { formatFileSize } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpKnowledgeDetailUtils";
 import { useUploadCenter } from "@/hooks/upload/useUploadCenter";
 import AidpFolderPickerModal from "@/ext_components/aidp/pages/knowledge-files/components/AidpFolderPickerModal";
 
@@ -38,14 +39,6 @@ interface AidpImportDrawerProps {
   onUploadComplete?: () => void;
 }
 
-const formatBytes = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}K`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}G`;
-};
-
 const SelectionRow: React.FC<{
   row: AidpDroppedFile;
   onRemove: (row: AidpDroppedFile) => void;
@@ -58,9 +51,9 @@ const SelectionRow: React.FC<{
         <Tooltip title={row.relativePath}>
           <div className={styles.fileName}>{row.relativePath}</div>
         </Tooltip>
-        <Tooltip title={formatBytes(row.file.size)}>
-          <div className={styles.fileDetail}>{formatBytes(row.file.size)}</div>
-        </Tooltip>
+        <div className={styles.fileDetail}>
+          {formatFileSize(row.file.size)}
+        </div>
       </div>
       <Button
         className={styles.deleteButton}
@@ -112,18 +105,13 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
     (incoming: AidpDroppedFile[]) => {
       if (incoming.length === 0) return;
       const current = rowsRef.current;
-      const seen = new Set(
-        current.map(
-          (row) =>
-            `${row.relativePath}|${row.file.name}|${row.file.size}|${row.file.lastModified}`
-        )
-      );
+      const seen = new Set(current.map((row) => row.file.name));
       const next = [...current];
       let duplicateCount = 0;
       let limitCount = 0;
       let currentBytes = current.reduce((sum, row) => sum + row.file.size, 0);
       for (const row of incoming) {
-        const key = `${row.relativePath}|${row.file.name}|${row.file.size}|${row.file.lastModified}`;
+        const key = row.file.name;
         if (seen.has(key)) {
           duplicateCount += 1;
           continue;
@@ -169,7 +157,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
   }, [onClose, replaceRows]);
 
   const handleImport = useCallback(() => {
-    if (rowsRef.current.length === 0) return;
     const folder = normalizeFolderPath(targetFolder);
     enqueue({
       files: rowsRef.current.map((row) => ({
@@ -256,7 +243,30 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
           </div>
         }
       >
-        <div className={styles.drawerBody}>
+        <div
+          className={styles.drawerBody}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+            setDragOver(true);
+          }}
+          onDragLeave={(event) => {
+            if (
+              !event.currentTarget.contains(event.relatedTarget as Node | null)
+            ) {
+              setDragOver(false);
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragOver(false);
+            void collectDroppedFiles(event.dataTransfer)
+              .then(addFiles)
+              .catch(() =>
+                message.error(t("aidpKnowledge.importReadFailed"))
+              );
+          }}
+        >
           <div className={styles.importIntro}>
             {t("aidpKnowledge.importDescription")}
           </div>
@@ -307,25 +317,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
               className={`${styles.dropArea} ${
                 dragOver ? styles.dropAreaActive : ""
               }`}
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "copy";
-                setDragOver(true);
-              }}
-              onDragLeave={(event) => {
-                if (
-                  !event.currentTarget.contains(
-                    event.relatedTarget as Node | null
-                  )
-                ) {
-                  setDragOver(false);
-                }
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragOver(false);
-                void collectDroppedFiles(event.dataTransfer).then(addFiles);
-              }}
             >
               <div className={styles.formatsHint}>
                 {t("aidpKnowledge.uploadHintFormats")}

@@ -26,7 +26,6 @@ export const AIDP_ACCEPT_STRING = [
   .map((ext) => `.${ext}`)
   .join(",");
 
-export const AIDP_MAX_UPLOAD_FILE_COUNT = 50;
 export const AIDP_SMALL_FILE_MAX_SIZE_MB = 20;
 export const AIDP_OTHER_FILE_MAX_SIZE_MB = 1024;
 export const AIDP_SMALL_FILE_EXTENSIONS = [
