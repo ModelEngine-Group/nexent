@@ -2197,7 +2197,7 @@
   "agentConfig.list.column.updatedAt": "更新时间",
   "agentConfig.list.resizeColumn": "拖动调整“{{column}}”列宽（方向键微调）",
   "agentConfig.list.column.actions": "操作",
-  "agentConfig.empty.noAgents": "暂无智能体，请创建",
+  "agentConfig.empty.noAgents": "暂无智能体",
   "agentConfig.button.generationAssistant": "智能体生成助手",
   "agentConfig.guide.title": "什么是智能体？",
   "agentConfig.guide.expand": "展开教程",

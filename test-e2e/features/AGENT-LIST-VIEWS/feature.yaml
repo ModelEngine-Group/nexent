@@ -65,6 +65,9 @@ feature:
   - rule_id: AGENT-LIST-RULE-012
     description: The Agent list does not show creator/import category tabs while its data source
       cannot reliably distinguish Agents by import provenance.
+  - rule_id: AGENT-LIST-RULE-013
+    description: An empty Agent list keeps file import available alongside creation.
+      The Agent Repository also exposes the same import wizard to users with access to Agent configuration.
   required_test_stages:
   - D1
   - D4
@@ -73,4 +76,5 @@ feature:
     - AGENT-LIST-REQ-001
     - AGENT-LIST-REQ-002
     - AGENT-LIST-REQ-003
+    - AGENT-EMPTY-LIST-IMPORT-20261126
     spec_path: ../nexent-doc/docs/Developing/agt-agent-list-views/proposal.md
