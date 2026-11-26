@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 from threading import Event
@@ -153,6 +154,44 @@ def test_passes_through_short_text():
 def test_passes_through_empty_results():
     observer = _RecordingObserver()
     assert annotate_mcp_search_results(json.dumps({"results": []}), observer) is None
+
+
+def test_picks_retrieval_shaped_list_when_multiple_list_keys_present():
+    # Review regression: the first candidate list key may hold a non-retrieval
+    # list while the real chunks live under a later key.
+    observer = _RecordingObserver()
+    payload = {
+        "code": 0,
+        "items": [{"id": 1, "name": "stub entry", "content": "short"}],
+        "chunks": RAG_RESULTS,
+    }
+    result = annotate_mcp_search_results(json.dumps(payload), observer, "rag")
+    assert result is not None
+    assert [item["index"] for item in json.loads(result)] == ["q1", "q2"]
+    reported = json.loads(observer.messages[0][2])
+    assert reported[0]["title"] == "Deployment guide"
+
+
+def test_passes_through_when_no_list_is_retrieval_shaped():
+    # Review regression: none of the candidate lists matching the shape means
+    # the payload stays unannotated instead of latching onto the first list.
+    observer = _RecordingObserver()
+    payload = {
+        "items": [{"id": 1, "name": "stub entry", "content": "short"}],
+        "data": [{"name": "cfg", "content": "tiny"}],
+    }
+    assert annotate_mcp_search_results(json.dumps(payload), observer) is None
+    assert observer.messages == []
+
+
+def test_logs_annotation_with_tool_name(caplog):
+    # Detection is heuristic: an INFO signal names the annotated tool so a
+    # misdetection (e.g. a ticket list) is traceable in agent logs.
+    observer = _RecordingObserver()
+    with caplog.at_level(logging.INFO, logger="nexent.core.agents.mcp_citation"):
+        annotate_mcp_search_results(json.dumps(RAG_RESULTS), observer, "rag_search")
+    assert "2 retrieval-shaped item(s)" in caplog.text
+    assert "'rag_search'" in caplog.text
 
 
 def test_passes_through_scalar_json_payload():
@@ -358,6 +397,71 @@ def test_score_field_accepts_string_values():
     annotate_mcp_search_results(json.dumps(items), observer, "rag")
     reported = json.loads(observer.messages[0][2])
     assert reported[0]["score"] == "high"
+
+
+def test_model_payload_preserves_unmapped_fields():
+    # Review regression: a ticket-like list that trips the retrieval heuristic
+    # must not lose its business fields in the model-facing payload.
+    observer = _RecordingObserver()
+    tickets = [{
+        "id": 42,
+        "name": "Printer broken",
+        "content": "The office printer jams on every duplex print job.",
+        "status": "open",
+        "priority": "high",
+        "assignee": "bob",
+    }]
+    result = annotate_mcp_search_results(json.dumps(tickets), observer, "tickets")
+    assert result is not None
+    payload = json.loads(result)[0]
+    # Unified citation keys keep their normalized values.
+    assert payload["title"] == "Printer broken"
+    assert payload["text"] == "The office printer jams on every duplex print job."
+    assert payload["index"] == "q1"
+    assert payload["reference_mark"] == "[[q1]]"
+    # Business fields survive verbatim; text/title aliases are not duplicated.
+    assert payload["id"] == 42
+    assert payload["status"] == "open"
+    assert payload["priority"] == "high"
+    assert payload["assignee"] == "bob"
+    assert "name" not in payload
+    assert "content" not in payload
+
+
+def test_model_payload_citation_keys_win_on_collision():
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Doc",
+        "text": "A long enough document chunk for detection.",
+        "index": 99,
+        "reference_mark": "boom",
+        "status": "open",
+    }]
+    result = annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    assert result is not None
+    payload = json.loads(result)[0]
+    assert payload["index"] == "q1"
+    assert payload["reference_mark"] == "[[q1]]"
+    assert payload["status"] == "open"
+
+
+def test_model_payload_preserves_metadata_and_score_fields():
+    # Fields consumed by the UI citation card are still kept for the model:
+    # annotation only adds citation metadata, it never removes tool data.
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Doc",
+        "url": "https://example.com/m",
+        "text": "A long enough document chunk for detection.",
+        "similarity": 0.9,
+        "metadata": {"tenant": "acme"},
+    }]
+    result = annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    assert result is not None
+    payload = json.loads(result)[0]
+    assert payload["url"] == "https://example.com/m"
+    assert payload["similarity"] == 0.9
+    assert payload["metadata"] == {"tenant": "acme"}
 
 
 # ---------------------------------------------------------------------------

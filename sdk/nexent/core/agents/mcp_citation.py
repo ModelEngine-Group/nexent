@@ -10,7 +10,9 @@ rendering works exactly like built-in search tools without any backend or
 frontend change. Inline ``<img>`` tags are stripped from chunk text and,
 when an image URL builder is provided, image chunks are rebuilt as image
 markers resolved through the picture-web channel, mirroring the built-in
-AIDP search tool flow.
+AIDP search tool flow. Fields not mapped onto the unified citation shape
+are preserved verbatim in the model-facing payload (citation keys win
+collisions), so a heuristic misdetection never silently drops tool data.
 """
 
 import functools
@@ -47,6 +49,12 @@ _RETRIEVAL_SOURCE_FIELDS = ("retrieval_source", "source")
 _CHUNK_TYPE_FIELDS = ("chunk_type",)
 _PAGES_FIELDS = ("pages",)
 _FILE_URL_FIELDS = ("file_url",)
+# Item fields the unified citation shape already re-emits under its own
+# model-payload keys (text/title aliases). Every other item field is kept
+# verbatim in the model-facing payload so a heuristic misdetection (e.g. a
+# ticket list with a long content field) never drops tool data the model
+# needs; citation keys take precedence when names collide.
+_MAPPED_FIELDS = frozenset(_TEXT_FIELDS + _TITLE_FIELDS)
 # Inline <img> tags embedded in data-platform RAG chunk text are stripped the
 # same way built-in AIDP search tools do before reporting citation content.
 _HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
@@ -77,17 +85,26 @@ def _has_value(source: Dict[str, Any], field: str) -> bool:
     return not isinstance(value, str) or bool(value.strip())
 
 
-def _extract_result_items(payload: Any) -> Optional[List[Any]]:
-    """Extract the candidate result list from a parsed JSON payload."""
+def _extract_retrieval_items(payload: Any) -> Optional[List[Any]]:
+    """Extract the retrieval-shaped item list from a parsed JSON payload.
+
+    Every candidate list key is checked against the retrieval heuristic and
+    the first matching list wins, so payloads carrying several lists (e.g. a
+    status list next to the real chunks) still annotate the right one instead
+    of giving up on the first non-retrieval list. A single text-bearing
+    object is treated as a one-item result.
+    """
     if isinstance(payload, list):
-        return payload if payload else None
+        return payload if _looks_like_retrieval_result(payload) else None
     if isinstance(payload, dict):
         for key in _LIST_KEYS:
             value = payload.get(key)
-            if isinstance(value, list) and value:
+            if isinstance(value, list) and _looks_like_retrieval_result(value):
                 return value
         if _first_str(payload, _TEXT_FIELDS) is not None:
-            return [payload]
+            items = [payload]
+            if _looks_like_retrieval_result(items):
+                return items
     return None
 
 
@@ -224,7 +241,9 @@ def annotate_mcp_search_results(
 
     Returns the rewritten model-facing JSON string, or ``None`` when the
     result does not look like a retrieval result (callers keep the original
-    output unchanged in that case).
+    output unchanged in that case). Item fields not mapped onto the unified
+    citation shape are preserved verbatim in the model-facing payload
+    (citation keys win collisions) so misdetections stay non-destructive.
 
     When ``image_url_builder`` is callable, image chunks are additionally
     rebuilt the way built-in AIDP search tools do: the observer entry carries
@@ -239,9 +258,17 @@ def annotate_mcp_search_results(
     except (TypeError, ValueError):
         return None
 
-    items = _extract_result_items(payload)
-    if items is None or not _looks_like_retrieval_result(items):
+    items = _extract_retrieval_items(payload)
+    if items is None:
         return None
+
+    # Detection is heuristic: log a signal so operators can spot payloads a
+    # tool never meant to be annotated (e.g. ticket lists) in agent logs.
+    logger.info(
+        "Annotating %d retrieval-shaped item(s) from MCP tool %r with citation marks",
+        len(items),
+        tool_name or "<unnamed>",
+    )
 
     tool_sign = ToolSign.MCP_SEARCH.value
     start_index = observer.reserve_citations(tool_sign, len(items))
@@ -254,6 +281,9 @@ def annotate_mcp_search_results(
         )
         ui_result = message.to_dict()
         model_result = message.to_model_dict()
+        for key, value in item.items():
+            if key not in _MAPPED_FIELDS and key not in model_result:
+                model_result[key] = value
         _rebuild_image_chunk(
             message, ui_result, model_result, image_urls, image_url_builder
         )
