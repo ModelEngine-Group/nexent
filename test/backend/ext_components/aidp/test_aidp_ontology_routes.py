@@ -998,3 +998,129 @@ def test_metadata_limit_and_async_acknowledgements(monkeypatch):
     assert _client().delete(
         "/aidp-mgmt/ontology/domains/1/metadata-fields/2", headers=_bearer()
     ).status_code == 200
+
+
+def test_batch_service_functions_and_fallbacks(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_batch_routes as routes
+
+    _allow_manager(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        routes,
+        "_ontology_request",
+        lambda *a, **kw: calls.append((a, kw)) or {"ok": True},
+    )
+    assert routes.export_ontology_impl("s", "k", "1") == {"ok": True}
+    assert routes.import_ontology_impl("s", "k", "1", {"Demo": {}}) == {"ok": True}
+    assert len(calls) == 2
+
+    monkeypatch.setattr(
+        routes, "export_ontology_impl", lambda *a, **kw: {"data": {}}
+    )
+    assert _client().post(
+        "/aidp-mgmt/ontology/domains/1/export",
+        headers=_bearer(),
+        json={"include_properties": True, "include_relations": True},
+    ).status_code != 200
+
+    monkeypatch.setattr(
+        routes,
+        "export_ontology_impl",
+        lambda *a, **kw: {"data": {"Demo": {}}},
+    )
+
+    def failing_domain(*_a, **_kw):
+        raise routes.AppException(_Code(), "down")
+
+    monkeypatch.setattr(routes, "get_ontology_domain_impl", failing_domain)
+    assert _client().post(
+        "/aidp-mgmt/ontology/domains/1/export",
+        headers=_bearer(),
+        json={"include_properties": True, "include_relations": True},
+    ).status_code == 200
+
+    assert _client().post(
+        "/aidp-mgmt/ontology/domains/1/import",
+        headers=_bearer(),
+        json={"file_name": "x.json", "document": {"Demo": {}}},
+    ).status_code == 400
+
+    monkeypatch.setattr(
+        routes, "get_ontology_domain_impl", lambda *a, **kw: {"name": "Demo"}
+    )
+    monkeypatch.setattr(
+        routes,
+        "import_ontology_impl",
+        lambda *a, **kw: {"data": {"task_id": "1"}},
+    )
+    assert _client().post(
+        "/aidp-mgmt/ontology/domains/1/import",
+        headers=_bearer(),
+        json={
+            "file_name": "x.json",
+            "document": {"Demo": {"types": [], "entities": [], "relations": []}},
+        },
+    ).status_code == 200
+
+
+def test_common_error_and_envelope_fallbacks(client):
+    module = ontology_common
+    client.request.return_value = _response(
+        400, json_body={"error": {"code": 9999, "message": "bad"}}
+    )
+    with pytest.raises(module.AppException) as error:
+        module._ontology_request("http://aidp.example", "key", "GET", "/x", operation="op")
+    assert error.value.details["upstream_code"] == 9999
+
+    client.request.return_value = _response(500, json_body={"error": {"message": "down"}})
+    with pytest.raises(module.AppException):
+        module._ontology_request("http://aidp.example", "key", "GET", "/x", operation="op")
+
+    envelope = module._list_envelope(
+        {"data": {}, "value": [{"id": 1}], "total_count": 5},
+        page=1,
+        page_size=20,
+    )
+    assert envelope["value"][0]["id"] == 1
+    assert envelope["total_count"] == 5
+
+    fallback = module._list_envelope(
+        {"items": [{"id": 1}]},
+        page=1,
+        page_size=1,
+    )
+    assert fallback["has_more"] is True
+
+
+def test_metadata_unbind_and_duplicate_rename(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_metadata_routes as routes
+
+    _allow_manager(monkeypatch)
+    monkeypatch.setattr(routes.perms, "require_permission", lambda *a, **kw: None)
+
+    async def fields(*_a, **_kw):
+        return [
+            {"id": 1, "field_name": "f", "field_type": "string"},
+            {"id": 2, "field_name": "g", "field_type": "string"},
+        ]
+
+    monkeypatch.setattr(routes, "_load_metadata_fields", fields)
+    monkeypatch.setattr(
+        routes,
+        "_find_metadata_field",
+        lambda rows, ref: next(
+            (row for row in rows if str(row["id"]) == str(ref) or row["field_name"] == ref),
+            None,
+        ),
+    )
+    client = _client()
+    assert client.post(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields/batch-unbind",
+        headers=_bearer(),
+        json={"metadata_ids": ["missing"]},
+    ).status_code == 400
+    assert client.patch(
+        "/aidp-mgmt/ontology/domains/1/metadata-fields/1",
+        headers=_bearer(),
+        json={"new_field_name": "g"},
+    ).status_code == 400
