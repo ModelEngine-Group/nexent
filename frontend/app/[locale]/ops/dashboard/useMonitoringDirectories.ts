@@ -28,6 +28,7 @@ export function useMonitoringDirectories({
   canReadInventory,
   tab,
   selectedService,
+  selectedGroup,
   drilledMcpService,
 }: {
   userId: string;
@@ -37,6 +38,7 @@ export function useMonitoringDirectories({
   canReadInventory: boolean;
   tab: MonitoringTab;
   selectedService?: string;
+  selectedGroup?: string;
   drilledMcpService?: { tenantId: string; service: McpServiceFilter };
 }) {
   const queryClient = useQueryClient();
@@ -84,10 +86,16 @@ export function useMonitoringDirectories({
     queryFn: () => fetchSkillsList(tenant, "mount"),
   });
 
+  // The service directory follows the group filter on the MCP tab only: the
+  // server catalog applies the same configured-group matching as the metrics,
+  // while the overview card keeps the unfiltered registered count.
+  const catalogGroupIds =
+    tab === "mcp" && selectedGroup ? [Number(selectedGroup)] : [];
   const mcpCatalog = useQuery({
-    queryKey: [...queryKey, "mcpCatalog", { tenant }],
+    queryKey: [...queryKey, "mcpCatalog", { tenant, catalogGroupIds }],
     enabled: (tab === "mcp" || tab === "overview") && tenant !== undefined,
-    queryFn: ({ signal }) => getMcpMonitoringCatalog(tenant ?? null, signal),
+    queryFn: ({ signal }) =>
+      getMcpMonitoringCatalog(tenant ?? null, catalogGroupIds, signal),
   });
   // MCP catalog IDs are global; inventory supplies tenant labels for a platform scope.
   const mcpServiceTenant = (service: McpServiceFilter) =>

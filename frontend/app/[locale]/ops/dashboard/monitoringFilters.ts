@@ -58,6 +58,17 @@ export function updateMonitoringFilters(
             resources: {},
             tool: "",
           };
+    case "group":
+      return action.value === state.group
+        ? state
+        : {
+            ...state,
+            group: action.value,
+            // The MCP service directory follows the group filter; drop a
+            // selection the new group may exclude, like the tenant reset.
+            resources: { ...state.resources, mcp: "" },
+            tool: "",
+          };
     case "resource":
       if (action.value === (state.resources[action.tab] ?? "")) return state;
       return {

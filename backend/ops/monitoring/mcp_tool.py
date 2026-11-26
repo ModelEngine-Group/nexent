@@ -8,15 +8,14 @@ from infrastructure.monitoring.facts import McpToolFact
 from ops.monitoring.contracts import MonitoringKind
 
 
-DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "group_snapshot_state", "group_key",
-              "initiator_group_ids", "mcp_server_id", "mcp_server_name", "mcp_server_type",
+DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "mcp_server_id", "mcp_server_name", "mcp_server_type",
               "tool_name", "agent_id", "has_agent_run")
 COUNTERS = ("request_count", "error_count", "error_eligible_count",
             "duration_ms_sum", "duration_ms_sample_count")
 
 
 def accumulate_mcp_tool(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:
-    """Accumulate MCP tool facts per (tenant, server identity, tool, agent, group) dimension.
+    """Accumulate MCP tool facts per (tenant, server identity, tool, agent) dimension.
 
     Counting semantics follow the model kind (design D-005): one stored document
     counts one request; a crash leaving only the ``started`` revision still

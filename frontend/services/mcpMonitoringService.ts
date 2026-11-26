@@ -16,12 +16,15 @@ import type { MonitoringDateScope } from "@/types/operations";
 
 export async function getMcpMonitoringCatalog(
   tenantId: string | null,
+  groupIds: number[],
   signal: AbortSignal
 ): Promise<McpCatalogService[]> {
   const endpoint = API_ENDPOINTS.operations.mcpMonitoringCatalog;
-  const url = tenantId
-    ? `${endpoint}?${new URLSearchParams({ tenant_id: tenantId })}`
-    : endpoint;
+  const params = new URLSearchParams();
+  if (tenantId) params.set("tenant_id", tenantId);
+  for (const id of groupIds) params.append("group_ids", String(id));
+  const url =
+    tenantId || groupIds.length > 0 ? `${endpoint}?${params}` : endpoint;
   const response = await fetchWithAuth(url, { signal });
   return (await response.json()).data;
 }
