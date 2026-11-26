@@ -3,14 +3,14 @@
 """SU-AC-03: actual PostgreSQL upgrade preserves settings and unrelated resources."""
 
 import json
-from pathlib import Path
 
 import pytest
 from shared.factories.scratch_database import create_scratch, drop_scratch, scratch_name
+from shared.merged_migrations import merged_migration_sql
 from shared.postgres import postgres_sql
 
 pytestmark = [pytest.mark.case_id("CHAT-MODEL-CONTROLS-D5-001"), pytest.mark.stage("D5")]
-MIGRATION = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.9.0_008_unify_conversation_model_parameters.sql"
+MIGRATION_SQL = merged_migration_sql("v2.9.0_008_unify_conversation_model_parameters.sql")
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def test_su_ac_03_upgrade_is_exact_and_idempotent(database):
            {"42": {"temperature": 0.3}})
     insert(database, 5, None, {"42": {"temperature": 0.5}})
     before = rows(database)
-    postgres_sql(MIGRATION.read_text(), database=database)
+    postgres_sql(MIGRATION_SQL, database=database)
     after = rows(database)
     assert after[0]["model_parameter_preferences"] == {
         "42": {"enable_thinking": True, "reasoning_budget_tokens": 1024, "temperature": 0, "top_p": 1},
@@ -80,7 +80,7 @@ def test_su_ac_03_upgrade_is_exact_and_idempotent(database):
         assert new["selected_model_id"] == 42
         assert new["message_fixture"] == old["message_fixture"]
         assert new["workbench_config_version"] == old["workbench_config_version"] + 1
-    postgres_sql(MIGRATION.read_text(), database=database)
+    postgres_sql(MIGRATION_SQL, database=database)
     assert rows(database) == after
 
 
@@ -96,7 +96,7 @@ def test_su_ac_03_missing_model_identity_discards_only_model_preferences(databas
     insert(database, 2, config(temperature=0, deep_thinking=False))
     insert(database, 3, None, {"42": {"temperature": 0.5}})
     before = rows(database)
-    postgres_sql(MIGRATION.read_text(), database=database)
+    postgres_sql(MIGRATION_SQL, database=database)
     after = rows(database)
     assert after[0]["selected_model_id"] is None
     assert after[0]["model_parameter_preferences"] == {}
@@ -109,7 +109,7 @@ def test_su_ac_03_missing_model_identity_discards_only_model_preferences(databas
     assert after[0]["workbench_config_version"] == before[0]["workbench_config_version"] + 1
     assert after[1]["model_parameter_preferences"] == {"42": {"temperature": 0, "enable_thinking": False}}
     assert after[2] == before[2]
-    postgres_sql(MIGRATION.read_text(), database=database)
+    postgres_sql(MIGRATION_SQL, database=database)
     assert rows(database) == after
 
 
@@ -118,12 +118,12 @@ def test_su_ac_03_selected_model_identity_retains_explicit_parameters(database):
     legacy["model_id"] = None
     insert(database, 1, legacy, {"43": {"temperature": 0.7}})
     postgres_sql("UPDATE nexent.conversation_record_t SET selected_model_id=42;", database=database)
-    postgres_sql(MIGRATION.read_text(), database=database)
+    postgres_sql(MIGRATION_SQL, database=database)
     after = rows(database)
     assert after[0]["selected_model_id"] == 42
     assert after[0]["model_parameter_preferences"] == {
         "42": {"temperature": 0.2, "top_p": 0, "enable_thinking": False},
         "43": {"temperature": 0.7},
     }
-    postgres_sql(MIGRATION.read_text(), database=database)
+    postgres_sql(MIGRATION_SQL, database=database)
     assert rows(database) == after

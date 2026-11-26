@@ -38,16 +38,19 @@ Historical migrations through v2.4.0 are consolidated by minor version in
 `v2.5.0_merged_migrations.sql`, `v2.6.0_merged_migrations.sql` (which merges
 all migrations applied after the v2.5.1 release, through v2.6.0),
 `v2.7.0_merged_migrations.sql` (which merges all migrations applied after
-the v2.6.1 release, through v2.7.0), and `v2.8.0_merged_migrations.sql`
-(which merges every migration file still loose after the v2.7.0 release).
+the v2.6.1 release, through v2.7.0), `v2.8.0_merged_migrations.sql`
+(which merges every migration file still loose after the v2.7.0 release), and
+`v2.9.0_merged_migrations.sql` (which merges every migration file still loose
+after the v2.8.5 release, in `sort -V` deployment order).
 Newer migrations remain separate until their minor-version history is
 consolidated.
 
-`v2.9.0_011_trajectory.sql` consolidates the trajectory execution summaries,
-statistics snapshots, historical conversation placeholders, and OPS/SU menu
-grants. It runs after `v2.9.0_010_account_and_ops_roles.sql`, which synchronizes
-the role permission sequence. It is safe to apply after the earlier separate
-trajectory migrations or to run again.
+The trajectory execution summaries, statistics snapshots, historical
+conversation placeholders, and OPS/SU menu grants are consolidated as the
+`v2.9.0_011_trajectory.sql` section of `v2.9.0_merged_migrations.sql`. That
+section runs after the `v2.9.0_010_account_and_ops_roles.sql` section, which
+synchronizes the role permission sequence. It is safe to apply after the
+earlier separate trajectory migrations or to run again.
 
 A filename prefix records the release the migration targets when it is written,
 not the develop version at that moment, so repeated prefixes and skipped
