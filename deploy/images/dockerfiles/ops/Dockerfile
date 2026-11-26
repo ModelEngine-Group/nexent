@@ -22,7 +22,9 @@ RUN --mount=type=bind,from=uv,source=/uv,target=/usr/local/bin/uv \
 
 RUN --mount=type=cache,id=nexent-ops-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-ops-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends postgresql-client
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bind9-dnsutils curl file iproute2 jq less lsof netcat-openbsd \
+        postgresql-client procps redis-tools unzip
 
 COPY backend/contracts /opt/backend/contracts
 COPY backend/gateway/identity /opt/backend/gateway/identity
