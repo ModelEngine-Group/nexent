@@ -189,6 +189,10 @@ const AttachmentPreview: FC<{
   const name = attachment.name || "Untitled";
   const contentType = attachment.contentType;
   const extension = name.split(".").pop()?.toLowerCase() || "";
+  const isHtml =
+    extension === "html" ||
+    extension === "htm" ||
+    contentType?.split(";")[0]?.trim().toLowerCase() === "text/html";
   const isImage =
     type === "image" ||
     contentType?.startsWith("image/") === true ||
@@ -211,11 +215,18 @@ const AttachmentPreview: FC<{
     attachment.content?.[0]?.image ||
     attachment.content?.[0]?.data;
   const thumbnailUrl = isComposer ? localImageUrl : remoteFileUrl;
-  const canOpenRemotePreview = Boolean(objectName || attachment.preview_url);
+  const localHtmlFile = isComposer && isHtml ? attachment.file : undefined;
+  const canOpenLocalPreview = Boolean(localImageUrl || localHtmlFile);
+  const htmlPreviewUrl = isHtml
+    ? remoteFileUrl || attachment.download_url
+    : undefined;
+  const canOpenRemotePreview = Boolean(
+    objectName || attachment.preview_url || htmlPreviewUrl
+  );
 
   const handleCardClick = () => {
     if (isComposer) {
-      if (isImage && localImageUrl) setIsLocalPreviewOpen(true);
+      if (canOpenLocalPreview) setIsLocalPreviewOpen(true);
       return;
     }
     if (canOpenRemotePreview) setIsRemotePreviewOpen(true);
@@ -249,10 +260,10 @@ const AttachmentPreview: FC<{
               handleCardClick();
             }
           }}
-          role={isImage && localImageUrl ? "button" : undefined}
-          tabIndex={isImage && localImageUrl ? 0 : undefined}
+          role={canOpenLocalPreview ? "button" : undefined}
+          tabIndex={canOpenLocalPreview ? 0 : undefined}
           aria-label={
-            isImage && localImageUrl
+            canOpenLocalPreview
               ? t("chat.attachments.preview", { name })
               : undefined
           }
@@ -281,25 +292,37 @@ const AttachmentPreview: FC<{
           </AttachmentPrimitive.Remove>
         </div>
 
-        <Dialog open={isLocalPreviewOpen} onOpenChange={setIsLocalPreviewOpen}>
-          <DialogContent
-            className="flex max-h-[80vh] max-w-3xl flex-col p-0"
-            onOpenAutoFocus={(event) => event.preventDefault()}
+        {localHtmlFile ? (
+          <FilePreviewDrawer
+            open={isLocalPreviewOpen}
+            onClose={() => setIsLocalPreviewOpen(false)}
+            source="local"
+            file={localHtmlFile}
+          />
+        ) : (
+          <Dialog
+            open={isLocalPreviewOpen}
+            onOpenChange={setIsLocalPreviewOpen}
           >
-            <DialogHeader className="border-b px-4 py-3">
-              <h2 className="truncate text-base font-medium">{name}</h2>
-            </DialogHeader>
-            {localImageUrl && (
-              <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-                <img
-                  src={localImageUrl}
-                  alt={name}
-                  className="max-h-[calc(70vh-60px)] max-w-full object-contain"
-                />
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+            <DialogContent
+              className="flex max-h-[80vh] max-w-3xl flex-col p-0"
+              onOpenAutoFocus={(event) => event.preventDefault()}
+            >
+              <DialogHeader className="border-b px-4 py-3">
+                <h2 className="truncate text-base font-medium">{name}</h2>
+              </DialogHeader>
+              {localImageUrl && (
+                <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+                  <img
+                    src={localImageUrl}
+                    alt={name}
+                    className="max-h-[calc(70vh-60px)] max-w-full object-contain"
+                  />
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+        )}
       </>
     );
   }
@@ -400,7 +423,7 @@ const AttachmentPreview: FC<{
           fileName={name}
           fileType={contentType || attachment.type}
           fileSize={attachment.size}
-          previewUrl={""}
+          previewUrl={htmlPreviewUrl}
           downloadUrl={attachment.download_url}
           onClose={() => setIsRemotePreviewOpen(false)}
         />

@@ -124,7 +124,7 @@ export function decodePreviewChunk(
   }
 }
 
-export async function decodeLocalTextFile(file: File): Promise<string> {
+export async function decodeLocalTextFile(file: Blob): Promise<string> {
   const buf = await file.arrayBuffer();
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(buf);
