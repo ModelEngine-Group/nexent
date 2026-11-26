@@ -6,12 +6,21 @@ import styles from "./DocumentPreview.module.css";
 export default function DocumentPages({ children }: { children: ReactNode }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const [size, setSize] = useState({ width: 816, height: 1000 });
   const [available, setAvailable] = useState(0);
   const [custom, setCustom] = useState<number | null>(null);
   const [pages, setPages] = useState(1);
   const [page, setPage] = useState(1);
   const scale = custom ?? Math.min(1, (available || size.width) / size.width);
+  useEffect(
+    () => () => {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+      }
+    },
+    []
+  );
   useEffect(() => {
     const viewport = viewportRef.current,
       content = contentRef.current;
@@ -41,20 +50,24 @@ export default function DocumentPages({ children }: { children: ReactNode }) {
         ref={viewportRef}
         className={styles.docViewport}
         onScroll={() => {
-          const viewport = viewportRef.current;
-          if (!viewport) return;
-          const nodes = Array.from(
-            contentRef.current?.querySelectorAll("section.docx") ?? []
-          );
-          let index = 0;
-          nodes.forEach((node, i) => {
-            if (
-              node.getBoundingClientRect().top <=
-              viewport.getBoundingClientRect().top + 60
-            )
-              index = i;
+          if (scrollFrameRef.current !== null) return;
+          scrollFrameRef.current = window.requestAnimationFrame(() => {
+            scrollFrameRef.current = null;
+            const viewport = viewportRef.current;
+            if (!viewport) return;
+            const nodes = Array.from(
+              contentRef.current?.querySelectorAll("section.docx") ?? []
+            );
+            let index = 0;
+            nodes.forEach((node, i) => {
+              if (
+                node.getBoundingClientRect().top <=
+                viewport.getBoundingClientRect().top + 60
+              )
+                index = i;
+            });
+            setPage(index + 1);
           });
-          setPage(index + 1);
         }}
       >
         <div

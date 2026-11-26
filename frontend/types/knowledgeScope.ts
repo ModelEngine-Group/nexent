@@ -42,11 +42,10 @@ export function normalizeAidpMetadataFilter(
   if (!filter?.enabled) {
     return EMPTY_AIDP_METADATA_FILTER;
   }
-  const raw = Array.isArray(filter.conditions) ? filter.conditions : [];
   const seen = new Set<string>();
   const conditions: AidpFileNameCondition[] = [];
-  raw.forEach((condition) => {
-    const value = String(condition?.value ?? "").trim();
+  filter.conditions.forEach((condition) => {
+    const value = condition.value.trim();
     if (!value) return;
     const key = `${condition.operator}\u0000${value}`;
     if (seen.has(key)) return;
@@ -55,7 +54,7 @@ export function normalizeAidpMetadataFilter(
   });
   return {
     enabled: true,
-    match: filter.match === "any" ? "any" : "all",
+    match: filter.match,
     conditions: conditions.slice(0, 20),
   };
 }

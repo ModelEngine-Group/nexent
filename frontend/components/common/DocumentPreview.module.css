@@ -206,9 +206,15 @@
   background: white;
   box-shadow: 0 2px 8px #0000000d;
 }
+.docPage :global(.docx-wrapper) {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
 .docPage :global(section.docx) {
   background: white !important;
   margin: 0 !important;
+  box-shadow: none !important;
 }
 .slidesLayout {
   display: flex;
@@ -290,6 +296,6 @@
   box-shadow: none;
 }
 .docPage :global(section.docx) {
-  margin: 0 0 20px !important;
-  box-shadow: 0 2px 8px #0000000d;
+  margin: 0 !important;
+  box-shadow: none !important;
 }

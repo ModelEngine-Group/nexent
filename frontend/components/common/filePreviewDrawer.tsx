@@ -1436,7 +1436,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   if (inline) {
     if (!open) return null;
     return (
-      <div className="h-full min-h-0 w-full overflow-hidden">
+      <div
+        data-slot="inline-file-preview"
+        className="h-full min-h-0 w-full overflow-hidden"
+      >
         {renderContent()}
       </div>
     );

@@ -202,7 +202,7 @@ export default function OriginalFilePreview({
                 setAttempt((value) => value + 1);
               }}
             >
-              {t("aidpKnowledge.chunksRetry")}
+              {t("common.retry")}
             </Button>
           }
         />

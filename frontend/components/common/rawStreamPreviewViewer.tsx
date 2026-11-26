@@ -299,36 +299,35 @@ function DocumentStreamPreviewViewer(
       });
     };
 
-    void Promise.resolve()
-      .then(() => {
-        if (cancelled) return;
-        setStatus("loading");
-        setPayload(null);
-        setSheets([]);
-        setActiveSheetIndex(0);
-        setPresentation(null);
-        setTextContent("");
-        setMediaUrl("");
-        releaseMediaUrl();
+    if (cancelled) return;
+    // Reset synchronously so switching files never paints the previous file
+    // while the next load is in flight.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset before async load
+    setStatus("loading");
+    setPayload(null);
+    setSheets([]);
+    setActiveSheetIndex(0);
+    setPresentation(null);
+    setTextContent("");
+    setMediaUrl("");
+    releaseMediaUrl();
 
-        return load();
-      })
-      .catch((error: unknown) => {
-        if (ignoreAbortError(error) || cancelled) {
-          return;
-        }
-        if (
-          error instanceof PreviewAccessError &&
-          onAccessErrorRef.current?.(error.reason)
-        ) {
-          setStatus("error");
-          return;
-        }
-        log.error("Failed to load document stream:", error);
-        if (!cancelled) {
-          setStatus("error");
-        }
-      });
+    void load().catch((error: unknown) => {
+      if (ignoreAbortError(error) || cancelled) {
+        return;
+      }
+      if (
+        error instanceof PreviewAccessError &&
+        onAccessErrorRef.current?.(error.reason)
+      ) {
+        setStatus("error");
+        return;
+      }
+      log.error("Failed to load document stream:", error);
+      if (!cancelled) {
+        setStatus("error");
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -453,18 +452,15 @@ function DocumentStreamPreviewViewer(
       }
     };
 
-    void Promise.resolve()
-      .then(() => {
-        if (cancelled) return;
-        setStatus("loading");
-        return render();
-      })
-      .catch((error: unknown) => {
-        log.error("Failed to render document preview:", error);
-        if (!cancelled) {
-          setStatus("error");
-        }
-      });
+    if (cancelled) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- render start
+    setStatus("loading");
+    void render().catch((error: unknown) => {
+      log.error("Failed to render document preview:", error);
+      if (!cancelled) {
+        setStatus("error");
+      }
+    });
 
     return () => {
       cancelled = true;

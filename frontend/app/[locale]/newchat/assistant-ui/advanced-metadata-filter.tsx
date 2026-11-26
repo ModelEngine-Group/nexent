@@ -63,13 +63,15 @@ interface AdvancedMetadataFilterProps {
 }
 
 const MAX_CONDITIONS = 20;
+let conditionKeySeed = 0;
+const nextConditionKey = () => `condition-${conditionKeySeed++}`;
 const SEARCH_PAGE_SIZE = 20;
 const SEARCH_CONCURRENCY = 3;
 const SEARCH_TIMEOUT_MS = 8000;
 const SEARCH_DISPLAY_LIMIT = 50;
 
 function searchableFileName(item: AidpDocumentItem): string {
-  return String(item.original_file_name || item.file_name || "").trim();
+  return (item.original_file_name || item.file_name).trim();
 }
 
 function FileConditionRow({
@@ -309,6 +311,12 @@ export function AdvancedMetadataFilter({
     value.conditions.length > 0
       ? value.conditions
       : [{ operator: "contains" as AidpMetadataFilterOperator, value: "" }];
+  const conditionKeysRef = useRef<string[]>([]);
+  if (conditionKeysRef.current.length !== conditions.length) {
+    conditionKeysRef.current = conditions.map(
+      (_, index) => conditionKeysRef.current[index] ?? nextConditionKey()
+    );
+  }
 
   const commit = (
     nextMatch: AidpMetadataFilterMatch,
@@ -327,6 +335,7 @@ export function AdvancedMetadataFilter({
   };
 
   const removeCondition = (index: number) => {
+    conditionKeysRef.current.splice(index, 1);
     commit(
       match,
       conditions.filter((_, itemIndex) => itemIndex !== index)
@@ -335,6 +344,7 @@ export function AdvancedMetadataFilter({
 
   const addCondition = () => {
     if (conditions.length >= MAX_CONDITIONS) return;
+    conditionKeysRef.current.push(nextConditionKey());
     commit(match, [...conditions, { operator: "contains", value: "" }]);
   };
 
@@ -376,7 +386,7 @@ export function AdvancedMetadataFilter({
           <div className="space-y-2">
             {conditions.map((condition, index) => (
               <FileConditionRow
-                key={`condition-${index}`}
+                key={conditionKeysRef.current[index]}
                 condition={condition}
                 targets={targets}
                 disabled={disabled}
