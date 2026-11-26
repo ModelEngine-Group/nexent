@@ -17,6 +17,7 @@ from contracts.constants.constants import (
 from contracts.roles import has_any_role, normalize_roles, roles_from_record
 from permissions.models import Resource, ResourceAccess
 
+
 MANAGEMENT_ROLES = {"SU", "ADMIN", "ASSET_OWNER"}
 ASSET_OWNER_READER_ROLES = {"SU", "ADMIN", "DEV"}
 GROUP_ACCESS_ROLES = {"USER", "DEV"}
@@ -57,7 +58,9 @@ class ResourceAccessControl:
 
         Tenant and USER ownership boundaries apply before source-specific
         behavior. DataMate resources remain read-only after those boundaries.
-        Creator-first semantics then apply to regular knowledge bases.
+        USER callers may read group-shared regular knowledge bases, but the
+        result is capped at read-only. Creator-first semantics then apply to
+        regular knowledge bases.
 
         ``asset_owner_tenant_id`` is injectable for callers that override the
         default tenant marker (for example in tests or for deployment configs).
@@ -66,6 +69,7 @@ class ResourceAccessControl:
         normalized_user_id = str(user_id or "")
         record_tenant_id = str(resource.tenant_id or "")
         normalized_user_tenant_id = str(user_tenant_id or "")
+        is_user_role = has_any_role(normalized_role, {'USER'})
         effective_asset_owner_tenant_id = (
             asset_owner_tenant_id
             if asset_owner_tenant_id is not None
@@ -78,9 +82,10 @@ class ResourceAccessControl:
             return _check_asset_owner_access(normalized_role)
         if record_tenant_id and record_tenant_id != normalized_user_tenant_id:
             return ResourceAccess.deny()
-        if has_any_role(normalized_role, {'USER'}) and str(resource.created_by or "") != normalized_user_id:
-            return ResourceAccess.deny()
         if str(resource.knowledge_sources or "") == "datamate":
+            # DataMate remains read-only, but the USER ownership boundary still applies.
+            if is_user_role and str(resource.created_by or "") != normalized_user_id:
+                return ResourceAccess.deny()
             return ResourceAccess.read_only()
 
         resource_groups = _normalize_group_ids(resource.group_ids)
@@ -91,7 +96,18 @@ class ResourceAccessControl:
             return ResourceAccess.creator(matched_groups=matched_groups)
         if has_any_role(normalized_role, MANAGEMENT_ROLES):
             return _check_management_access(resource)
-        return _check_group_access(resource, normalized_role, matched_groups, resource_groups, normalized_user_groups)
+        access = _check_group_access(
+            resource,
+            normalized_role,
+            matched_groups,
+            resource_groups,
+            normalized_user_groups,
+        )
+        if is_user_role and access.can_read:
+            # USER callers may read group-shared knowledge bases, but never
+            # gain edit rights from the group permission.
+            return ResourceAccess.read_only(matched_groups=matched_groups)
+        return access
 
 
 def _normalize_group_ids(group_ids: Optional[List[object]]) -> List[object]:

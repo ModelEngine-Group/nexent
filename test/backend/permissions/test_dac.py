@@ -173,6 +173,46 @@ class TestGroupAndTenantRules:
         )
         assert access.permission_label is None
 
+    @pytest.mark.parametrize("permission", ["EDIT", "READ_ONLY"])
+    def test_user_group_intersection_is_read_only(self, permission):
+        access = _check(
+            _resource(ingroup_permission=permission, group_ids=[10, 20]),
+            user_id="member-user",
+            role="USER",
+            groups=[20, 30],
+        )
+        assert access.permission_label == "READ_ONLY"
+        assert access.can_read
+        assert not access.can_edit
+        assert access.matched_groups == ["20"]
+
+    def test_user_without_group_intersection_denied(self):
+        access = _check(
+            _resource(ingroup_permission="READ_ONLY", group_ids=[10]),
+            user_id="member-user",
+            role="USER",
+            groups=[99],
+        )
+        assert access.permission_label is None
+
+    def test_user_empty_groups_legacy_intersection(self):
+        access = _check(
+            _resource(ingroup_permission="READ_ONLY", group_ids=None),
+            user_id="legacy-user",
+            role="USER",
+            groups=[],
+        )
+        assert access.permission_label == "READ_ONLY"
+
+    def test_user_private_denied(self):
+        access = _check(
+            _resource(ingroup_permission="PRIVATE", group_ids=[10]),
+            user_id="member-user",
+            role="USER",
+            groups=[10],
+        )
+        assert access.permission_label is None
+
     def test_empty_groups_legacy_intersection(self):
         access = _check(
             _resource(ingroup_permission="READ_ONLY", group_ids=None),
