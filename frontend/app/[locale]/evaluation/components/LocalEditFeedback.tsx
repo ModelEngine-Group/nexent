@@ -6,8 +6,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { evolutionService as api, type ExperimentReport, type LocalFeedback, type Workspace } from "@/services/evolutionService";
 
-export default function LocalEditFeedback({ report, workspace, agent, version, viewer, suggestedId }: {
+const allMethods: LocalFeedback["method"][] = ["P1", "P3", "T1", "T2", "S2"];
+
+export default function LocalEditFeedback({ report, workspace, agent, version, viewer, suggestedId, onFeedback, methods = allMethods, label }: {
   report: ExperimentReport; workspace: Workspace; agent: number; version: number; viewer: string; suggestedId?: number;
+  onFeedback?: (id: number, suggestionId?: number) => void;
+  methods?: LocalFeedback["method"][];
+  label?: string;
 }) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
@@ -45,29 +50,37 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
   const submit = useMutation({ mutationFn: async () => {
     const { skill_target, ...data } = await form.validateFields();
     const [targetKind, targetId] = (skill_target ?? "").split(":");
-    return api.shareLocalEdit(report.experiment_id, {
+    const linkedSuggestion = method === "S2" ? data.suggestion_id : undefined;
+    const saved = await api.shareLocalEdit(report.experiment_id, {
       ...data, tool_name: isTool ? data.tool_name : undefined,
       skill_id: method === "S2" && targetKind === "catalog" ? Number(targetId) : undefined,
       released_guide_candidate_id: method === "S2" && targetKind === "guide" ? Number(targetId) : undefined,
-      suggestion_id: method === "S2" ? data.suggestion_id : undefined,
+      suggestion_id: linkedSuggestion,
       related_passage: method === "P3" ? data.related_passage?.trim() || undefined : undefined,
       failure: { ...data.failure, observed: data.failure.observed ?? "" },
       protection: { ...data.protection, observed: data.protection.observed ?? "" },
       share_expected_arguments: method === "T2" ? data.share_expected_arguments : undefined,
       share_file_state: fileChecks ? data.share_file_state : undefined,
     });
+    return { ...saved, linkedSuggestion };
+  }, onSuccess: ({ feedback_id, linkedSuggestion }) => {
+    if (!onFeedback) return;
+    onFeedback(feedback_id, linkedSuggestion);
+    setOpen(false);
   }});
   if (!need("fail").length || !need("pass").length) return null;
   return <>
-    <Button onClick={() => setOpen(true)}>{t("evolution.shareLocalEdit")}</Button>
-    <Modal open={open} title={t("evolution.shareLocalEdit")} onCancel={() => setOpen(false)}
+    <Button type={onFeedback ? "primary" : "default"} onClick={() => { submit.reset(); setOpen(true); }}>
+      {label ?? t("evolution.shareLocalEdit")}
+    </Button>
+    <Modal open={open} title={label ?? t("evolution.shareLocalEdit")} onCancel={() => setOpen(false)}
       okText={t("evolution.shareFeedback")} cancelText={t("common.cancel")} confirmLoading={submit.isPending}
       onOk={() => submit.mutate()} destroyOnHidden>
-      <Form form={form} layout="vertical" initialValues={initialTarget ? {
+      <Form form={form} layout="vertical" initialValues={initialTarget && methods.includes("S2") ? {
         method: "S2", skill_target: initialTarget, suggestion_id: suggestedId, goal: initialSuggestion?.expected_behavior,
-      } : { method: "P1" }} onValuesChange={() => submit.reset()}>
-        <Form.Item name="method" label={t("evolution.editMethod")} rules={[{ required: true }]}>
-          <Select options={["P1","P3","T1","T2","S2"].map(value => ({ value, label: t(`evolution.method.${value}`) }))}
+      } : { method: methods[0] }} onValuesChange={() => submit.reset()}>
+        <Form.Item name="method" label={t("evolution.editMethod")} hidden={methods.length === 1} rules={[{ required: true }]}>
+          <Select options={methods.map(value => ({ value, label: t(`evolution.method.${value}`) }))}
             onChange={() => form.setFieldValue("share_file_state", false)} />
         </Form.Item>
         {method === "S2" && <Form.Item name="skill_target" preserve={false} label={t("evolution.targetSkill")} rules={[{ required: true }]}>
@@ -87,6 +100,7 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
         {(["failure","protection"] as const).map(group => {
           const id = group === "failure" ? failed : good;
           const details = group === "failure" ? failure : protection;
+          const task = details.data?.task;
           const answer = report.pairs[String(id)]?.base.result?.answer;
           return <div key={group}>
             <Form.Item name={[group,"case_id"]} label={t(`evolution.feedback.${group}`)} rules={[{ required: true }]}>
@@ -101,6 +115,11 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
             {details.data && <details><summary>{t("evolution.viewTaskEvidence")}</summary>
               <p>{details.data.task.query}</p><p>{details.data.task.expected}</p><p>{answer}</p>
             </details>}
+            {task && typeof answer === "string" && task.expected.length <= 3000 &&
+              answer.length <= 3000 && <Button size="small" type="link" onClick={() => {
+                form.setFieldValue([group, "expected"], task.expected);
+                form.setFieldValue([group, "observed"], answer);
+              }}>{t("evolution.workflow.useCaseResults")}</Button>}
             {(["input_excerpt","expected","observed"] as const).map(field =>
               <Form.Item key={field} name={[group,field]} label={t(`evolution.excerpt.${field}`)}
                 rules={field === "input_excerpt" || field === "observed" && answer === "" ? [] : [{ required: true, whitespace: true }]}

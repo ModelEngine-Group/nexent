@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Checkbox, Form, Input, InputNumber, Radio, Select } from "antd";
+import { Alert, Button, Checkbox, Flex, Form, Input, Radio, Select, Typography } from "antd";
 import { useState } from "react";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useTranslation } from "react-i18next";
@@ -15,8 +15,9 @@ function ApprovedScriptInput({ id, agent, version, viewer }: { id?: number; agen
   return rule ? <pre>{JSON.stringify({arguments: rule.arguments, expected_stdout: rule.expected_script_stdout, expected_files: rule.expected_script_files}, null, 2)}</pre> : null;
 }
 
-export function ScriptFeedbackForm({report, workspace, agent, version, viewer}: {
+export function ScriptFeedbackForm({report, workspace, agent, version, viewer, onFeedback}: {
   report: ExperimentReport; workspace: Workspace; agent: number; version: number; viewer: string;
+  onFeedback?: (id: number) => void;
 }) {
   const {t} = useTranslation("common");
   const [form] = Form.useForm<ScriptFeedback>();
@@ -27,7 +28,8 @@ export function ScriptFeedbackForm({report, workspace, agent, version, viewer}: 
     const processes = trial?.result?.tool_use?.script_evidence;
     return trial?.status === status && processes?.length === 1 && processes[0].input_matches;
   }).map(c => ({value:c.case_id, label:c.query}));
-  const save = useMutation({mutationFn:(data: ScriptFeedback) => api.shareScriptFeedback(report.experiment_id, data)});
+  const save = useMutation({mutationFn:(data: ScriptFeedback) => api.shareScriptFeedback(report.experiment_id, data),
+    onSuccess: ({ feedback_id }) => onFeedback?.(feedback_id)});
   if (!options("fail").length || !options("pass").length) return null;
   return <details><summary>{t("evolution.scriptFeedback")}</summary>
     <Form layout="vertical" form={form} onFinish={v => save.mutate(v)} onValuesChange={(changed) => {
@@ -58,34 +60,41 @@ export function ScriptFeedbackForm({report, workspace, agent, version, viewer}: 
   </details>;
 }
 
-export function ScriptDraftForm() {
+export function ScriptDraftForm({ feedbackId, onSelect }: {
+  feedbackId: number; onSelect?: (id: number) => void;
+}) {
   const queries = useQueryClient();
   const {availableLlmModels} = useModelList();
   const models = availableLlmModels.map(model => ({value: model.id, label: model.displayName || model.name}));
   const {t} = useTranslation("common");
-  const [id,setId] = useState<number | null>(null);
   const [manual,setManual] = useState(false);
   const [code,setCode] = useState("");
   const [model,setModel] = useState<number>();
-  const draft = useMutation({mutationFn:() => api.scriptDraft(id!, manual ? {replacement:code} : {model_id:model!})});
+  const selectedModel = model ?? (models.length === 1 ? models[0].value : undefined);
+  const draft = useMutation({mutationFn:() => api.scriptDraft(feedbackId, manual ? {replacement:code} : {model_id:selectedModel!})});
   const build = useMutation({mutationFn:() => {
     const reviewed = draft.data!;
-    return api.buildScript(id!, {replacement: reviewed.replacement, draft_digest: reviewed.draft_digest, source_digest: reviewed.source_digest});
+    return api.buildScript(feedbackId, {replacement: reviewed.replacement, draft_digest: reviewed.draft_digest, source_digest: reviewed.source_digest});
   }, onSuccess: () => queries.invalidateQueries({queryKey: ["evolution"]})});
   const reset = () => { draft.reset(); build.reset(); };
-  return <details><summary>{t("evolution.scriptDraft")}</summary><Form layout="vertical">
-    <Form.Item label={t("evolution.feedbackId")}><InputNumber aria-label={t("evolution.feedbackId")} value={id} min={1} precision={0} onChange={v => {setId(v); reset();}}/></Form.Item>
+  return <Flex vertical gap={12}>
+    <Typography.Text>{t("evolution.workflow.scriptHelp")}</Typography.Text>
+    <Form layout="vertical">
     <Radio.Group value={manual} onChange={e => {setManual(e.target.value); reset();}} options={[
       {label:t("evolution.scriptModel"), value:false},{label:t("evolution.scriptManual"),value:true}]}/>
     {manual ? <Form.Item label={t("evolution.scriptReplacement")}><Input.TextArea aria-label={t("evolution.scriptReplacement")} rows={6} maxLength={32768} value={code}
       onChange={e => {setCode(e.target.value); reset();}}/></Form.Item>
-      : <Form.Item label={t("evolution.scriptModel")}><Select options={models} value={model} onChange={v => {setModel(v); reset();}}/></Form.Item>}
-    <Button disabled={!id || (manual ? !code.trim() : !model)} loading={draft.isPending} onClick={() => {build.reset(); draft.mutate();}}>{t("evolution.scriptDraft")}</Button>
+      : <Form.Item label={t("evolution.generatorModel")}><Select aria-label={t("evolution.generatorModel")}
+        options={models} value={selectedModel} onChange={v => {setModel(v); reset();}}/></Form.Item>}
+    <Button disabled={manual ? !code.trim() : !selectedModel} loading={draft.isPending} onClick={() => {build.reset(); draft.mutate();}}>{t("evolution.scriptDraft")}</Button>
   </Form>
     {draft.error && <Alert type="error" message={draft.error.message}/>}
     {draft.data && <><strong>{draft.data.script_path} · {draft.data.function}</strong><pre>{draft.data.diff}</pre>
       <Button disabled={build.isSuccess} loading={build.isPending} onClick={() => build.mutate()}>{t("evolution.reviewedBuild")}</Button>
       {build.error && <Alert type="error" message={build.error.message}/>}
-      {build.data && <p>{t("evolution.scriptBuildCreated", {id:build.data.candidate_id})}</p>}</>}
-  </details>;
+      {build.data && <Flex gap={8} align="center" wrap>
+        <Typography.Text>{t("evolution.scriptBuildCreated", {id:build.data.candidate_id})}</Typography.Text>
+        {onSelect && <Button onClick={() => onSelect(build.data.candidate_id)}>{t("evolution.workflow.compareThis")}</Button>}
+      </Flex>}</>}
+  </Flex>;
 }

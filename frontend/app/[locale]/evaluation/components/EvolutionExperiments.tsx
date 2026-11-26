@@ -1,9 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 import { useRef, useState } from "react";
+import Link from "next/link";
 import {
   Alert,
   Button,
+  Card,
   Checkbox,
   Flex,
   Form,
@@ -17,27 +19,26 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useModelList } from "@/hooks/model/useModelList";
-import { evolutionService as api, type Trial, type TraceCaseDraft, type ScreeningCriteria } from "@/services/evolutionService";
+import { evolutionService as api, type Trial, type TraceCaseDraft, type ScreeningCriteria, type LocalFeedback } from "@/services/evolutionService";
 import { storageService } from "@/services/storageService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import ExampleCandidates from "./ExampleCandidates";
-import DiscoveryFeedback, { ResourceCandidateGenerator } from "./DiscoveryFeedback";
+import { ResourceCandidateGenerator } from "./DiscoveryFeedback";
 import ToolUseRules, { toolExpectation, type ToolRuleFields } from "./ToolUseRules";
 import FileStateRules, { fileStateRule, type FileRule } from "./FileStateRules";
 import LocalEditFeedback from "./LocalEditFeedback";
-import NewSkillBriefForm from "./NewSkillBriefForm";
-import { ToolMaintainerBrief, ToolRepairForm } from "./ToolRepair";
-import { ScriptFeedbackForm, ScriptDraftForm } from "./SkillScriptRepair";
-import ToolMappingCandidate from "./ToolMappingCandidate";
-import ToolSetCandidates from "./ToolSetCandidates";
+import { ToolMaintainerBrief } from "./ToolRepair";
+import { ScriptDraftForm } from "./SkillScriptRepair";
 import FixedRegressionCases from "./FixedRegressionCases";
 import PublicBenchmarkReports from "./PublicBenchmarkReports";
 import ReviewBatchResults from "./ReviewBatchResults";
+import EvolutionGenerationMethods from "./EvolutionGenerationMethods";
+import { EvolutionDirectionGuide, evolutionHref, matchesDirection, readEvolutionDirection, type EvolutionDirection } from "./EvolutionDirections";
 
 function CaseForm({
   agent,
   version,
   skills,
+  direction,
   draft,
   close,
   saved,
@@ -45,6 +46,7 @@ function CaseForm({
   agent: number;
   version: number;
   skills: { name: string }[];
+  direction?: EvolutionDirection;
   draft?: TraceCaseDraft;
   close: () => void;
   saved: (id: number) => void;
@@ -158,12 +160,17 @@ function CaseForm({
         <Form.Item label={t("evolution.sourceGroup")} name="source_group">
           <Input maxLength={128} />
         </Form.Item>
-        <Checkbox checked={labelSkill} onChange={e => setLabelSkill(e.target.checked)}>{t("evolution.labelSkill")}</Checkbox>
-        {labelSkill && <Form.Item label={t("evolution.acceptableSkills")}>
-          <Select mode="multiple" value={expectedSkills} onChange={setExpectedSkills}
-            options={skills.map(s => ({ value: s.name, label: s.name }))} />
-        </Form.Item>}
-        <ToolUseRules />
+        {(!direction || direction === "skill" || direction === "combination") && <>
+          <Checkbox checked={labelSkill} onChange={e => setLabelSkill(e.target.checked)}>{t("evolution.labelSkill")}</Checkbox>
+          {labelSkill && <Form.Item label={t("evolution.acceptableSkills")}>
+            <Select mode="multiple" value={expectedSkills} onChange={setExpectedSkills}
+              options={skills.map(s => ({ value: s.name, label: s.name }))} />
+          </Form.Item>}
+        </>}
+        {direction === "prompt" || direction === "skill" ? <details>
+          <summary>{t("evolution.direction.additionalToolChecks")}</summary>
+          <ToolUseRules />
+        </details> : <ToolUseRules />}
         <p><Checkbox checked={verifyFiles} onChange={e => { setVerifyFiles(e.target.checked); setStateless(false); }}>
           {t("evolution.verifyFiles")}</Checkbox></p>
         {verifyFiles && <FileStateRules />}
@@ -207,19 +214,32 @@ interface ComparisonFocus {
   experiment?: number;
 }
 
+const evolutionSteps = ["cases", "baseline", "generate", "compare", "release"] as const;
+type EvolutionStep = typeof evolutionSteps[number];
+const directionMethods: Record<Exclude<EvolutionDirection, "combination">, LocalFeedback["method"][]> = {
+  prompt: ["P1", "P3"],
+  skill: ["S2"],
+  tool: ["T1", "T2"],
+};
+const internalCandidateNames = new Set(["agent.prompt", "agent.tools", "agent.tool_format"]);
+
 function Experiments({
   agent,
   version,
   viewer,
   focus,
+  direction,
 }: {
   agent: number;
   version: number;
   viewer: string;
   focus?: ComparisonFocus;
+  direction?: EvolutionDirection;
 }) {
   const { t, i18n } = useTranslation("common");
   const { availableLlmModels } = useModelList();
+  const [stage, setStage] = useState<EvolutionStep>();
+  const [feedback, setFeedback] = useState<{ id: number; kind: "resource" | "script" }>();
   const [caseIds, setCases] = useState<number[]>([]);
   const [screen, setScreen] = useState(false);
   const [chosenMetric, setMetric] = useState<ScreeningCriteria["metric"]>("tasks_fixed");
@@ -277,9 +297,22 @@ function Experiments({
         ? 2000
         : false,
   });
+  const selectedExperiment = workspace.data?.experiments.find(item => item.experiment_id === selected);
+  const baselineReport = selectedExperiment?.candidate_type
+    ? selectedExperiment.candidate_type === "baseline"
+    : report.data?.total_pairs === 0;
+  const step = stage ?? (focus?.candidate ? "compare" : focus?.experiment
+    ? baselineReport ? "baseline" : "compare"
+    : focus?.suggestion ? "generate" : direction === "combination" ? "compare" : "cases");
+  const runCandidate = step === "baseline" ? "baseline" : candidate;
+  const showRun = step === "baseline" || step === "compare";
+  const reportVisible = report.data && (step === "baseline" ? baselineReport
+    : (step === "compare" || step === "release") && !baselineReport);
+  const publishedRules = (rules.data || []).filter((rule) => rule.status === "PUBLISHED");
+  const modelOptions = availableLlmModels.map((model) => ({ value: model.id, label: model.displayName || model.name }));
   const start = useMutation({
     mutationFn: () => {
-      const [kind, id] = candidate!.split(":");
+      const [kind, id] = runCandidate!.split(":");
       const components = kind === "combination" ? sourceIds.map(selectedId => {
         const source = workspace.data!.experiments.find(e => e.experiment_id === selectedId)!;
         return { experiment_id: selectedId, candidate_type: source.candidate_type!, candidate_id: source.candidate_id! };
@@ -290,8 +323,8 @@ function Experiments({
         candidate_type: kind,
         components,
         candidate_id: id ? Number(id) : undefined,
-        suggestion_id: suggestion,
-        suggestion_target_case_id: suggestion ? targetCase : undefined,
+        suggestion_id: kind !== "baseline" ? suggestion : undefined,
+        suggestion_target_case_id: kind !== "baseline" && suggestion ? targetCase : undefined,
         case_ids: caseIds,
         screening: screen && kind !== "baseline" ? { metric, minimum: minimum!, target_case_ids: targets } : undefined,
         budget: {
@@ -327,15 +360,26 @@ function Experiments({
   const confirmations = useQuery({
     queryKey: ["confirmation-results", viewer, agent, version, selected],
     queryFn: () => api.confirmationResults(selected!),
-    enabled: !!selected && report.data?.screening?.status === "eligible",
+    enabled: step === "release" && !!selected && report.data?.screening?.status === "eligible",
     retry: false,
     refetchInterval: query => query.state.data?.some(row => !row.summary) ? 10000 : false,
   });
   const choices = workspace.data;
+  const candidates = choices?.candidates.filter(c => matchesDirection(direction, c.kind, c.optimization_methods)) ?? [];
+  const history = choices?.experiments.filter(e => !e.candidate_type || step === "generate" ||
+    (step === "baseline" ? e.candidate_type === "baseline" : e.candidate_type !== "baseline"))
+    .filter(e => !e.candidate_type || e.candidate_type === "baseline" ||
+      matchesDirection(direction, e.candidate_type, e.optimization_methods)) ?? [];
   const eligible = choices?.experiments.filter(e => e.eligible_component && e.candidate_type && e.candidate_id) || [];
+  const showCombination = (!direction || direction === "combination") && eligible.length >= 2;
+  const steps = direction === "combination" ? evolutionSteps.filter(item => item !== "generate") : evolutionSteps;
+  const showSkill = !direction || direction === "skill";
   const fixedIds = new Set(report.data?.fixed_regression?.case_ids ?? []);
   const fixedDigests = new Set(choices?.fixed_regression?.map(c => c.digest));
-  choices?.cases.forEach(c => { if (c.digest && fixedDigests.has(c.digest)) fixedIds.add(c.case_id); });
+  choices?.cases.forEach(c => {
+    if ((c.digest && fixedDigests.has(c.digest)) || choices.fixed_regression?.some(member =>
+      member.source_version === version && member.source_case_id === c.case_id)) fixedIds.add(c.case_id);
+  });
   const development = report.data && { ...report.data, pairs: Object.fromEntries(
     Object.entries(report.data.pairs).filter(([id]) => !fixedIds.has(Number(id)))) };
   const proposed = choices?.candidates.find(c => c.kind === "skill_new" && candidate === `skill_new:${c.candidate_id}`);
@@ -343,8 +387,28 @@ function Experiments({
     eligible.some(e => sourceIds.includes(e.experiment_id) && e.candidate_type === "skill_discovery"));
   const scopeLabels = new Set(choices?.cases.filter(c => caseIds.includes(c.case_id) &&
     !fixedDigests.has(c.digest ?? "") && c.expected_skill_names != null).map(c => c.expected_skill_names!.includes(proposed?.name ?? "")));
-  const baselineReport = report.data?.total_pairs === 0;
   const active = ["pending", "running"].includes(report.data?.status || "");
+  const selectCandidate = (kind: string, id: number) => {
+    setCandidate(`${kind}:${id}`);
+    setCases([]);
+    setTargets([]);
+    if (kind !== "skill_step") setSuggestion(undefined);
+    setTargetCase(undefined);
+    setStage("compare");
+    void workspace.refetch();
+  };
+  const advanceToBaseline = () => setStage("baseline");
+  const nextFromCases = direction === "combination" ? "compare" : "baseline";
+  const receiveResourceFeedback = (id: number) => setFeedback({ id, kind: "resource" });
+  const receiveLocalEdit = (id: number, suggestionId?: number) => {
+    setSuggestion(suggestionId);
+    receiveResourceFeedback(id);
+  };
+  const goToDraft = (turn: number, previous: boolean) => {
+    setPreceding(0);
+    setPreviousTask(previous);
+    setAdding(turn);
+  };
   const error =
     workspace.error ||
     rules.error ||
@@ -353,12 +417,24 @@ function Experiments({
     cancel.error || (retry.variables === selected ? retry.error : null) || confirmations.error;
   return (
     <Flex vertical gap={14}>
+      <nav aria-label={t("evolution.workflow.navigation")}>
+        <Flex gap={8} wrap>
+          {steps.map((item) => <Button key={item} type={item === step ? "primary" : "default"}
+            aria-current={item === step ? "step" : undefined} onClick={() => setStage(item)}>
+            {t(`evolution.workflow.${item}`)}
+          </Button>)}
+        </Flex>
+      </nav>
+      <Typography.Text type="secondary">{t(`evolution.workflow.${step}Help`)}</Typography.Text>
+      {direction && direction !== "combination" && ["cases", "generate"].includes(step) && (
+        <Typography.Text>{t(`evolution.direction.${direction}.${step}`)}</Typography.Text>
+      )}
       {error instanceof Error && (
         <Alert type="error" showIcon message={error.message} />
       )}
       {choices && (
         <>
-          {candidate !== "combination" && !!choices.suggestions?.length && (
+          {showSkill && (step === "generate" || step === "compare" && candidate !== "combination") && !!choices.suggestions?.length && (
             <Select
               allowClear
               aria-label={t("evolution.suggestion")}
@@ -374,12 +450,13 @@ function Experiments({
               }))}
             />
           )}
+          {step === "cases" && <>
           <FixedRegressionCases agent={agent} version={version} workspace={choices} refresh={workspace.refetch}
-            rubrics={(rules.data || []).filter(r => r.status === "PUBLISHED")}
-            models={availableLlmModels.map(m => ({ value: m.id, label: m.displayName || m.name }))} />
+            rubrics={publishedRules} models={modelOptions} suggestedEvaluator={evaluatorId} suggestedJudge={judge}
+            onNewCase={() => setAdding(true)} />
           {!!choices.review_batches?.length && <ReviewBatchResults batches={choices.review_batches}
             refreshing={workspace.isFetching} refresh={() => void workspace.refetch()}
-            onDraft={(turn, previous) => { setPreceding(0); setPreviousTask(previous); setAdding(turn); }} />}
+            onDraft={goToDraft} />}
           {!!choices.reviews?.length && (
             <details>
               <summary>{t("evolution.recentObservations")}</summary>
@@ -406,41 +483,52 @@ function Experiments({
               </ul>
             </details>
           )}
+          <div><Button type="primary" onClick={() => setStage(nextFromCases)}>{t(nextFromCases === "baseline"
+            ? "evolution.workflow.toBaseline" : "evolution.direction.toComparison")}</Button></div>
+          </>}
+          {showRun && <>
+          {step === "compare" && !candidates.length && !showCombination && (
+            <Alert showIcon type="info" message={t(direction === "combination" ? "evolution.direction.needsComponents" : "evolution.workflow.noCandidate")}
+              action={direction !== "combination" && <Button size="small" onClick={() => setStage("generate")}>{t("evolution.workflow.toGenerate")}</Button>} />
+          )}
           <Flex gap={8} wrap align="center">
-            <Select
+            {step === "compare" && <Select
               aria-label={t("evolution.candidate")}
               placeholder={t("evolution.candidate")}
               style={{ minWidth: 220 }}
               value={candidate}
+              showSearch={{ optionFilterProp: "label" }}
               onChange={v => { setCandidate(v); if (v === "combination") { setSuggestion(undefined); setTargetCase(undefined); } }}
-              options={[{ value: "baseline", label: t("evolution.baselineSelection") },
-                ...(eligible.length >= 2 ? [{value:"combination", label:t("evolution.combination")}] : []), ...choices.candidates.map((c) => ({
+              options={[
+                ...(showCombination ? [{value:"combination", label:t("evolution.combination")}] : []), ...candidates.map((c) => ({
                 value: `${c.kind}:${c.candidate_id}`,
-                label: `#${c.candidate_id} · ${c.name}`,
+                label: `#${c.candidate_id} · ${internalCandidateNames.has(c.name)
+                  ? t(direction && c.kind === "prompt" ? `evolution.direction.${direction}.edit` : `evolution.kind.${c.kind}`)
+                  : c.name}`,
               }))]}
-            />
-            {proposed && <span>{t("evolution.newSkill.heldout")}</span>}
-            {candidate === "combination" && <Select mode="multiple" maxCount={2} aria-label={t("evolution.chooseComponents")}
+            />}
+            {step === "compare" && proposed && <span>{t("evolution.newSkill.heldout")}</span>}
+            {step === "compare" && candidate === "combination" && <Select mode="multiple" maxCount={2} aria-label={t("evolution.chooseComponents")}
               placeholder={t("evolution.chooseComponents")} value={sourceIds} onChange={setSources} style={{minWidth: 260}}
               options={eligible.map(e => ({ value: e.experiment_id, label: t("evolution.sourceExperiment", {
                 experiment: e.experiment_id, candidate: e.candidate_id, type: t(`evolution.kind.${e.candidate_type}`),
               }) }))} />}
             <Select
               mode="multiple"
+              showSearch={{ optionFilterProp: "label" }}
               aria-label={t("evolution.cases")}
               placeholder={t("evolution.cases")}
               style={{ minWidth: 260 }}
               value={caseIds}
               onChange={ids => { setCases(ids); setTargets(targets.filter(id => ids.includes(id))); }}
-              options={choices.cases.filter(c => !discoveryRun || c.expected_skill_names != null).map((c) => ({
+              options={choices.cases.filter(c => step === "baseline" || !discoveryRun || c.expected_skill_names != null).map((c) => ({
                 value: c.case_id,
                 label: `${c.family} · ${c.query}`,
               }))}
             />
-            <Button onClick={() => setAdding(true)}>
-              {t("evolution.newCase")}
-            </Button>
           </Flex>
+          <details>
+          <summary>{t("evolution.workflow.advancedRun")}</summary>
           <Flex gap={12} wrap>
             <label>{t("evolution.budget.turns")} <InputNumber value={turnLimit} onChange={setTurnLimit}
               aria-label={t("evolution.budget.turns")} min={1} max={10000} precision={0} /></label>
@@ -454,10 +542,12 @@ function Experiments({
                 step={0.01} precision={6} /></label>
             </>}
           </Flex>
-          {candidate && candidate !== "baseline" && <>
+          </details>
+          {step === "compare" && candidate && <>
             <Checkbox checked={screen} onChange={e => setScreen(e.target.checked)}>{t("evolution.screen.enable")}</Checkbox>
             {screen && <Flex gap={8} wrap>
-              <Select mode="multiple" aria-label={t("evolution.screen.targets")} placeholder={t("evolution.screen.targets")}
+              <Select mode="multiple" showSearch={{ optionFilterProp: "label" }}
+                aria-label={t("evolution.screen.targets")} placeholder={t("evolution.screen.targets")}
                 value={targets} onChange={setTargets} style={{ minWidth: 240 }}
                 options={choices.cases.filter(c => caseIds.includes(c.case_id) && !fixedDigests.has(c.digest ?? ""))
                   .map(c => ({value:c.case_id, label:c.query}))} />
@@ -471,15 +561,21 @@ function Experiments({
             </Flex>}
           </>}
           <Flex gap={8} wrap>
-            {suggestion && (
+            {step === "compare" && suggestion && (
               <Select
                 aria-label={t("evolution.suggestionTarget")}
                 placeholder={t("evolution.suggestionTarget")}
                 style={{ minWidth: 220 }}
                 value={caseIds.includes(targetCase ?? 0) ? targetCase : undefined}
-                onChange={setTargetCase}
+                showSearch={{ optionFilterProp: "label" }}
+              onChange={(id) => {
+                setTargetCase(id);
+                const task = choices.cases.find(c => c.case_id === id);
+                if ((!targets.length || (targets.length === 1 && targets[0] === targetCase))
+                  && !fixedDigests.has(task?.digest ?? "")) setTargets([id]);
+              }}
                 options={choices.cases.filter((c) => caseIds.includes(c.case_id)).map((c) => ({
-                  value: c.case_id, label: c.family,
+                  value: c.case_id, label: c.query,
                 }))}
               />
             )}
@@ -489,8 +585,7 @@ function Experiments({
               style={{ minWidth: 180 }}
               value={evaluatorId}
               onChange={setEvaluator}
-              options={(rules.data || [])
-                .filter((r) => r.status === "PUBLISHED")
+              options={publishedRules
                 .map((r) => ({ value: r.evaluator_id, label: r.name }))}
             />
             {evaluatorId && needsJudge && (
@@ -509,41 +604,77 @@ function Experiments({
             <Button
               type="primary"
               disabled={
-                !turnLimit || !elapsedLimit || !candidate || (!!proposed && scopeLabels.size !== 2) ||
-                (candidate !== "baseline" && screen && (!targets.length || !minimum ||
+                !turnLimit || !elapsedLimit || !runCandidate || (step === "compare" && !!proposed && scopeLabels.size !== 2) ||
+                (step === "compare" && screen && (!targets.length || !minimum ||
                   (metric !== "input_token_reduction_pct" && minimum > targets.length) ||
                   targets.some(id => !caseIds.includes(id) || fixedDigests.has(choices.cases.find(c => c.case_id === id)?.digest ?? "")))) ||
-                (candidate === "combination" && (sourceIds.length !== 2 || !!suggestion || !sourceIds.every(id => eligible.some(e => e.experiment_id === id)))) ||
-                (candidate === "baseline" && !!suggestion) ||
-                (discoveryRun && caseIds.some(id => {
+                (step === "compare" && candidate === "combination" &&
+                  (sourceIds.length !== 2 || !!suggestion || !sourceIds.every(id => eligible.some(e => e.experiment_id === id)))) ||
+                (step === "compare" && discoveryRun && caseIds.some(id => {
                   const c = choices.cases.find(task => task.case_id === id);
                   return c?.expected_skill_names == null;
                 })) ||
-                caseIds.length < (suggestion ? 2 : 1) ||
-                (!!suggestion && !caseIds.includes(targetCase ?? 0)) ||
+                caseIds.length < (step === "compare" && suggestion ? 2 : 1) ||
+                (step === "compare" && !!suggestion && !caseIds.includes(targetCase ?? 0)) ||
                 !evaluatorId ||
                 (needsJudge && !judge)
               }
               loading={start.isPending}
               onClick={() => start.mutate()}
             >
-              {t("evolution.compare")}
+              {t(step === "baseline" ? "evolution.workflow.startBaseline" : "evolution.compare")}
             </Button>
           </Flex>
+          {step === "compare" && !!choices.fixed_regression?.length && (
+            <Typography.Text type="secondary">{t("evolution.workflow.fixedIncluded", { count: choices.fixed_regression.length })}</Typography.Text>
+          )}
+          </>}
+          {step !== "cases" && <Flex gap={8} wrap align="center">
           <Select
             aria-label={t("evolution.history")}
             placeholder={t("evolution.history")}
             style={{ maxWidth: 350 }}
-            value={selected}
-            onChange={setSelected}
-            options={choices.experiments.map((e) => ({
+            value={history.some(item => item.experiment_id === selected) ? selected : undefined}
+            onChange={(id) => { setSelected(id); setFeedback(undefined); }}
+            options={history.map((e) => ({
               value: e.experiment_id,
-              label: `#${e.experiment_id} · ${new Date(e.create_time).toLocaleString()}`,
+              label: `#${e.experiment_id} · ${t(e.candidate_type === "baseline" ? "evolution.workflow.baseline" : "evolution.workflow.compare")} · ${new Date(e.create_time).toLocaleString()}`,
             }))}
           />
+          {step === "generate" && !report.data && (
+            <Button onClick={advanceToBaseline}>{t("evolution.workflow.toBaseline")}</Button>
+          )}
+          </Flex>}
         </>
       )}
-      {report.data && (
+      {step === "generate" && direction !== "combination" && choices && <>
+        {development && report.data?.status === "finished" ? (
+          <Flex vertical gap={12}>
+            <div><LocalEditFeedback key={`local-${development.experiment_id}`} report={development}
+              workspace={choices} agent={agent} version={version} viewer={viewer} suggestedId={suggestion}
+              onFeedback={receiveLocalEdit} methods={direction ? directionMethods[direction] : undefined}
+              label={direction ? t(`evolution.direction.${direction}.edit`) : undefined} /></div>
+            <EvolutionGenerationMethods key={development.experiment_id} direction={direction} baseline={!!baselineReport}
+              report={development} workspace={choices} scope={{ agent, version, viewer }} onResource={receiveResourceFeedback}
+              onScript={id => setFeedback({ id, kind: "script" })} onCandidate={selectCandidate} />
+          </Flex>
+        ) : (
+          <Alert type="info" showIcon message={t("evolution.workflow.needsEvidence")} />
+        )}
+        {feedback && <Card size="small" title={t(feedback.kind === "script"
+          ? "evolution.workflow.scriptTitle" : "evolution.workflow.generateTitle")}
+          extra={<Typography.Text type="secondary" copyable={{
+            text: `${window.location.origin}${window.location.pathname}?tab=evolution&feedback_id=${feedback.id}&feedback_kind=${feedback.kind}`,
+          }}>{t("evolution.workflow.shareHandoff")}</Typography.Text>}>
+          {feedback.kind === "script" ? <ScriptDraftForm key={feedback.id} feedbackId={feedback.id}
+            onSelect={(id) => selectCandidate("skill_script", id)} />
+            : <ResourceCandidateGenerator key={feedback.id} feedbackId={feedback.id} onSelect={selectCandidate} />}
+        </Card>}
+      </>}
+      {step === "release" && !reportVisible && (
+        <Alert showIcon type="info" message={t("evolution.workflow.needsComparison")} />
+      )}
+      {report.data && reportVisible && (
         <>
           <Flex gap={12} align="center">
             <Typography.Text>
@@ -579,7 +710,7 @@ function Experiments({
               failed: report.data.fixed_regression.failed.join(", ") || "—",
               incomplete: report.data.fixed_regression.incomplete.join(", ") || "—",
             })}</Typography.Text>}
-            {report.data.screening && <div>
+            {step === "release" && report.data.screening && <div>
               <strong>{t(`evolution.screen.${report.data.screening.status}`)}</strong>
               <p>{t(`evolution.screen.${report.data.screening.criteria.metric}`)} · {t("evolution.screen.minimum")} {report.data.screening.criteria.minimum}
                 {" · "}{t("evolution.screen.observed")} {report.data.screening.gain?.toLocaleString(undefined, {maximumFractionDigits: 2}) ?? "—"}</p>
@@ -618,7 +749,7 @@ function Experiments({
                 </p>)}
               </div>}
             </div>}
-            {active && (
+            {active && step !== "release" && (
               <Button
                 onClick={() => cancel.mutate()}
                 loading={cancel.isPending}
@@ -626,44 +757,28 @@ function Experiments({
                 {t("evolution.cancel")}
               </Button>
             )}
-            {report.data.can_retry && <Button loading={retry.isPending}
+            {step !== "release" && report.data.can_retry && <Button loading={retry.isPending}
               onClick={() => retry.mutate(report.data.experiment_id)}>{t("evolution.retryInconclusive")}</Button>}
           </Flex>
-          {report.data.status === "finished" && !baselineReport && (
+          {step === "baseline" && report.data.status === "finished" && (
+            <div><Button type="primary" onClick={() => setStage(direction === "combination" ? "compare" : "generate")}>
+              {t(direction === "combination" ? "evolution.direction.toComparison" : "evolution.workflow.toGenerate")}
+            </Button></div>
+          )}
+          {step === "compare" && report.data.status === "finished" && (
+            <div><Button onClick={() => setStage("release")}>{t("evolution.workflow.toRelease")}</Button></div>
+          )}
+          {step === "release" && !report.data.screening && (
+            <Alert showIcon type="info" message={t("evolution.workflow.needsScreening")} />
+          )}
+          {step === "compare" && report.data.status === "finished" && (
             <PublicBenchmarkReports
               key={report.data.experiment_id}
               experiment={report.data.experiment_id}
               viewer={viewer}
             />
           )}
-          {development && report.data.status === "finished" && (
-            <ExampleCandidates key={`ExampleCandidates-${report.data.experiment_id}`} report={development} cases={choices?.cases || []}
-              onGenerated={(id) => {
-                setCandidate(`prompt:${id}`);
-                setCases([]);
-                setSuggestion(undefined);
-                void workspace.refetch();
-              }}
-            />
-          )}
-          {development && report.data.status === "finished" && choices && Object.values(development.pairs).some(p => p.base.result?.selection) &&
-            <DiscoveryFeedback key={`DiscoveryFeedback-${report.data.experiment_id}`} report={development} workspace={choices} />}
-          {development && report.data.status === "finished" && choices && <LocalEditFeedback key={`LocalEditFeedback-${report.data.experiment_id}`}
-            report={development} workspace={choices} agent={agent} version={version} viewer={viewer} suggestedId={suggestion} />}
-          {development && report.data.status === "finished" && baselineReport && choices &&
-            <ToolMappingCandidate key={`ToolMappingCandidate-${report.data.experiment_id}`} report={development} cases={choices.cases} onSelect={id => {
-              setCandidate(`tool_mapping:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
-            }}/>}
-          {development && report.data.status === "finished" && baselineReport && choices && <ToolRepairForm
-            key={`ToolRepairForm-${report.data.experiment_id}`} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
-          {development && report.data.status === "finished" && baselineReport && choices && <ScriptFeedbackForm
-            key={`ScriptFeedbackForm-${report.data.experiment_id}`} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
-          {development && report.data.status === "finished" && baselineReport && choices && <NewSkillBriefForm key={`NewSkillBriefForm-${report.data.experiment_id}`} report={development} workspace={choices}/>}
-          {development && report.data.status === "finished" && baselineReport && <ToolSetCandidates key={`ToolSetCandidates-${report.data.experiment_id}`}
-            report={development} cases={choices?.cases || []} onSelect={id => {
-              setCandidate(`tool_set:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
-            }} />}
-          <Table
+          {step !== "release" && <Table
             pagination={false}
             rowKey="id"
             dataSource={Object.entries(report.data.pairs).map(([id, p]) => ({
@@ -789,7 +904,7 @@ function Experiments({
                 </div>,
               },
             ]}
-          />
+          />}
         </>
       )}
       {typeof adding === "number" && source.error && <Alert type="error" message={source.error.message}
@@ -801,16 +916,15 @@ function Experiments({
           draft={typeof adding === "number" ? source.data : undefined}
           agent={agent}
           version={version}
+          direction={direction}
           skills={[...new Set([...(choices?.skills || []).map(s => s.name),
             ...(choices?.released_guides || []).map(s => s.name),
             ...(choices?.candidates || []).filter(c => c.kind === "skill_new").map(c => c.name)])].map(name => ({name}))}
           close={() => setAdding(false)}
           saved={(id) => {
             if (typeof adding === "number") {
-              setCandidate("baseline");
-              setSuggestion(undefined);
-              setTargetCase(undefined);
               setCases([id]);
+              advanceToBaseline();
             } else {
               setCases(current => [...new Set([...current, id])]);
             }
@@ -823,10 +937,9 @@ function Experiments({
   );
 }
 
-export default function EvolutionExperiments({ focusParams }: { focusParams?: Pick<URLSearchParams, "get"> }) {
-  const { user } = useAuthorizationContext();
-  if (!user) return null;
-  const viewer = JSON.stringify([user.tenantId, user.id]);
+type FocusParams = Pick<URLSearchParams, "get">;
+
+function readFocus(focusParams?: FocusParams) {
   const readId = (key: string) => {
     const raw = focusParams?.get(key);
     const id = Number(raw);
@@ -834,13 +947,43 @@ export default function EvolutionExperiments({ focusParams }: { focusParams?: Pi
   };
   const focus = { agent: readId("agent_id"), version: readId("version_no"), suggestion: readId("suggestion_id"),
     candidate: readId("candidate_id"), experiment: readId("experiment_id") };
-  return <AgentPicker key={viewer} viewer={viewer} focus={focus} />;
+  return { focus, feedback: readId("feedback_id") };
 }
 
-function AgentPicker({ viewer, focus }: { viewer: string; focus: ComparisonFocus }) {
+export function EvolutionWorkspace({ focusParams }: { focusParams?: FocusParams }) {
+  const { focus, feedback } = readFocus(focusParams);
+  const direction = focus.suggestion || focus.candidate ? "skill" : readEvolutionDirection(focusParams?.get("direction"));
+  return direction || focus.experiment || feedback
+    ? <EvolutionExperiments focusParams={focusParams} direction={direction} />
+    : <EvolutionDirectionGuide scope={focus} />;
+}
+
+export default function EvolutionExperiments({ focusParams, direction }: { focusParams?: FocusParams; direction?: EvolutionDirection }) {
+  const { user } = useAuthorizationContext();
+  if (!user) return null;
+  const viewer = JSON.stringify([user.tenantId, user.id]);
+  const { focus, feedback } = readFocus(focusParams);
+  return <>
+    <AgentPicker key={`${viewer}:${direction ?? ""}`} viewer={viewer} focus={focus} direction={direction} />
+    {feedback && <ResourceHandoff key={`${viewer}:${feedback}`} id={feedback}
+      script={focusParams?.get("feedback_kind") === "script"} />}
+  </>;
+}
+
+function ResourceHandoff({ id, script }: { id: number; script: boolean }) {
+  const { t } = useTranslation("common");
+  const [open, setOpen] = useState(true);
+  return <Modal centered open={open} title={t(script ? "evolution.workflow.scriptTitle" : "evolution.workflow.generateTitle")}
+    footer={null} onCancel={() => setOpen(false)} destroyOnHidden>
+    {script ? <ScriptDraftForm feedbackId={id} /> : <ResourceCandidateGenerator feedbackId={id} />}
+  </Modal>;
+}
+
+function AgentPicker({ viewer, focus, direction }: { viewer: string; focus: ComparisonFocus; direction?: EvolutionDirection }) {
   const { t } = useTranslation("common");
   const [agent, setAgent] = useState<number | undefined>(focus.agent);
-  const [version, setVersion] = useState<number | undefined>(focus.agent ? focus.version : undefined);
+  const [configuredVersion, setVersion] = useState<number | undefined>(focus.agent ? focus.version : undefined);
+  const [toolMaintenanceOpen, setToolMaintenanceOpen] = useState(false);
   const agents = useQuery({
     queryKey: ["evolution-agents", viewer],
     queryFn: api.agents,
@@ -850,14 +993,25 @@ function AgentPicker({ viewer, focus }: { viewer: string; focus: ComparisonFocus
     queryFn: () => api.versions(agent!),
     enabled: !!agent,
   });
+  const current = agents.data?.find((item) => item.agent_id === agent)?.current_version_no;
+  const version = configuredVersion ?? (current && current > 0 ? current : undefined);
+  const validScope = version && versions.data?.some((item) => item.version_no === version);
   const error = agents.error || versions.error;
   return (
     <Flex vertical gap={16}>
-      <ResourceCandidateGenerator />
-      <ScriptDraftForm/>
-      <ToolMaintainerBrief viewer={viewer}/>
+      {direction && <Flex vertical gap={6}>
+        <Link href={evolutionHref(undefined, { agent, version })} className="self-start text-primary hover:underline">
+          {t("evolution.direction.back")}
+        </Link>
+        <Typography.Title level={4} className="!m-0">{t(`evolution.direction.${direction}`)}</Typography.Title>
+      </Flex>}
       {error instanceof Error && <Alert type="error" message={error.message} />}
-      <Flex gap={8}>
+      <Card size="small" title={t("evolution.workflow.scope")}
+        extra={(!direction || direction === "tool") &&
+          <Button type="link" onClick={() => setToolMaintenanceOpen(true)}>{t("evolution.workflow.toolMaintenance")}</Button>}>
+      <Flex vertical gap={12}>
+      <Typography.Text type="secondary">{t("evolution.workflow.scopeHelp")}</Typography.Text>
+      <Flex gap={8} wrap>
         <Select
           showSearch
           optionFilterProp="label"
@@ -891,15 +1045,22 @@ function AgentPicker({ viewer, focus }: { viewer: string; focus: ComparisonFocus
             }))}
         />
       </Flex>
-      {agent && version && (
+      </Flex>
+      </Card>
+      {agent && version && validScope && (
         <Experiments
           key={`${agent}:${version}`}
           agent={agent}
           version={version}
           viewer={viewer}
           focus={agent === focus.agent && version === focus.version ? focus : undefined}
+          direction={direction}
         />
       )}
+      <Modal centered open={toolMaintenanceOpen} title={t("evolution.workflow.toolMaintenance")}
+        footer={null} onCancel={() => setToolMaintenanceOpen(false)} destroyOnHidden>
+        <ToolMaintainerBrief viewer={viewer} />
+      </Modal>
     </Flex>
   );
 }

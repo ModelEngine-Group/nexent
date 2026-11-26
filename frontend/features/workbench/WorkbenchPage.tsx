@@ -19,6 +19,7 @@ import {
 } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { Chat } from "@/app/newchat/assistant-ui/chat";
+import { ConversationEvolutionSwitch } from "@/components/chat/ConversationEvolutionSwitch";
 import type {
   Nl2AgentStateEvent,
   Nl2SkillStreamEvent,
@@ -1497,12 +1498,16 @@ const HomeContent: FC = () => {
         />
       </div>
 
-      <WorkbenchLoadingBoundary
-        conversationReady={ready}
-        modelsLoading={isLoadingModels}
-        bootstrapLoading={isLoadingWorkbenchBootstrap}
-        resourcesResolving={workbenchState.resolving}
-      >
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        {user && isPersistedConversation && (
+          <ConversationEvolutionSwitch key={numericConversationId} id={numericConversationId} />
+        )}
+        <WorkbenchLoadingBoundary
+          conversationReady={ready}
+          modelsLoading={isLoadingModels}
+          bootstrapLoading={isLoadingWorkbenchBootstrap}
+          resourcesResolving={workbenchState.resolving}
+        >
         <div className="flex min-h-0 flex-1 min-w-0 flex-col">
           <div className="min-h-0 flex-1">
             <Chat
@@ -1709,7 +1714,8 @@ const HomeContent: FC = () => {
             onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
           />
         </div>
-      </WorkbenchLoadingBoundary>
+        </WorkbenchLoadingBoundary>
+      </div>
     </>
   );
 

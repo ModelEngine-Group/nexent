@@ -41,7 +41,8 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
                      "018_evolution_replay_cases", "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions",
                      "025_evolution_regression_cases", "026_evolution_combination", "028_evolution_confirmation_suites",
                      "029_evolution_confirmation_locks", "030_evolution_confirmation_results", "031_evolution_session_versions", "032_evolution_releases", "033_evolution_release_tools", "020_evolution_feedback_handoff",
-                     "034_evolution_new_skill_candidates", "039_evolution_tool_builds", "041_evolution_generation_attempts",
+                     "034_evolution_new_skill_candidates", "035_evolution_release_guides", "039_evolution_tool_builds",
+                     "041_evolution_generation_attempts",
                      "043_evolution_model_charges", "044_evolution_evaluation_metering",
                      "045_evolution_confirmation_metering", "046_evolution_online_diagnosis",
                      "047_evolution_development_recovery", "050_evolution_scoped_skill_suggestions",
@@ -124,6 +125,9 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
                 "candidate_type":"prompt", "candidate_id":candidate, "evaluator_id":eid})
             assert 400 <= response.status_code < 500 and "fresh materials" in response.text, response.text
             candidate_v2 = store_prompt_candidate(tenant, 7, 2, user, "base", "revised", {"method":"P1"})
+            same_edit = store_prompt_candidate(tenant, 7, 2, user, "base", "revised",
+                                               {"development_feedback": {"method": "T2"}})
+            assert same_edit == candidate_v2
             submission = {"request_id":"frozen", "agent_id":7, "version_no":2,
                           "candidate_type":"prompt", "candidate_id":candidate_v2, "evaluator_id":eid}
             response = client.post(root + "/experiments", headers=headers, json={**submission, "case_ids":[same_group["case_id"]]})
@@ -140,6 +144,14 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
                 "screening":{"target_case_ids":[fresh["case_id"]],"minimum":1}})
             assert response.status_code == 202, response.text
             source_experiment = response.json()["data"]["experiment_id"]
+            response = client.get(root + "/agents/7/versions/2/workspace", headers=headers)
+            assert response.status_code == 200, response.text
+            workspace = response.json()["data"]
+            assert [(row["kind"], row["optimization_methods"]) for row in workspace["candidates"]] == [
+                ("prompt", ["P1", "T2"])
+            ]
+            assert workspace["experiments"][0]["experiment_id"] == source_experiment
+            assert workspace["experiments"][0]["optimization_methods"] == ["P1", "T2"]
             plan = jobs.read_plan(tenant, source_experiment)
             assert plan["regression_cases"] == copied
             assert set(plan["cases"]) == {str(copied_id), str(fresh["case_id"])}

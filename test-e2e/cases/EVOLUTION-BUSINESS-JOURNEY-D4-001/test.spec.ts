@@ -232,19 +232,40 @@ journey(ID, async (scenario) => {
         const compare = savedReceipt.getByRole("link", { name: "对比评测" });
         await expect(compare).toHaveAttribute("href", new RegExp(`candidate_id=${revised}(?:&|$)`));
         await compare.click();
+        await expect(editor.getByRole("heading", { name: "优化 Skill", exact: true })).toBeVisible();
         await expect(editor.getByRole("combobox", { name: "选择候选" })).toBeVisible();
         await expect(editor.getByText(`#${revised} · ${config.skill}`, { exact: true })).toBeVisible();
         await editor.goto(config.origin + "/zh/evaluation", { waitUntil: "domcontentloaded" });
-        await editor.getByText("候选对比", { exact: true }).first().click();
+        await editor.getByRole("tab", { name: "自演进", exact: true }).click();
+        await expect(editor.getByRole("link", { name: "优化提示词", exact: true })).toBeVisible();
+        await expect(editor.getByRole("link", { name: "优化工具调用", exact: true })).toBeVisible();
+        await editor.getByRole("link", { name: "优化 Skill", exact: true }).click();
         await choose(editor, "智能体", config.display);
-        await choose(editor, "版本", /^V1(?:\s|$)/, "V1 ");
+        const steps = editor.getByRole("navigation", { name: "自演进步骤" });
+        await steps.getByRole("button", { name: "生成改动" }).click();
+        await choose(editor, "选择评测记录", `#${config.baseline} ·`);
+        await expect(editor.getByRole("button", { name: "修改 Skill 步骤" })).toBeVisible();
+        await expect(editor.getByRole("button", { name: "改写提示词" })).toHaveCount(0);
+        await expect(editor.getByRole("button", { name: "修改工具调用规则" })).toHaveCount(0);
+        await expect(editor.getByRole("button", { name: "从评测结果挑选提示词示例" })).toHaveCount(0);
+        await steps.getByRole("button", { name: "准备业务题" }).click();
+        await expect(steps.getByRole("button", { name: "准备业务题" })).toHaveAttribute("aria-current", "step");
+        await expect(editor.getByRole("button", { name: "生成改动草案" })).toHaveCount(0);
+        await expect(editor.getByRole("button", { name: "预览脚本改动" })).toHaveCount(0);
+        const guardRow = editor.getByRole("row").filter({ hasText: config.guard });
+        await guardRow.getByRole("button", { name: "加入固定回归" }).click();
+        const fixedDialog = editor.getByRole("dialog", { name: "加入固定回归" });
+        await choose(editor, "固定题的评估器", config.rule);
+        await fixedDialog.getByRole("button", { name: "加入固定回归", exact: true }).click();
+        await guardRow.getByRole("button", { name: "移出固定回归" }).click();
+        await expect(guardRow.getByRole("button", { name: "加入固定回归" })).toBeVisible();
+        await steps.getByRole("button", { name: "评测候选" }).click();
         for (const [label, value] of [
           ["关联业务用户的建议（需选目标题和保护题）", sid + " ·"],
           ["选择候选", "#" + candidate.candidate_id + " · " + config.skill],
-          ["业务题", config.target], ["业务题", config.guard], ["建议的目标题（其他已选题用于回归）", "新交接"],
+          ["业务题", config.target], ["业务题", config.guard], ["建议的目标题（其他已选题用于回归）", config.target],
         ] as const) await choose(editor, label, value);
-        await editor.getByRole("checkbox", { name: "按预设条件筛选候选" }).check();
-        await choose(editor, "选择要改善的专项题", config.target);
+        await editor.getByRole("checkbox", { name: "设置通过条件（用于独立确认）" }).check();
         await choose(editor, "选择已发布评估器", config.rule);
         const submitted = editor.waitForResponse((r) => r.url() === root + "/experiments" && r.request().method() === "POST");
         await editor.getByRole("button", { name: "开始对比", exact: true }).click();
@@ -254,6 +275,7 @@ journey(ID, async (scenario) => {
         expect(request.version_no).toBe(1);
         expect(request.suggestion_id).toBe(Number(sid.slice(2)));
         expect(request.suggestion_target_case_id).toBe(config.targetId);
+        expect(request.screening.target_case_ids).toEqual([config.targetId]);
         experiment = (await response.json()).data.experiment_id;
         const finished = await editor.waitForResponse(async (r) => r.url() === root + "/experiments/" + experiment &&
           r.status() === 200 && (await r.json()).data?.status === "finished", { timeout: 120_000 });
@@ -264,6 +286,7 @@ journey(ID, async (scenario) => {
         const status = await send(page, sid, /保护题全部通过/);
         await expect(status.message.getByRole("link", { name: "对比评测" })).toHaveCount(0);
         await expect(status.message.getByRole("button", { name: "编辑候选" })).toHaveCount(0);
+        await editor.getByRole("button", { name: "去确认与发布" }).click();
         const nomination = editor.waitForResponse((r) =>
           r.url() === root + "/experiments/" + experiment + "/confirmation-candidate" && r.request().method() === "POST");
         await editor.getByRole("button", { name: "提交候选给独立评测人", exact: true }).click();

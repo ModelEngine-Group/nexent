@@ -3,7 +3,7 @@
 "use client";
 
 import { useMessageSources } from "../ui/message-sources";
-import { ConversationEvolutionSwitch } from "./conversation-evolution-switch";
+import { ConversationEvolutionSwitch } from "@/components/chat/ConversationEvolutionSwitch";
 import { SuggestionReceiptActions } from "./suggestion-receipt-actions";
 import type { SuggestionReceipt } from "@/services/evolutionService";
 
@@ -991,7 +991,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             </header>
           )}
 
-        {conversationId && hasMessages && !readOnly && !isShareMode && variant !== "embedded" ? (
+        {conversationId && hasMessages && !workbenchPresentation && !readOnly && !isShareMode && variant !== "embedded" ? (
           <ConversationEvolutionSwitch key={conversationId} id={conversationId} />
         ) : null}
         <ConversationArtifactsToolbarEntry />

@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperiments";
+import EvolutionExperiments, { EvolutionWorkspace } from "@/app/evaluation/components/EvolutionExperiments";
 import NewSkillBriefForm from "@/app/evaluation/components/NewSkillBriefForm";
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
@@ -20,7 +20,7 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
   }),
 }));
 vi.mock("@/hooks/model/useModelList", () => ({
-  useModelList: () => ({ availableLlmModels: [] }),
+  useModelList: () => ({ availableLlmModels: [{ id: 6, name: "Configured model" }] }),
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -51,6 +51,7 @@ vi.mock("@/services/evolutionService", () => ({
     shareDiscovery: vi.fn(),
     developmentCase: vi.fn(),
     shareLocalEdit: vi.fn(),
+    fromFeedback: vi.fn(),
     toolSetCandidates: vi.fn(),
     toolMappingCandidate: vi.fn(),
     toolRepairBrief: vi.fn(),
@@ -66,15 +67,60 @@ vi.mock("@/services/evolutionService", () => ({
 
 async function choose(label: string, option: string) {
   const select = await screen.findByRole("combobox", { name: label });
+  for (const other of screen.queryAllByRole("combobox", { expanded: true })) {
+    if (other !== select) fireEvent.keyDown(other, { key: "Escape" });
+  }
   fireEvent.mouseDown(select.closest(".ant-select-selector") || select);
   await waitFor(() => {
     const item = [
-      ...document.querySelectorAll(".ant-select-item-option-content"),
+      ...document.querySelectorAll(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content"),
     ].find((el) => el.textContent === option);
     expect(item).toBeTruthy();
     fireEvent.click(item!);
   });
 }
+
+it("opens each improvement area from the guide and preserves the requested scope in its link", () => {
+  render(<EvolutionWorkspace focusParams={new URLSearchParams("tab=evolution&agent_id=7&version_no=1")} />);
+  for (const direction of ["prompt", "skill", "tool", "combination"]) {
+    expect(screen.getByRole("link", { name: `evolution.direction.${direction}` })).toHaveAttribute(
+      "href", `?tab=evolution&direction=${direction}&agent_id=7&version_no=1`,
+    );
+  }
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+});
+
+it.each([
+  { direction: "prompt", visible: ["#10 · Instruction", "#13 · Shared edit"] },
+  { direction: "skill", visible: ["#12 · Handover skill"] },
+  { direction: "tool", visible: ["#11 · Required lookup", "#13 · Shared edit"] },
+])("lists only matching candidates in the $direction workspace", async ({ direction, visible }) => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Handover" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({
+    cases: [{ case_id: 1, family: "Handover", query: "Shared business case" }],
+    experiments: [],
+    candidates: [
+      { candidate_id: 10, kind: "prompt", name: "Instruction" },
+      { candidate_id: 11, kind: "prompt", name: "Required lookup", optimization_methods: ["T1"] },
+      { candidate_id: 12, kind: "skill_step", name: "Handover skill" },
+      { candidate_id: 13, kind: "prompt", name: "Shared edit", optimization_methods: ["P3", "T2"] },
+    ],
+  });
+  render(<QueryClientProvider client={new QueryClient()}>
+    <EvolutionWorkspace focusParams={new URLSearchParams(`direction=${direction}&agent_id=7&version_no=1`)} />
+  </QueryClientProvider>);
+  expect(screen.getByRole("heading", { name: `evolution.direction.${direction}` })).toBeInTheDocument();
+  expect(await screen.findByText("Shared business case", {}, { timeout: 10000 })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "evolution.workflow.compare" }));
+  const select = screen.getByRole("combobox", { name: "evolution.candidate" });
+  fireEvent.mouseDown(select.closest(".ant-select-selector") || select);
+  await waitFor(() => {
+    const options = document.querySelectorAll(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content");
+    expect(Array.from(options, option => option.textContent)).toEqual(visible);
+  });
+});
 
 it("retries only the inconclusive result and displays its previous receipt", async () => {
   vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Meeting agent" }]);
@@ -163,16 +209,16 @@ it("selects a published scope and opens its paired results with the original sta
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
   fireEvent.click(await screen.findByText("evolution.recentObservations"));
   expect(screen.getByText(/evolution.observation.tool_error/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "evolution.generateFromFeedback" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "evolution.workflow.compare" }));
   await choose(
     "evolution.history",
-    "#42 · " + new Date("2026-11-23T00:00:00Z").toLocaleString()
+    "#42 · evolution.workflow.compare · " + new Date("2026-11-23T00:00:00Z").toLocaleString()
   );
   expect(await screen.findByText("unassigned")).toBeInTheDocument();
   expect(screen.getByText("evolution.fileVerdict")).toBeInTheDocument();
   expect(screen.getByText("omitted control")).toBeInTheDocument();
   expect(screen.getByText("evolution.skillCoverage")).toBeInTheDocument();
-  expect(screen.getByText("evolution.screen.incomplete")).toBeInTheDocument();
-  expect(screen.getByText("evolution.screen.no_fixed_regression")).toBeInTheDocument();
   const publicResult = {
     report_id: 2, experiment_id: 42, dataset: "Instruction public fixture", revision: "v1",
     subset: "format", scoring_protocol: "exact match v2", metric: "accuracy (%)", sample_count: 30,
@@ -197,7 +243,6 @@ it("selects a published scope and opens its paired results with the original sta
   fireEvent.click(within(dialog).getByRole("button", { name: "OK" }));
   await waitFor(() => expect(evolutionService.recordPublicBenchmark).toHaveBeenCalledWith(42,
     expect.objectContaining({ baseline_score: 40, candidate_score: 90, sample_count: 30 })));
-  expect(screen.getByText("evolution.screen.incomplete")).toBeInTheDocument();
   expect(screen.getByText("missing owner")).toBeInTheDocument();
   expect(screen.getByText("evolution.state.improved")).toBeInTheDocument();
   expect(evolutionService.workspace).toHaveBeenCalledWith(7, 1);
@@ -205,7 +250,12 @@ it("selects a published scope and opens its paired results with the original sta
   vi.mocked(evolutionService.exampleCandidates).mockResolvedValue({
     variants: [{ candidate_id: null, example_count: 0 }, { candidate_id: 6, example_count: 1 }],
   });
-  fireEvent.click(screen.getByRole("button", { name: "evolution.selectExamples" }));
+  fireEvent.click(screen.getByRole("button", { name: "evolution.workflow.release" }));
+  expect(screen.getByText("evolution.screen.incomplete")).toBeInTheDocument();
+  expect(screen.getByText("evolution.screen.no_fixed_regression")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "evolution.workflow.generate" }));
+  fireEvent.click(screen.getByText("evolution.workflow.moreMethods"));
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.selectExamples" }));
   await choose("evolution.failedTarget", "Owners");
   await choose("evolution.passingTrial", "Owners · evolution.result");
   for (const [label, value] of [["targetBehavior", "name"], ["exampleBehavior", "name"],
@@ -228,10 +278,9 @@ it("selects a published scope and opens its paired results with the original sta
   fireEvent.keyDown(screen.getByRole("combobox", { name: "evolution.cases" }), { key: "Escape" });
   await choose("evolution.cases", "Sources · Extract");
   expect(compare).toBeDisabled();
-  await choose("evolution.suggestionTarget", "Sources");
+  await choose("evolution.suggestionTarget", "Extract");
   fireEvent.click(screen.getByRole("checkbox", {name:"evolution.screen.enable"}));
-  expect(compare).toBeDisabled();
-  await choose("evolution.screen.targets", "Extract");
+  expect(compare).toBeEnabled();
   vi.mocked(evolutionService.submit).mockResolvedValue({ experiment_id: 42 });
   fireEvent.click(compare);
   await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
@@ -257,13 +306,88 @@ it("offers prompt examples from a finished baseline report with passing and fail
     },
   });
   render(<QueryClientProvider client={new QueryClient()}>
-    <EvolutionExperiments focusParams={new URLSearchParams("agent_id=7&version_no=1&experiment_id=42")} />
+    <EvolutionWorkspace focusParams={new URLSearchParams("direction=prompt&agent_id=7&version_no=1&experiment_id=42")} />
   </QueryClientProvider>);
   expect(await screen.findByText("evolution.baselineCoverage")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "evolution.selectExamples" }));
+  fireEvent.click(screen.getByRole("button", { name: "evolution.workflow.toGenerate" }));
+  expect(screen.getByRole("button", { name: "evolution.direction.prompt.edit" })).toBeInTheDocument();
+  expect(screen.queryByText("evolution.scriptFeedback")).not.toBeInTheDocument();
+  expect(screen.queryByText("evolution.proposeToolSets")).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.selectExamples" }));
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
   await choose("evolution.failedTarget", "Billing");
   await choose("evolution.passingTrial", "Operations · evolution.base");
+});
+
+it("carries confirmed evidence into drafting and opens comparison for the generated change", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Handover", current_version_no: 1 }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({
+    candidates: [{ candidate_id: 19, kind: "prompt", name: "Retain open tasks" }],
+    experiments: [{ experiment_id: 42, candidate_type: "baseline", create_time: "2026-11-24" }],
+    cases: [
+      { case_id: 1, family: "Handover", query: "Unassigned task" },
+      { case_id: 2, family: "Handover", query: "Assigned task" },
+    ],
+  });
+  vi.mocked(evolutionService.report).mockResolvedValue({
+    experiment_id: 42, agent_id: 7, version_no: 1, total_pairs: 0, valid_pairs: 0, status: "finished",
+    pairs: {
+      "1": { base: { status: "fail", result: { answer: "NONE" } }, comparison: "baseline_only" },
+      "2": { base: { status: "pass", result: { answer: "B2" } }, comparison: "baseline_only" },
+    },
+  });
+  vi.mocked(evolutionService.developmentCase).mockImplementation(async (_agent, _version, id) => ({
+    task: { query: id === 1 ? "Unassigned task" : "Assigned task", expected: id === 1 ? "A1" : "B2", family: "Handover" },
+  }));
+  vi.mocked(evolutionService.shareLocalEdit).mockResolvedValue({ feedback_id: 88 });
+  vi.mocked(evolutionService.fromFeedback).mockResolvedValue({
+    candidate_id: 19, method: "P1", edit: { old: "Require an owner.", new: "Retain all open tasks." },
+  });
+  render(<QueryClientProvider client={new QueryClient()}>
+    <EvolutionExperiments focusParams={new URLSearchParams("agent_id=7&version_no=1&experiment_id=42")} />
+  </QueryClientProvider>);
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.workflow.toGenerate" }, { timeout: 10000 }));
+  expect(screen.queryByRole("button", { name: "evolution.generateFromFeedback" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "evolution.shareLocalEdit" }));
+  const form = await screen.findByRole("dialog");
+  fireEvent.change(within(form).getByLabelText("evolution.editGoal"), { target: { value: "Keep unassigned tasks." } });
+  fireEvent.change(within(form).getByLabelText("evolution.sourcePassage"), { target: { value: "Require an owner." } });
+  await choose("evolution.feedback.failure", "Unassigned task");
+  fireEvent.click(await within(form).findByRole("button", { name: "evolution.workflow.useCaseResults" }));
+  await choose("evolution.feedback.protection", "Assigned task");
+  await waitFor(() => expect(within(form).getAllByRole("button", { name: "evolution.workflow.useCaseResults" })).toHaveLength(2));
+  fireEvent.click(within(form).getAllByRole("button", { name: "evolution.workflow.useCaseResults" })[1]);
+  fireEvent.click(within(form).getByRole("button", { name: "evolution.shareFeedback" }));
+  await waitFor(() => expect(evolutionService.shareLocalEdit).toHaveBeenCalledWith(42, expect.objectContaining({
+    failure: { case_id: 1, expected: "A1", observed: "NONE" },
+    protection: { case_id: 2, expected: "B2", observed: "B2" },
+  })));
+  expect(screen.queryByRole("spinbutton", { name: "evolution.feedbackId" })).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.generateFromFeedback" }));
+  expect(await screen.findByText("Retain all open tasks.")).toBeInTheDocument();
+  expect(evolutionService.fromFeedback).toHaveBeenCalledWith(88, 6);
+  fireEvent.click(screen.getByRole("button", { name: "evolution.workflow.compareThis" }));
+  expect(screen.getByRole("button", { name: "evolution.workflow.compare" })).toHaveAttribute("aria-current", "step");
+  expect(screen.getByText("#19 · Retain open tasks")).toBeInTheDocument();
+  expect(evolutionService.submit).not.toHaveBeenCalled();
+});
+
+it("opens shared evidence for a resource maintainer without an editable agent", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([]);
+  vi.mocked(evolutionService.fromFeedback).mockResolvedValue({
+    candidate_id: 23, method: "S2", edit: { old: "Skip open tasks.", new: "Retain open tasks." },
+  });
+  render(<QueryClientProvider client={new QueryClient()}>
+    <EvolutionExperiments focusParams={new URLSearchParams("feedback_id=90&feedback_kind=resource")} />
+  </QueryClientProvider>);
+  const dialog = await screen.findByRole("dialog", {}, { timeout: 10000 });
+  expect(within(dialog).getByText("evolution.workflow.generateTitle")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "evolution.generateFromFeedback" }));
+  expect(await within(dialog).findByText("Retain open tasks.")).toBeInTheDocument();
+  expect(evolutionService.fromFeedback).toHaveBeenCalledWith(90, 6);
+  expect(evolutionService.workspace).not.toHaveBeenCalled();
 });
 
 it("submits an eligible candidate only when its editor requests independent confirmation", async () => {
@@ -284,7 +408,8 @@ it("submits an eligible candidate only when its editor requests independent conf
   render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
   await choose("agentEvaluation.agentLabel", "Meeting agent");
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
-  await choose("evolution.history", "#41 · " + new Date(date).toLocaleString());
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.workflow.release" }));
+  await choose("evolution.history", "#41 · evolution.workflow.compare · " + new Date(date).toLocaleString());
   const submit = await screen.findByRole("button", {name:"evolution.confirmation.submit"});
   expect(evolutionService.nominate).not.toHaveBeenCalled();
   fireEvent.click(submit);
@@ -334,7 +459,7 @@ it("requires a business expectation before freezing a trace draft, then selects 
     trace: { turn_id: 3, purpose: "reproduce", draft_digest: "a".repeat(64),
       inputs_reviewed: true, tools_require_no_reset: false, unused_attachment_slots: [], use_previous_task: false },
   })));
-  expect(await screen.findByText("evolution.baselineSelection")).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "evolution.workflow.startBaseline" })).toBeInTheDocument();
 });
 
 it("refreshes five-turn groups and opens a draft only for an available source", async () => {
@@ -400,6 +525,7 @@ it("combines two finished single experiments in selection order and shows the fo
   render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
   await choose("agentEvaluation.agentLabel", "Meeting agent");
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.workflow.compare" }));
   await choose("evolution.candidate", "evolution.combination");
   await choose("evolution.evaluator", "Rules");
   await choose("evolution.cases", "Meeting · List actions");
@@ -501,12 +627,14 @@ it("maintains the shared regression suite from a published version", async () =>
     workspace={{ experiments: [], candidates: [], cases: [{ case_id: 13, digest: "new", family: "minutes", query: "all owners" }],
       fixed_regression: [{ source_case_id: 9, source_version: 1, digest: "old", family: "minutes", query: "protect read" }] }}
     refresh={refresh} /></QueryClientProvider>);
-  fireEvent.click(screen.getByText("evolution.fixedSuite"));
-  await choose("evolution.chooseFixed", "minutes · all owners");
-  expect(screen.getByRole("button", { name: "evolution.addFixed" })).toBeDisabled();
-  await choose("evolution.fixedRubric", "owner rule");
-  fireEvent.click(screen.getByRole("button", { name: "evolution.addFixed" }));
+  const row = screen.getByRole("row", { name: /all owners/ });
+  fireEvent.click(within(row).getByRole("button", { name: "evolution.addFixed" }));
+  const modal = await screen.findByRole("dialog", { name: "evolution.addFixed" });
+  expect(within(modal).getByText("owner rule")).toBeInTheDocument();
+  fireEvent.click(within(modal).getByRole("button", { name: "evolution.addFixed" }));
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("checkbox", { name: "evolution.fixedSuite" }));
+  expect(screen.queryByRole("row", { name: /all owners/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "evolution.removeFixed" }));
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
   expect(evolutionService.setFixedRegression).toHaveBeenNthCalledWith(1, 7, 2, 13, true, { evaluator_id: 15, language: "zh", judge_model_id: undefined });
@@ -596,6 +724,7 @@ it("requires both an applicable task and a skip task before comparing a new Skil
   render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
   await choose("agentEvaluation.agentLabel", "Intake");
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.workflow.compare" }));
   await choose("evolution.candidate", "#8 · intake");
   await choose("evolution.evaluator", "Business checks");
   await choose("evolution.cases", "Work · Review record");
@@ -647,9 +776,9 @@ it("previews the maintainer's function diff without starting an experiment", asy
   const replacement = "def report(value):\n    return value.upper()";
   vi.mocked(evolutionService.scriptDraft).mockResolvedValue({script_path:"scripts/report.py", function:"report",
     replacement, diff:"+    return value.upper()", draft_digest:"pinned", source_digest:"baseline"});
-  render(<QueryClientProvider client={new QueryClient()}><ScriptDraftForm/></QueryClientProvider>);
-  fireEvent.click(screen.getByText("evolution.scriptDraft", {selector:"summary"}));
-  fireEvent.change(screen.getByRole("spinbutton", {name:"evolution.feedbackId"}), {target:{value:"32"}});
+  const select = vi.fn();
+  render(<QueryClientProvider client={new QueryClient()}><ScriptDraftForm feedbackId={32} onSelect={select} /></QueryClientProvider>);
+  expect(screen.queryByRole("spinbutton", {name:"evolution.feedbackId"})).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("radio", {name:"evolution.scriptManual"}));
   fireEvent.change(screen.getByRole("textbox", {name:"evolution.scriptReplacement"}), {target:{value:replacement}});
   fireEvent.click(screen.getByRole("button", {name:"evolution.scriptDraft"}));
@@ -661,6 +790,8 @@ it("previews the maintainer's function diff without starting an experiment", asy
   await waitFor(() => expect(evolutionService.buildScript).toHaveBeenCalledWith(32,{
     replacement, draft_digest:"pinned", source_digest:"baseline",
   }));
+  fireEvent.click(await screen.findByRole("button", {name:"evolution.workflow.compareThis"}));
+  expect(select).toHaveBeenCalledWith(55);
 });
 
 it("keeps the MCP response and independent fixture in the task editor payload", () => {
@@ -701,7 +832,7 @@ it("shows provider model limits and the stopped status on a metered experiment",
   vi.mocked(evolutionService.versions).mockResolvedValue([{version_no:1,version_name:"Pilot"}]);
   vi.mocked(evolutionService.evaluators).mockResolvedValue([]);
   vi.mocked(evolutionService.workspace).mockResolvedValue({
-    model_budget_available:true, cases:[], candidates:[], experiments:[{experiment_id:42,create_time:date}],
+    model_budget_available:true, cases:[], candidates:[], experiments:[{experiment_id:42,create_time:date,candidate_type:"baseline"}],
   });
   vi.mocked(evolutionService.report).mockResolvedValue({
     experiment_id:42, status:"finished", total_pairs:0, valid_pairs:0, pairs:{},
@@ -715,9 +846,11 @@ it("shows provider model limits and the stopped status on a metered experiment",
   render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
   await choose("agentEvaluation.agentLabel", "Meeting agent");
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.workflow.baseline" }));
+  fireEvent.click(screen.getByText("evolution.workflow.advancedRun"));
   expect(await screen.findByRole("spinbutton", {name:"evolution.budget.modelTokens"})).toBeInTheDocument();
   expect(screen.getByRole("spinbutton", {name:"evolution.budget.modelCost"})).toBeInTheDocument();
-  await choose("evolution.history", "#42 · " + new Date(date).toLocaleString());
+  await choose("evolution.history", "#42 · evolution.workflow.baseline · " + new Date(date).toLocaleString());
   expect(await screen.findByText("evolution.budget.modelUsage")).toBeInTheDocument();
   expect(screen.getByText("evolution.budget.modelStopped")).toBeInTheDocument();
 });

@@ -148,6 +148,11 @@ vi.mock("@/app/newchat/assistant-ui/chat", () => ({
     return <input aria-label="workbench draft" defaultValue="Keep my draft" />;
   },
 }));
+vi.mock("@/components/chat/ConversationEvolutionSwitch", () => ({
+  ConversationEvolutionSwitch: ({ id }: { id: number }) => (
+    <button type="button" aria-label={`Conversation ${id} analysis`} />
+  ),
+}));
 vi.mock("@/app/newchat/assistant-ui/composer-tools", () => ({
   ComposerAttachment: () => null,
   ComposerDictation: () => null,
@@ -428,15 +433,35 @@ it("still gates missing active identity and history loading", async () => {
   view.threadId = undefined;
   const page = render(<WorkbenchPage />);
   expect(screen.queryByRole("textbox", { name: "workbench draft" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Conversation \d+ analysis/ })).toBeNull();
   view.threadId = "a";
   view.threadLoading = true;
   page.rerender(<WorkbenchPage />);
   expect(screen.queryByRole("textbox", { name: "workbench draft" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Conversation 101 analysis" })).toBeVisible();
+  view.threadId = "b";
+  page.rerender(<WorkbenchPage />);
+  expect(screen.queryByRole("button", { name: "Conversation 101 analysis" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Conversation 202 analysis" })).toBeVisible();
   view.threadLoading = false;
   page.rerender(<WorkbenchPage />);
   expect(
     await screen.findByRole("textbox", { name: "workbench draft" })
   ).toBeVisible();
+});
+
+it("keeps saved conversation consent visible during resource restoration", async () => {
+  const pending = deferred<ApiConversationDetail>();
+  vi.mocked(conversationService.getById).mockReturnValue(pending.promise);
+  render(<WorkbenchPage />);
+  const consent = screen.getByRole("button", { name: "Conversation 101 analysis" });
+  const composer = await screen.findByRole("textbox", { name: "workbench draft" });
+  await waitFor(() => expect(composer.closest('[aria-busy="true"]')).not.toBeNull());
+  expect(consent).toBeVisible();
+  expect(consent.closest('[aria-busy="true"]')).toBeNull();
+  await act(async () => pending.resolve(detail(101)));
+  await waitFor(() => expect(composer.closest('[aria-busy="true"]')).toBeNull());
+  expect(screen.getByRole("button", { name: "Conversation 101 analysis" })).toBe(consent);
 });
 
 it.each(["pending", "unavailable"])(

@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 import { useState } from "react";
-import { Alert, Button, Form, Input, InputNumber, Select } from "antd";
+import { Alert, Button, Flex, Form, Input, Select, Typography } from "antd";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -11,7 +11,9 @@ const groups = ["missed", "overused", "correct"] as const;
 type Group = typeof groups[number];
 type Fields = { goal: string } & Record<Group, { case_id: number; query_excerpt: string }>;
 
-export default function DiscoveryFeedback({ report, workspace }: { report: ExperimentReport; workspace: Workspace }) {
+export default function DiscoveryFeedback({ report, workspace, onFeedback }: {
+  report: ExperimentReport; workspace: Workspace; onFeedback?: (id: number) => void;
+}) {
   const { t } = useTranslation("common");
   const [skill, setSkill] = useState<number>();
   const [form] = Form.useForm<Fields>();
@@ -20,6 +22,7 @@ export default function DiscoveryFeedback({ report, workspace }: { report: Exper
     mutationFn: async () => api.shareDiscovery(report.experiment_id, {
       ...await form.validateFields(), method: "S1", skill_id: skill!,
     }),
+    onSuccess: ({ feedback_id }) => onFeedback?.(feedback_id),
   });
   function casesFor(group: Group) {
     return workspace.cases.filter(c => {
@@ -59,27 +62,38 @@ export default function DiscoveryFeedback({ report, workspace }: { report: Exper
   </details>;
 }
 
-export function ResourceCandidateGenerator() {
+export function ResourceCandidateGenerator({ feedbackId, onSelect }: {
+  feedbackId: number; onSelect?: (kind: string, id: number) => void;
+}) {
   const { t } = useTranslation("common");
   const { availableLlmModels } = useModelList();
-  const [feedback, setFeedback] = useState<number | null>();
   const [model, setModel] = useState<number>();
-  const generate = useMutation({ mutationFn: () => api.fromFeedback(feedback!, model!) });
-  return <details>
-    <summary>{t("evolution.generateFromFeedback")}</summary>
+  const selectedModel = model ?? (availableLlmModels.length === 1 ? availableLlmModels[0].id : undefined);
+  const generate = useMutation({ mutationFn: () => api.fromFeedback(feedbackId, selectedModel!) });
+  const generated = generate.data;
+  const kind = generated?.method === "S1" ? "skill_discovery"
+    : generated?.method === "S2" ? "skill_step"
+    : generated?.method === "S3" ? "skill_new" : "prompt";
+  return <Flex vertical gap={12}>
+    <Typography.Text>{t("evolution.workflow.evidenceReady")}</Typography.Text>
     <Form layout="inline">
-      <Form.Item label={t("evolution.feedbackId")}><InputNumber min={1} precision={0} value={feedback}
-        onChange={setFeedback} /></Form.Item>
-      <Form.Item label={t("evolution.generatorModel")}><Select style={{ minWidth: 160 }} value={model} onChange={setModel}
+      <Form.Item label={t("evolution.generatorModel")}><Select aria-label={t("evolution.generatorModel")}
+        style={{ minWidth: 160 }} value={selectedModel} onChange={setModel}
         options={availableLlmModels.map(m => ({ value: m.id, label: m.displayName || m.name }))} /></Form.Item>
-      <Button disabled={!feedback || !model} loading={generate.isPending} onClick={() => generate.mutate()}>
+      <Button type="primary" disabled={!selectedModel} loading={generate.isPending} onClick={() => generate.mutate()}>
         {t("evolution.generateFromFeedback")}
       </Button>
     </Form>
     {generate.error && <Alert type="error" message={generate.error.message} />}
-    {generate.data && <div><strong>#{generate.data.candidate_id} · {generate.data.method}</strong>
-      {generate.data.edit && <><p><del>{generate.data.edit.old}</del></p><p><ins>{generate.data.edit.new}</ins></p></>}
-      {Object.entries(generate.data.files || {}).map(([path,content]) =>
-        <details key={path} open={path==="SKILL.md"}><summary>{path}</summary><pre className="whitespace-pre-wrap">{content}</pre></details>)}</div>}
-  </details>;
+    {generated && <Flex vertical gap={8}>
+      <Typography.Text strong>{t("evolution.workflow.generated", { id: generated.candidate_id })}</Typography.Text>
+      {generated.edit && <dl className="space-y-2">
+        <div><dt>{t("evolution.workflow.currentText")}</dt><dd className="whitespace-pre-wrap">{generated.edit.old}</dd></div>
+        <div><dt>{t("evolution.workflow.proposedText")}</dt><dd className="whitespace-pre-wrap">{generated.edit.new}</dd></div>
+      </dl>}
+      {Object.entries(generated.files || {}).map(([path,content]) =>
+        <details key={path} open={path==="SKILL.md"}><summary>{path}</summary><pre className="whitespace-pre-wrap">{content}</pre></details>)}
+      {onSelect && <div><Button onClick={() => onSelect(kind, generated.candidate_id)}>{t("evolution.workflow.compareThis")}</Button></div>}
+    </Flex>}
+  </Flex>;
 }

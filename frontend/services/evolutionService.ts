@@ -68,10 +68,10 @@ export interface Workspace {
   reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[];
     diagnosis?: { status: "needs_review" | "needs_evidence" | "no_issue"; reason: string; missing?: string[] } }[];
   review_batches?: ReviewBatch[];
-  candidates: { candidate_id: number; kind: string; name: string }[];
+  candidates: { candidate_id: number; kind: string; name: string; optimization_methods?: string[] | null }[];
   cases: { case_id: number; digest?: string; family: string; query: string; expected_skill_names?: string[] | null }[];
   experiments: { experiment_id: number; create_time: string; candidate_type?: string;
-    candidate_id?: number; eligible_component?: boolean }[];
+    candidate_id?: number; eligible_component?: boolean; optimization_methods?: string[] | null }[];
 }
 export interface EvaluatedCandidate { experiment_id: number; candidate_type: string; candidate_id: number }
 export interface TraceCaseDraft {

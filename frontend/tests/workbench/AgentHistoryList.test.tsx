@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
@@ -18,6 +19,7 @@ import agentChatStyles from "@/app/newchat/agent-chat.module.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const state = vi.hoisted(() => ({
+  confirm: vi.fn(),
   threadItems: [] as Array<{
     id: string;
     remoteId?: string;
@@ -51,8 +53,13 @@ vi.mock("@assistant-ui/react", () => ({
 }));
 
 vi.mock("@/hooks/useConfirmModal", () => ({
-  useConfirmModal: () => ({ confirm: vi.fn() }),
+  useConfirmModal: () => ({ confirm: state.confirm }),
 }));
+
+vi.mock("@/components/providers/AuthorizationProvider", async () => {
+  const { createContext } = await import("react");
+  return { AuthorizationContext: createContext({ user: { id: "owner", tenantId: "t" } }) };
+});
 
 vi.mock("@/app/newchat/assistant-ui/thread-pins", () => ({
   usePinnedThreads: () => ({
@@ -103,6 +110,7 @@ const conversation = (id: number) => ({
 const queryClients: QueryClient[] = [];
 
 afterEach(async () => {
+  state.confirm.mockClear();
   state.threadItems = [];
   state.mainThreadId = undefined;
   state.serverPins = [];
@@ -129,6 +137,25 @@ function renderHistory(selectedAgentId?: number) {
     </QueryClientProvider>
   );
 }
+
+it("offers past analysis withdrawal in the saved conversation menu", async () => {
+  vi.spyOn(conversationService, "getAgentGroups").mockResolvedValue(agentGroups);
+  vi.spyOn(conversationService, "getAgentGroupConversations").mockResolvedValue({
+    items: [conversation(1)], pinned_items: [], next_cursor: null,
+  });
+  const setting = vi.spyOn(conversationService, "evolutionSetting");
+  renderHistory();
+  fireEvent.click(await screen.findByRole("button", { name: "Agent Seven" }));
+  const row = (await screen.findByText("History 1")).closest("[data-conversation-id]");
+  expect(row).not.toBeNull();
+  expect(screen.queryByText("chat.evolution.withdraw")).toBeNull();
+  fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "chat.threadList.moreActions" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "chat.evolution.withdraw" }));
+  await waitFor(() => expect(state.confirm).toHaveBeenCalledWith(expect.objectContaining({
+    title: "chat.evolution.withdraw",
+  })));
+  expect(setting).not.toHaveBeenCalled();
+});
 
 it("shows animated skeleton rows without visible loading copy", async () => {
   let resolveConversations!: (value: {

@@ -15,9 +15,11 @@ import {
 export default function NewSkillBriefForm({
   report,
   workspace,
+  onFeedback,
 }: {
   report: ExperimentReport;
   workspace: Workspace;
+  onFeedback?: (id: number) => void;
 }) {
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
@@ -37,6 +39,7 @@ export default function NewSkillBriefForm({
   const submit = useMutation({
     mutationFn: async () =>
       api.newSkillBrief(report.experiment_id, await form.validateFields()),
+    onSuccess: ({ feedback_id }) => onFeedback?.(feedback_id),
   });
   return (
     <details>

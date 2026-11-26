@@ -325,6 +325,14 @@ def read_plan(tenant, eid, active_only=False):
 
 def workspace_choices(tenant, agent_id, version):
     params = dict(tenant=tenant, agent=agent_id, version=version)
+    methods = """
+        CASE WHEN c.resource_field = 'agent.prompt' THEN ARRAY(
+            SELECT DISTINCT COALESCE(f.feedback->'development_feedback'->>'method', f.feedback->>'method')
+            FROM nexent.evolution_candidate_feedback_t f WHERE f.candidate_id=c.candidate_id
+              AND COALESCE(f.feedback->'development_feedback'->>'method', f.feedback->>'method') IS NOT NULL
+            ORDER BY 1
+        ) END AS optimization_methods
+    """
     queries = {
         "released_guides": """
             SELECT name, candidate_id, digest FROM nexent.evolution_release_guide_t
@@ -350,14 +358,14 @@ def workspace_choices(tenant, agent_id, version):
             FROM nexent.evolution_replay_case_t WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version
             ORDER BY case_id DESC LIMIT 200
         """,
-        "candidates": """
+        "candidates": f"""
             SELECT c.candidate_id, CASE c.resource_field WHEN 'agent.tools' THEN 'tool_set' WHEN 'agent.tool_format' THEN 'tool_mapping' ELSE 'prompt' END AS kind,
-                c.resource_field AS name, c.create_time
+                c.resource_field AS name, c.create_time, {methods}
             FROM nexent.evolution_candidate_t c
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.base_version_no=:version
             UNION ALL
             SELECT s.candidate_id, CASE s.feedback->>'method' WHEN 'S1' THEN 'skill_discovery' WHEN 'S4' THEN 'skill_script' ELSE 'skill_step' END,
-                s.skill_name, s.create_time FROM nexent.evolution_skill_candidate_t s
+                s.skill_name, s.create_time, NULL::text[] FROM nexent.evolution_skill_candidate_t s
             WHERE s.tenant_id=:tenant AND (s.feedback->>'method' IS DISTINCT FROM 'S4' OR
                 (s.feedback->'script_build'->>'agent'=CAST(:agent AS text)
                  AND s.feedback->'script_build'->>'version'=CAST(:version AS text))) AND (EXISTS (
@@ -368,10 +376,10 @@ def workspace_choices(tenant, agent_id, version):
                     AND g.version_no=s.source_version_no AND g.candidate_id=s.released_guide_candidate_id
                     AND g.name=s.skill_name AND g.digest=s.base_digest)))
             UNION ALL
-            SELECT c.candidate_id, 'skill_new', c.name, c.created_at FROM nexent.evolution_new_skill_candidate_t c
+            SELECT c.candidate_id, 'skill_new', c.name, c.created_at, NULL::text[] FROM nexent.evolution_new_skill_candidate_t c
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.version_no=:version
             UNION ALL
-            SELECT b.build_id, 'tool_build', f.feedback->>'tool_name', b.created_at
+            SELECT b.build_id, 'tool_build', f.feedback->>'tool_name', b.created_at, NULL::text[]
             FROM nexent.evolution_tool_build_t b
             JOIN nexent.evolution_feedback_handoff_t f ON f.feedback_id=b.feedback_id AND f.tenant_id=b.tenant_id
             JOIN LATERAL (
@@ -382,9 +390,10 @@ def workspace_choices(tenant, agent_id, version):
               AND f.feedback->>'agent_id'=CAST(:agent AS text) AND f.feedback->>'version_no'=CAST(:version AS text)
             ORDER BY create_time DESC LIMIT 200
         """,
-        "experiments": """
+        "experiments": f"""
             SELECT e.experiment_id, e.create_time, plan->'request'->>'candidate_type' AS candidate_type,
                    (plan->'request'->>'candidate_id')::bigint AS candidate_id,
+                   {methods},
                    (plan->'request'->>'candidate_id' IS NOT NULL AND plan->'request'->>'candidate_type' IN ('prompt','skill_discovery','skill_step','tool_set') AND NOT e.cancelled AND
                     NOT EXISTS (SELECT 1 FROM nexent.evolution_trial_t t WHERE t.experiment_id=e.experiment_id
                                 AND t.status IN ('running','pending','cancelled')) AND
@@ -394,7 +403,10 @@ def workspace_choices(tenant, agent_id, version):
                                 AND b.status IN ('pass','fail') AND t.receipt_id IS NOT NULL AND b.receipt_id IS NOT NULL))
                        AS eligible_component
               FROM nexent.evolution_experiment_t e
-             WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version ORDER BY experiment_id DESC LIMIT 100
+              LEFT JOIN nexent.evolution_candidate_t c ON e.plan->'request'->>'candidate_type'='prompt'
+                AND c.candidate_id=(e.plan->'request'->>'candidate_id')::bigint
+                AND c.tenant_id=e.tenant_id AND c.agent_id=e.agent_id AND c.base_version_no=e.version_no
+             WHERE e.tenant_id=:tenant AND e.agent_id=:agent AND e.version_no=:version ORDER BY e.experiment_id DESC LIMIT 100
         """,
     }
     with get_db_session() as session:

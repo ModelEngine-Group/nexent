@@ -24,7 +24,7 @@ export function SuggestionReceiptActions({ receipt }: { receipt: SuggestionRecei
   if (!user || actions.isError || (!actions.data?.compare && !actions.data?.edit)) return null;
   const compare = actions.data.compare;
   const edit = actions.data.edit;
-  const params = new URLSearchParams({ tab: "evolution" });
+  const params = new URLSearchParams({ tab: "evolution", direction: "skill" });
   if (compare) {
     for (const [key, value] of Object.entries(compare)) {
       if (value !== null) params.set(key, String(value));

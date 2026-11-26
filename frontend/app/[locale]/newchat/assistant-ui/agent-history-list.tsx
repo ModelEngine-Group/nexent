@@ -29,11 +29,13 @@ import {
   PencilIcon,
   PinIcon,
   PinOffIcon,
+  ShieldOffIcon,
   TrashIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { useWithdrawConversationAnalysis } from "@/hooks/chat/useWithdrawConversationAnalysis";
 import { conversationService } from "@/services/conversationService";
 import type {
   AgentConversationGroup,
@@ -1464,6 +1466,7 @@ function AgentHistoryRow({
   const { t } = useTranslation();
   const aui = useAui();
   const { confirm } = useConfirmModal();
+  const withdrawAnalysis = useWithdrawConversationAnalysis();
   const pin = usePinnedThreads();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1527,6 +1530,11 @@ function AgentHistoryRow({
       icon: <PencilIcon className="size-4" />,
       label: t("chat.threadList.rename"),
     },
+    ...(withdrawAnalysis ? [{
+      key: "withdraw-analysis",
+      icon: <ShieldOffIcon className="size-4" />,
+      label: t("chat.evolution.withdraw"),
+    }] : []),
     {
       key: "delete",
       icon: <TrashIcon className="size-4" />,
@@ -1661,6 +1669,8 @@ function AgentHistoryRow({
                     });
                   } else if (key === "rename") {
                     setEditing(true);
+                  } else if (key === "withdraw-analysis") {
+                    setTimeout(() => withdrawAnalysis?.(Number(conversationId)), 0);
                   } else if (key === "delete") {
                     setTimeout(deleteConversation, 0);
                   }

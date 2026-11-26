@@ -32,6 +32,7 @@ import {
   LoaderCircle,
   ListChecks,
   Share2Icon,
+  ShieldOffIcon,
 } from "lucide-react";
 import {
   Fragment,
@@ -52,6 +53,7 @@ import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import { useConversationShareRequest } from "@/stores/conversationShare";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
+import { useWithdrawConversationAnalysis } from "@/hooks/chat/useWithdrawConversationAnalysis";
 import {
   fetchAgentConversationIds,
   getAgentConversationSelectionSummary,
@@ -1460,6 +1462,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const { t } = useTranslation();
   const aui = useAui();
   const { confirm } = useConfirmModal();
+  const withdrawAnalysis = useWithdrawConversationAnalysis();
   const [isEditing, setIsEditing] = useState(false);
   const batch = useBatchSelection();
   const batchMode = batch?.batchMode ?? false;
@@ -1702,6 +1705,15 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               <PencilIcon className="size-4" />
               {t("chat.threadList.rename")}
             </ThreadListItemMorePrimitive.Item>
+            {withdrawAnalysis && Number.isSafeInteger(shareConversationId) && shareConversationId > 0 && (
+              <ThreadListItemMorePrimitive.Item
+                onSelect={() => setTimeout(() => withdrawAnalysis(shareConversationId), 0)}
+                className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+              >
+                <ShieldOffIcon className="size-4" />
+                {t("chat.evolution.withdraw")}
+              </ThreadListItemMorePrimitive.Item>
+            )}
             <ThreadListItemMorePrimitive.Item
               onSelect={() => setTimeout(handleDelete, 0)}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
