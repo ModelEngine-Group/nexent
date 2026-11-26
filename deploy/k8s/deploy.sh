@@ -68,6 +68,7 @@ LOCAL_NODE_NAME=""
 EXISTING_CLAIM_PREFIX=""
 RUNTIME_REPLICAS="1"
 SAVED_RUNTIME_CHART_REPLICAS=""
+DIRECT_UPGRADE="false"
 K8S_WAIT_TIMEOUT_SECONDS="${NEXENT_K8S_WAIT_TIMEOUT_SECONDS:-600}"
 
 # Parse command line arguments. The optional "apply" command is kept as a deploy alias.
@@ -161,6 +162,10 @@ while [[ $# -gt 0 ]]; do
       RUNTIME_REPLICAS="$2"
       K8S_RUNTIME_REPLICAS_EXPLICIT="true"
       shift 2
+      ;;
+    --direct-upgrade)
+      DIRECT_UPGRADE="true"
+      shift
       ;;
     --retry-runtime-maintenance)
       echo "Error: --retry-runtime-maintenance was removed. Rerun the application deployment during an idle window." >&2
@@ -985,6 +990,21 @@ deploy_application_release() {
     (
         set -o pipefail
         local bootstrap_run_id='' deployment_db_read deployment_db_write deployment_db_pid deployment_db_owner
+        if [ "${DIRECT_UPGRADE:-false}" = "true" ] && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+            helm_application_chart false "" template >/dev/null || return 1
+            start_runtime_deploy_lock || return 1
+            require_direct_upgrade_target || return 1
+            require_previous_deployment_jobs_stopped || return 1
+            if [ "$RUNTIME_REPLICAS" -gt 1 ]; then
+                require_runtime_shared_storage || return 1
+            fi
+            require_runtime_deploy_lock || return 1
+            helm_application_chart false "" upgrade || return 1
+            require_runtime_deploy_lock || return 1
+            wait_for_nexent_ready || return 1
+            require_runtime_deploy_lock || return 1
+            return 0
+        fi
         if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
             if ! IFS= read -r bootstrap_run_id < /proc/sys/kernel/random/uuid; then
                 bootstrap_run_id=$(uuidgen | tr '[:upper:]' '[:lower:]') || return 1
@@ -1197,6 +1217,24 @@ sync_official_skills_to_workspace() {
 helm_release_exists() {
     local release_name="$1"
     helm status "$release_name" --namespace "$NAMESPACE" >/dev/null 2>&1
+}
+
+require_direct_upgrade_target() {
+    local state owner owner_namespace replicas
+    if ! helm_release_exists "$APPLICATION_RELEASE_NAME"; then
+        echo "Error: --direct-upgrade requires an existing '$APPLICATION_RELEASE_NAME' Helm release. Use the default deployment for initial setup." >&2
+        return 1
+    fi
+
+    if state=$(kubectl get deployment nexent-config -n "$NAMESPACE" -o \
+        'jsonpath={.metadata.annotations.meta\.helm\.sh/release-name}:{.metadata.annotations.meta\.helm\.sh/release-namespace}:{.spec.replicas}'); then
+        IFS=: read -r owner owner_namespace replicas <<< "$state"
+        if [[ "$owner" = "$APPLICATION_RELEASE_NAME" && "$owner_namespace" = "$NAMESPACE" && "$replicas" =~ ^[1-9][0-9]*$ ]]; then
+            return 0
+        fi
+    fi
+    echo "Error: --direct-upgrade requires an active nexent-config Deployment owned by the '$APPLICATION_RELEASE_NAME' Helm release. Use the default deployment to complete bootstrap." >&2
+    return 1
 }
 
 reject_legacy_single_release() {
@@ -1547,9 +1585,15 @@ apply() {
     # Step 1: Select deployment components, port policy and image source.
     apply_deployment_common_config
 
+    if [ "$DIRECT_UPGRADE" = "true" ] && release_scope_includes_nexent &&
+        deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        require_direct_upgrade_target || exit 1
+    fi
+
     # Step 2: Render release-specific values with image tags and persistence settings.
     update_values_yaml
-    if release_scope_includes_nexent && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+    if [ "$DIRECT_UPGRADE" = "false" ] && release_scope_includes_nexent &&
+        deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
         validate_official_skills_source || exit 1
     fi
     persist_deploy_options
@@ -1716,7 +1760,7 @@ apply() {
     render_runtime_secret_values
     recreate_legacy_nexent_secret_for_helm_management
 
-    # Step 8: Stop old business Pods and run bootstrap before activating the release.
+    # Step 8: Deploy the application release using the selected upgrade flow.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
     else
@@ -1785,7 +1829,8 @@ print_usage() {
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
         echo "  --persistence-mode MODE    local、dynamic 或 existing"
-        echo "  --runtime-replicas COUNT   设置无业务停机调整后的 Runtime 副本数"
+        echo "  --runtime-replicas COUNT   设置 Runtime 固定副本数"
+        echo "  --direct-upgrade           直接更新现有应用，跳过全局缩零和系统初始化 Job"
         echo "  --storage-class NAME       用于 PV/PVC 绑定的 StorageClass（别名：--storageclass、--storage-class-name、--sc）"
         echo "  --local-path PATH          本地 PV 基础路径"
         echo "  --local-node-name NAME     已废弃；local 模式使用 hostPath，不需要 nodeAffinity"
@@ -1820,7 +1865,8 @@ print_usage() {
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"
-    echo "  --runtime-replicas COUNT   Set the Runtime replica count after an idle deployment"
+    echo "  --runtime-replicas COUNT   Set the fixed Runtime replica count"
+    echo "  --direct-upgrade           Upgrade an existing application without scaling to zero or running bootstrap"
     echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"
     echo "  --local-path PATH          Base path for local PVs"
     echo "  --local-node-name NAME     Deprecated; local mode uses hostPath and does not require nodeAffinity"

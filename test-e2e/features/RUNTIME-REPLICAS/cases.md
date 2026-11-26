@@ -7,5 +7,6 @@
 - D3 [RUNTIME-SCHEDULER-D3-001](../../cases/RUNTIME-SCHEDULER-D3-001/case.yaml) · blocked
 - D3 [RUNTIME-SHARED-STORAGE-D3-001](../../cases/RUNTIME-SHARED-STORAGE-D3-001/case.yaml) · blocked
 - D3 [RUNTIME-STREAM-CONTROL-D3-001](../../cases/RUNTIME-STREAM-CONTROL-D3-001/case.yaml) · blocked
+- D5 [RUNTIME-DIRECT-DEPLOY-D5-001](../../cases/RUNTIME-DIRECT-DEPLOY-D5-001/case.yaml) · blocked
 - D5 [RUNTIME-OFFLINE-DEPLOY-D5-001](../../cases/RUNTIME-OFFLINE-DEPLOY-D5-001/case.yaml) · blocked
 - D5 [RUNTIME-POD-RESTART-D5-001](../../cases/RUNTIME-POD-RESTART-D5-001/case.yaml) · blocked

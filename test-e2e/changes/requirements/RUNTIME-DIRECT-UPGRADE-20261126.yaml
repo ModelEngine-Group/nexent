@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-DIRECT-UPGRADE-20261126
+  change_type: requirement
+  requirement_id: RUNTIME-DIRECT-UPGRADE-20261126
+  title: Kubernetes 应用支持直接 Helm 升级
+  description: 已激活的 Nexent 应用可通过 --direct-upgrade 跳过全局缩零和 bootstrap，按所选发布范围执行升级。
+  affected_features:
+    existing: []
+    added: []
+    modified: [RUNTIME-REPLICAS]
+    retired: []
+  affected_cases:
+    existing: [RUNTIME-OFFLINE-DEPLOY-D5-001]
+    added: [RUNTIME-DIRECT-DEPLOY-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 核对直升仅发起一次正常应用更新，以及默认发布范围和应用范围下的基础设施行为。
+    - 核对未部署、已暂停、失锁、共享存储不合格和 Ready 超时的失败边界。
+    - 核对默认部署仍先停旧 Pod，再启动 bootstrap，初始化成功后才激活应用。
+    reason: 后端部署单测复核默认流程，直升分支和失败边界由 test/deploy 下的 Helm 脚本测试覆盖。D5 验证真实 Kubernetes 的副本、Pod UID 和对话历史。
+    test_selectors:
+    - test/backend/deploy/test_k8s_bootstrap.py

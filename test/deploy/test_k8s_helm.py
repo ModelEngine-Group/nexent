@@ -163,7 +163,11 @@ case "$1" in
     fi
     exit 0
     ;;
-  upgrade|uninstall) exit 0 ;;
+  upgrade)
+    if [ "$2" = "nexent" ] && [ "${MOCK_FAIL_DIRECT_UPGRADE:-false}" = "true" ]; then exit 1; fi
+    exit 0
+    ;;
+  uninstall) exit 0 ;;
 esac
 exit 0
 """,
@@ -224,6 +228,11 @@ if [ "$1" = "get" ] && [ "$2" = "deployment" ]; then
     printf '2:2:0:'
     exit 0
   fi
+  if [ "$3" = "nexent-config" ] && [[ "$*" == *"/release-name"*".spec.replicas"* ]]; then
+    if [ "${MOCK_MISSING_CONFIG:-false}" = "true" ]; then exit 1; fi
+    printf '%s:%s:%s' "${MOCK_CONFIG_OWNER:-nexent}" "${MOCK_CONFIG_NAMESPACE:-nexent}" "${MOCK_CONFIG_REPLICAS:-1}"
+    exit 0
+  fi
   if [ "${MOCK_APP_EXISTS:-false}" = "true" ]; then printf 'deployment/%s\\n' "$3"; fi
   exit 0
 fi
@@ -274,6 +283,8 @@ if [ "$1" = "exec" ]; then
           if [ "${MOCK_FAIL_LOCK:-false}" = "true" ]; then printf 'busy\\n'; else printf '123\\n'; fi ;;
         *pg_locks*)
           if [ "${MOCK_FAIL_LOCK_LOSS:-false}" = "true" ] && grep -Fq '.status.succeeded' "$MOCK_LOG"; then exit 1; fi
+          if [ "${MOCK_FAIL_DIRECT_LOCK_LOSS:-false}" = "true" ] &&
+              grep -Fq 'kubectl rollout status deployment/nexent-web ' "$MOCK_LOG"; then exit 1; fi
           printf '123\\n' ;;
       esac
     done

@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-DIRECT-DEPLOY-D5-001
+  feature_id: RUNTIME-REPLICAS
+  requirement_ids: [RUNTIME-DIRECT-UPGRADE-20261126]
+  business_rule_ids: [RUNTIME-REPLICAS-RULE-10]
+  title: 直接调整 Runtime 副本并保留现有业务 Pod 和已完成对话
+  type: DEPLOYMENT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 验证仅改 Runtime 副本数的应用直升及直升后的对话访问。
+  preconditions:
+  - 使用测试独占 namespace、数据库、Redis 和动态 RWX StorageClass。
+  - 首次部署完成且 3 个 Runtime 副本已就绪。两次调整均在无在途业务的窗口执行。
+  test_data:
+    replica_sequence: [3, 4, 3]
+    release_scope: nexent
+    sentinel: 真实 Gateway 对话和原业务 Pod UID。
+  steps:
+  - order: 1
+    action: 创建隔离应用并完成一轮真实对话，记录历史和各服务 Pod UID。
+    expected: 3 个 Runtime 副本 Ready，用户消息和助手回复可读。
+  - order: 2
+    action: 使用 --direct-upgrade 依次将 Runtime 扩到 4 个副本再缩到 3 个副本。
+    expected: 两次均达到目标 Ready 数。扩容保留原 Runtime Pod，缩容只移除一个 Runtime Pod，其他应用服务的 Pod UID 均保持一致。
+  - order: 3
+    action: 每次升级后通过稳定 Gateway 读取原历史并提交一轮新对话。
+    expected: 原历史保持一致，每轮新对话都完成且可从历史读取用户消息和助手回复。
+  expected_results:
+  - 两次直升均使用启用业务的 Helm 更新，目标副本 Ready。
+  - 仅 Runtime Pod 数量改变，其他应用 Pod UID 和原历史保持一致，测试创建的资源已回收。
+  - 两次直升后的新对话均成功并写入历史。
+  forbidden_side_effects:
+  - 直升全局缩零，启动 bootstrap Job，或重建未改动的业务 Pod。
+  - 丢失或改写已完成对话，或对测试外资源执行部署和清理。
+  acceptance:
+  - id: AC-DIRECT-001
+    description: 仅改副本数时，无全局缩零或 bootstrap，固定副本依次达到 4 和 3，其他服务保留原 Pod。
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-DIRECT-002
+    description: 两次直升均保留原对话，并可完成新的对话。
+    steps: [1, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [2]
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/changes/runtime-direct-upgrade/proposal.md
+    blocked_reason: 需要机器本地显式启用的隔离 Kubernetes 集群、候选镜像和动态 RWX 环境。
+    primary_domain: deployment
+    preparation_plan: 固定 kubeconfig 上下文与集群 UID，在专用 StorageClass 上创建测试独占 namespace 和数据域，部署候选镜像并启动受控模型。
+    cleanup_plan: 按运行标识核验并回收测试 namespace 和专用 StorageClass 上的 PV。
+  risk_type: DEPLOYMENT
+  risk: 直接调整 Runtime 副本导致旧业务 Pod 被整体重建，或影响持久会话。
+  condition:
+  - 真实部署脚本和专用动态 RWX 环境，只有 Runtime 目标副本数改变。
+  metrics:
+  - 每次 Helm 更新的暂停标记、目标副本数、Ready 数、各业务服务 Pod UID。
+  - 历史一致性、新对话结果以及 namespace 和 PV 回收证据。
+  thresholds:
+  - 原 Runtime Pod 在扩容后全部存续，缩容后剩余 Pod 均来自扩容结果。
+  - 每次直升新增 bootstrap Job 和其他业务 Pod UID 变更均为 0，新增对话成功数为 1。
+  recovery_expectations:
+  - 测试结束后，确认独占 namespace 及其动态卷已回收。

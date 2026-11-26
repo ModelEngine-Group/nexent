@@ -128,9 +128,23 @@ Before pausing the release, the script checks for unfinished bootstrap Jobs, leg
 
 If an unexpected shutdown leaves abandoned work that requires repair, pause the business Deployments and wait for their Pods and any previous bootstrap or maintenance writers to exit. Provision a one-off Pod using the Management image and the release's database and Redis configuration. Mount the same workspace PVC at `/mnt/nexent`, carry over any custom `AGENT_WORKSPACE_ROOT`, and use a service account that can list Deployments and Pods in the release namespace. In the Pod, run `python -m management.maintenance --namespace <namespace> --release <release>`. Complete repair separately before running the deployment script. Routine idle-window scaling uses the deployment script alone.
 
+### Direct Application Upgrade
+
+Use `--direct-upgrade` during an idle window on an initialized application release. The script checks that the existing `nexent-config` Deployment belongs to the release and has a positive replica count. It acquires the deployment lock, checks for earlier deployment Jobs that may still be running, and verifies bound RWX volumes for multiple Runtime replicas. It then runs one application Helm upgrade and waits for the enabled Deployments to become ready.
+
+```bash
+bash deploy.sh k8s --defaults --release-scope nexent --direct-upgrade --runtime-replicas 4
+```
+
+Omit `--runtime-replicas` to use the existing replica selection rules for `values.yaml` and saved configuration. With the default release scope `all`, the script upgrades the infrastructure release before the application upgrade. The flag applies only to the current command.
+
+Direct upgrade skips the release-wide shutdown, bootstrap Job, official skill synchronization, and system Agent initialization. Config continues to run its normal startup migrations when its Pod is replaced. Use the default deployment for first installation, a paused release, and updates that require bootstrap or have incompatible database changes.
+
+If the Pod templates stay the same, a replica count change only adds or removes Runtime Pods. Changes to an image, configuration, or Secret can replace Pods according to each Deployment's strategy. Services using `Recreate` can be temporarily unavailable.
+
 ### Fixed Runtime Replicas
 
-To change the fixed Runtime count on an application release already using shared storage, edit `nexent-runtime.replicaCount` in this chart's `values.yaml` and run the deployment script in an idle window.
+To change the fixed Runtime count on an application release already using shared storage, edit `nexent-runtime.replicaCount` in this chart's `values.yaml` and run the deployment script in an idle window. The default flow pauses the application. The `--direct-upgrade` flow applies the new count directly.
 
 ```bash
 bash deploy.sh k8s --release-scope nexent --defaults
@@ -166,7 +180,8 @@ Budget threads, database and Redis connections, object storage, and downstream m
 | `--version` | Application version | Version tag (auto-detected from `backend/contracts/constants/environment.py` if not set) |
 | `--deployment-version` | Legacy deployment version | Both versions use `infrastructure,application`; `full` enables local authentication |
 | `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
-| `--runtime-replicas` | Fixed Runtime replica count after an idle deployment | Positive integer |
+| `--runtime-replicas` | Fixed Runtime replica count | Positive integer |
+| `--direct-upgrade` | Upgrade an existing application release without scaling the application to zero or running bootstrap | Off |
 | `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
 | `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |
 | `--local-node-name` | Deprecated compatibility option | Ignored; local mode uses hostPath and does not require nodeAffinity |

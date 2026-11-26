@@ -740,7 +740,7 @@ class RuntimeScalingCluster:
                 raise IsolationError("Owned namespace or dynamically provisioned storage did not disappear")
             time.sleep(2)
 
-    def deploy(self, script: Path, replicas: int | None = None, *, initial=False, helm_gate=None,
+    def deploy(self, script: Path, replicas: int | None = None, *, initial=False, direct=False, helm_gate=None,
                kubectl_gate=None):
         self.require_owned_namespace()
         valid_target = initial if replicas is None else type(replicas) is int and 1 <= replicas <= 2147483647
@@ -753,6 +753,8 @@ class RuntimeScalingCluster:
                    "--wait-timeout", str(self.profile.wait_seconds)]
         if replicas is not None:
             command.extend(["--runtime-replicas", str(replicas)])
+        if direct:
+            command.append("--direct-upgrade")
         if self.profile.image_registry_prefix:
             command.extend(["--image-registry-prefix", self.profile.image_registry_prefix])
         environment = dict(self._command_env)
