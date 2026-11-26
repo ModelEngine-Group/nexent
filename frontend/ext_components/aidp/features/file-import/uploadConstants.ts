@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export const AIDP_FILE_EXTENSIONS = {
   TEXT: ["txt", "json", "md", "markdown"] as const,
   WEB: ["html"] as const,
