@@ -62,6 +62,17 @@ def require_skill_allowed(tenant_id, name, skill_id, *, session=None):
         raise ResourceBindingError("resource_blocked")
 
 
+def filter_uninstalled_resources(catalog, tenant_id):
+    """Exclude globally blocked Skill and MCP names from installable resources."""
+    if not catalog:
+        return []
+    policy = load_tool_denylist(tenant_id)
+    return [item for item in catalog if not (
+        item["resource_type"] == "skill" and policy.blocks_skill(item["name"])
+        or item["resource_type"] == "mcp_server" and policy.blocks_mcp(item["name"])
+    )]
+
+
 def _editor_state(session, tenant_id):
     global_row = repository.global_config(session)
     global_policy = _global_value(global_row)

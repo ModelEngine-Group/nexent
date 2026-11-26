@@ -1006,15 +1006,9 @@ async def _load_internal_uninstalled_resource_catalog(
             "installation_options": [option],
             "default_option_id": option.option_id,
         })
-    if catalog:
-        from management.services.configuration.resource_denylist import load_tool_denylist
+    from management.services.configuration.resource_denylist import filter_uninstalled_resources
 
-        policy = load_tool_denylist(tenant_id)
-        catalog = [item for item in catalog if not (
-            item["resource_type"] == "skill" and policy.blocks_skill(item["name"])
-            or item["resource_type"] == "mcp_server" and policy.blocks_mcp(item["name"])
-        )]
-    return catalog
+    return filter_uninstalled_resources(catalog, tenant_id)
 
 
 async def search_uninstalled_resources_impl(

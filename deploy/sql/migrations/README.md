@@ -7,6 +7,7 @@ current file checksum in `nexent.schema_migrations`.
 Execution rules:
 
 - Files are discovered with `*.sql` and sorted by version-aware filename order.
+- `v2.9.0_resource_denylist.sql` follows `v2.9.0_merged_migrations.sql`, which creates the system configuration table it extends.
 - A file with no migration record is executed and recorded as `applied`.
 - A file with the same recorded checksum is skipped.
 - A file with a different recorded checksum is executed again, then its checksum,

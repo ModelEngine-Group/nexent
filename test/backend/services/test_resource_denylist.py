@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,18 @@ import pytest
 from contracts.errors.exceptions import ResourceBindingError
 from contracts.resource_denylist import GlobalDenylistUpdate, TenantDenylistUpdate
 from management.services.configuration import resource_denylist as denylist
+
+
+def test_resource_denylist_migration_follows_system_configuration_baseline():
+    migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
+    names = sorted(path.name for path in migrations.glob("v2.9.0*.sql"))
+    assert names.index("v2.9.0_merged_migrations.sql") < names.index("v2.9.0_resource_denylist.sql")
+
+
+def test_empty_uninstalled_catalog_does_not_load_policy(mocker):
+    load = mocker.patch.object(denylist, "load_tool_denylist")
+    assert denylist.filter_uninstalled_resources([], "tenant-a") == []
+    load.assert_not_called()
 
 
 def test_policy_matches_global_name_or_tenant_resource(mocker):

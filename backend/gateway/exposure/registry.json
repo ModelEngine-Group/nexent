@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "generated-615-rows",
+  "revision": "generated-619-rows",
   "routes": [
     {
       "method": "GET",
@@ -5013,6 +5013,17 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/api/system_configurations/recommendations",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/system_configurations.py",
+      "route_id": "route-ebb75bac64a1aa1e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/system_configurations/resource_denylist",
       "transport": "http",
@@ -5030,17 +5041,6 @@
       "target": "ops",
       "source": "backend/ops/api/system_configurations.py",
       "route_id": "resource-denylist-ops-put",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/system_configurations/recommendations",
-      "transport": "http",
-      "target": "ops",
-      "source": "backend/ops/api/system_configurations.py",
-      "route_id": "route-ebb75bac64a1aa1e",
       "credential_kinds": [
         "session"
       ]
