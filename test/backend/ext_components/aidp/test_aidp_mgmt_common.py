@@ -52,3 +52,39 @@ def test_folder_path_model():
     assert model.name == "n"
     with pytest.raises(ValidationError):
         Model(path="bad", name="n")
+
+
+def _request(headers):
+    from starlette.requests import Request
+
+    return Request({"type": "http", "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]})
+
+
+@pytest.mark.asyncio
+async def test_auth_header_and_tenant_errors(monkeypatch):
+    import asyncio
+
+    common = _common()
+
+    with pytest.raises(Exception):
+        await common._auth(_request({}))
+
+    def bad_token(_auth):
+        raise common.UnauthorizedError("bad")
+
+    monkeypatch.setattr(common.auth_utils_module, "get_current_user_id", bad_token)
+    with pytest.raises(Exception):
+        await common._auth(_request({"Authorization": "Bearer x"}))
+
+    monkeypatch.setattr(
+        common.auth_utils_module, "get_current_user_id", lambda _auth: ("u", "")
+    )
+    with pytest.raises(Exception):
+        await common._auth(_request({"Authorization": "Bearer x"}))
+
+    monkeypatch.setattr(
+        common.auth_utils_module, "get_current_user_id", lambda _auth: ("u", "t")
+    )
+    assert await common._auth(
+        _request({"Authorization": "Bearer x", "Accept-Language": "en-US"})
+    ) == ("u", "t")

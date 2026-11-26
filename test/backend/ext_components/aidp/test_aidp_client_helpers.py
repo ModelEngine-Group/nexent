@@ -22,6 +22,7 @@ def _response(status=200, *, json_body=None, content=None, headers=None):
 def client(monkeypatch):
     module = importlib.import_module("ext_components.aidp.services.aidp_client")
     http = MagicMock()
+    module._real_request_with_retry = module._request_with_retry
     monkeypatch.setattr(module.http_client_manager, "get_sync_client", MagicMock(return_value=http))
     monkeypatch.setattr(module, "_request_with_retry", lambda fn, context: fn())
     return module, http
@@ -149,3 +150,27 @@ def test_resolve_folder_id_matches_segments(client, monkeypatch):
     )
     monkeypatch.setattr(module, "_get_aidp_folder_level", lambda *a, **kw: next(levels))
     assert module._resolve_aidp_folder_id("s", "k", "kb", "/a/b/") == 3
+
+
+def test_retry_helper_retries_and_raises(client, monkeypatch):
+    module, _ = client
+    monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+    responses = [_response(500, json_body={}), _response(200, json_body={})]
+    retry = module._real_request_with_retry
+    assert retry(lambda: responses.pop(0), "op", max_attempts=2).status_code == 200
+
+    attempts = {"n": 0}
+
+    def flaky():
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise httpx.ConnectError("down")
+        return _response(200, json_body={})
+
+    assert retry(flaky, "op", max_attempts=2).status_code == 200
+
+    def always_fail():
+        raise httpx.ConnectError("down")
+
+    with pytest.raises(httpx.ConnectError):
+        retry(always_fail, "op", max_attempts=1)
