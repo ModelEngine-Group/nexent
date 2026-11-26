@@ -20,8 +20,8 @@ const defaultList: ModelListRequest = {
   page: 1,
   pageSize: 10,
   search: "",
-  sortBy: "request_count",
-  descending: true,
+  sortBy: "name",
+  descending: false,
 };
 
 export function ModelMonitoringDetails({
@@ -73,7 +73,7 @@ export function ModelMonitoringDetails({
     key,
     title,
     sorter: true,
-    sortDirections: ["descend", "ascend", "descend"],
+    sortDirections: ["ascend", "descend"],
     sortOrder:
       list.sortBy === key ? (list.descending ? "descend" : "ascend") : null,
     align: "right",
@@ -190,13 +190,12 @@ export function ModelMonitoringDetails({
   const onTableChange: NonNullable<
     TableProps<ModelMonitoringRow>["onChange"]
   > = (_pagination, _filters, sorter, extra) => {
-    if (extra.action !== "sort" || Array.isArray(sorter) || !sorter.columnKey)
-      return;
+    if (extra.action !== "sort" || Array.isArray(sorter)) return;
     setList((current) => ({
       ...current,
       page: 1,
-      sortBy: sorter.columnKey as ModelListSort,
-      descending: sorter.order !== "ascend",
+      sortBy: sorter.order ? (sorter.columnKey as ModelListSort) : "name",
+      descending: sorter.order === "descend",
     }));
   };
   return (

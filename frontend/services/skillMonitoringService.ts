@@ -55,6 +55,7 @@ export function getSkillMonitoringList(
     page: number;
     pageSize: number;
     search: string;
+    sortBy: "name" | "usage_count";
     descending: boolean;
   },
   signal: AbortSignal
@@ -67,6 +68,7 @@ export function getSkillMonitoringList(
       page: String(options.page),
       page_size: String(options.pageSize),
       search: options.search,
+      sort_by: options.sortBy,
       descending: String(options.descending),
     }
   );

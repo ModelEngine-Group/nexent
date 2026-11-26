@@ -24,8 +24,8 @@ const defaultList: AgentListRequest = {
   page: 1,
   pageSize: 10,
   search: "",
-  sortBy: "execution_count",
-  descending: true,
+  sortBy: "name",
+  descending: false,
 };
 
 export function AgentMonitoringDetails({
@@ -86,7 +86,7 @@ export function AgentMonitoringDetails({
     key,
     title,
     sorter: true,
-    sortDirections: ["descend", "ascend", "descend"],
+    sortDirections: ["ascend", "descend"],
     sortOrder:
       list.sortBy === key ? (list.descending ? "descend" : "ascend") : null,
     align: "right" as const,
@@ -208,13 +208,12 @@ export function AgentMonitoringDetails({
   const onTableChange: NonNullable<
     TableProps<AgentMonitoringRow>["onChange"]
   > = (_pagination, _filters, sorter, extra) => {
-    if (extra.action !== "sort" || Array.isArray(sorter) || !sorter.columnKey)
-      return;
+    if (extra.action !== "sort" || Array.isArray(sorter)) return;
     setList((current) => ({
       ...current,
       page: 1,
-      sortBy: sorter.columnKey as AgentListSort,
-      descending: sorter.order !== "ascend",
+      sortBy: sorter.order ? (sorter.columnKey as AgentListSort) : "name",
+      descending: sorter.order === "descend",
     }));
   };
 

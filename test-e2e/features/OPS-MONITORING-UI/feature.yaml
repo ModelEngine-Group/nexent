@@ -9,13 +9,13 @@ feature:
   description: Provide the authorized monitoring dashboard shell and tenant-scoped directory filters.
   business_rules:
   - rule_id: OPS-MONITORING-UI-RULE-01
-    description: The existing dashboard entry presents five tabs, with shared tenant and calendar dates and tenant-scoped group and resource choices.
+    description: The existing dashboard entry presents five tabs, with shared tenant and calendar dates and tenant-scoped group and resource choices. Custom dates cannot exceed the same UTC day used by the date presets.
   - rule_id: OPS-MONITORING-UI-RULE-02
     description: A tenant change clears all dependent selections and a service change clears its tool selection. Refresh reads the active directories and connected statistics.
   - rule_id: OPS-MONITORING-UI-RULE-03
-    description: Agent inventory is scoped by tenant. Execution and Token cards and daily trends use the selected tenant, Agent, group and dates. Missing values, coverage and publication state remain explicit.
+    description: Agent inventory is scoped by tenant. Execution and Token cards and daily trends use the selected tenant, Agent, group and dates. Missing and unpublished values are distinct from zero. The Agent and overview panels omit coverage and publication timestamps from metric displays.
   - rule_id: OPS-MONITORING-UI-RULE-04
-    description: Agent details use scoped server search, sorting and pagination. Date and group changes reset only the page within the same tenant and Agent. A current Agent row can select its tenant-qualified resource.
+    description: Agent details use scoped server search, sorting and pagination. Detail lists default to name ascending and return to that order when metric sorting is cleared. Date and group changes reset only the page within the same tenant and Agent. A current Agent row can select its tenant-qualified resource.
   - rule_id: OPS-MONITORING-UI-RULE-05
     description: All Agents show the server's Top 5 for the active metric and authorized scope. A single Agent shows success and failure shares from the summary and the call total separately.
   - rule_id: OPS-MONITORING-UI-RULE-06

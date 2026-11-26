@@ -55,7 +55,7 @@ export type AgentMonitoringMetric =
   "execution_count" | "total_tokens" | "success_rate";
 
 export type AgentListSort =
-  AgentMonitoringMetric | "avg_duration_ms" | "avg_ttft_ms";
+  AgentMonitoringMetric | "avg_duration_ms" | "avg_ttft_ms" | "name";
 
 export interface AgentListRequest {
   page: number;

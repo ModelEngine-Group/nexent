@@ -39,7 +39,7 @@ export interface McpMonitoringOverview extends MonitoringPublication {
 }
 
 export type McpMonitoringDimension = "services" | "tools";
-export type McpMonitoringSort = "request_count" | "avg_duration_ms";
+export type McpMonitoringSort = "name" | "request_count" | "avg_duration_ms";
 
 export interface McpMonitoringRow {
   tenant_id: string;

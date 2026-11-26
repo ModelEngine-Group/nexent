@@ -91,6 +91,7 @@ describe("Skill monitoring reads", () => {
       page: 2,
       pageSize: 10,
       search: "a+b c",
+      sortBy: "name" as const,
       descending: false,
     };
     const allSkills = { ...scope, skillId: null };
@@ -102,7 +103,7 @@ describe("Skill monitoring reads", () => {
     ).resolves.toEqual(ranking);
     expect(fetch.mock.calls).toEqual([
       [
-        "/api/ops/v1/monitoring/skills?start_date=2026-11-24&end_date=2026-11-25&page=2&page_size=10&search=a%2Bb+c&descending=false&tenant_id=tenant%2Fa&group_ids=3&group_ids=5",
+        "/api/ops/v1/monitoring/skills?start_date=2026-11-24&end_date=2026-11-25&page=2&page_size=10&search=a%2Bb+c&sort_by=name&descending=false&tenant_id=tenant%2Fa&group_ids=3&group_ids=5",
         { signal },
       ],
       [

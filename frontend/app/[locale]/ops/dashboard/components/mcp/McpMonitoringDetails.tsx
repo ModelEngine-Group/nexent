@@ -24,8 +24,8 @@ const initialList: McpMonitoringListOptions = {
   page: 1,
   pageSize: 10,
   search: "",
-  sortBy: "request_count",
-  descending: true,
+  sortBy: "name",
+  descending: false,
 };
 
 export function McpMonitoringDetails({
@@ -79,13 +79,13 @@ export function McpMonitoringDetails({
   const format = (value: number | null | undefined) =>
     value == null ? "—" : number.format(value);
   const sortableMetric = (
-    key: McpMonitoringSort,
+    key: Exclude<McpMonitoringSort, "name">,
     title: string
   ): NonNullable<TableProps<McpMonitoringRow>["columns"]>[number] => ({
     title,
     key,
     sorter: true,
-    sortDirections: ["descend", "ascend", "descend"],
+    sortDirections: ["ascend", "descend"],
     sortOrder:
       list.sortBy === key ? (list.descending ? "descend" : "ascend") : null,
     render: (_, row) => {
@@ -166,13 +166,17 @@ export function McpMonitoringDetails({
     extra
   ) => {
     if (extra.action !== "sort" || Array.isArray(sorter)) return;
-    const sortBy = sorter.columnKey;
-    if (sortBy === "request_count" || sortBy === "avg_duration_ms") {
+    const sortBy = sorter.order ? sorter.columnKey : "name";
+    if (
+      sortBy === "name" ||
+      sortBy === "request_count" ||
+      sortBy === "avg_duration_ms"
+    ) {
       setList((current) => ({
         ...current,
         page: 1,
         sortBy,
-        descending: sorter.order !== "ascend",
+        descending: sorter.order === "descend",
       }));
     }
   };

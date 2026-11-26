@@ -86,11 +86,19 @@ def _read(request, scope, tenant):
         raise HTTPException(503, "Model monitoring is temporarily unavailable") from None
 
 
+def _sort_names(items, get_name, descending):
+    named = [item for item in items if get_name(item)]
+    unnamed = [item for item in items if not get_name(item)]
+    return sorted(named, key=lambda item: get_name(item).casefold(), reverse=descending) + unnamed
+
+
 def _items(rows, catalog, status, metric, search="", descending=True):
     items = model_rows(rows, catalog, covered=status["coverage_state"] == "covered")
     items = [item for item in items if search.casefold() in
              (item.get("display_name") or item.get("model_name") or "").casefold()]
     items.sort(key=lambda item: (item["tenant_id"], item["model_id"]))
+    if metric == "name":
+        return _sort_names(items, lambda item: item.get("display_name") or item.get("model_name"), descending)
     present = [item for item in items if metric_value(item, metric) is not None]
     missing = [item for item in items if metric_value(item, metric) is None]
     return sorted(present, key=lambda item: metric_value(item, metric), reverse=descending) + missing
@@ -100,7 +108,7 @@ def _items(rows, catalog, status, metric, search="", descending=True):
 def models(request: Request, scope: Annotated[Selection, Depends(selection)],
            tenant: Annotated[str | None, Depends(ops_tenant)],
            page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-           search: Annotated[str, Query(max_length=100)] = "", sort_by: Metric = "request_count",
+           search: Annotated[str, Query(max_length=100)] = "", sort_by: Metric | Literal["name"] = "request_count",
            descending: bool = True):
     rows, catalog, _, status = _read(request, scope, tenant)
     items = _items(rows, catalog, status, sort_by, search, descending)
@@ -153,11 +161,13 @@ def _read_skill(request, scope, tenant):
         raise HTTPException(503, "Skill monitoring is temporarily unavailable") from None
 
 
-def _skill_items(rows, catalog, status, search="", descending=True):
+def _skill_items(rows, catalog, status, search="", descending=True, sort_by="usage_count"):
     items = skill_rows(rows, catalog, covered=status["coverage_state"] == "covered")
     needle = search.casefold()
     items = [item for item in items if needle in (item.get("skill_name") or "").casefold()]
     items.sort(key=lambda item: (item["tenant_id"] or "", item["skill_id"]))
+    if sort_by == "name":
+        return _sort_names(items, lambda item: item.get("skill_name"), descending)
     present = [item for item in items if skill_metric_value(item) is not None]
     missing = [item for item in items if skill_metric_value(item) is None]
     return sorted(present, key=skill_metric_value, reverse=descending) + missing
@@ -167,9 +177,10 @@ def _skill_items(rows, catalog, status, search="", descending=True):
 def skills(request: Request, scope: Annotated[Selection, Depends(selection)],
            tenant: Annotated[str | None, Depends(ops_tenant)],
            page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-           search: Annotated[str, Query(max_length=100)] = "", descending: bool = True):
+           search: Annotated[str, Query(max_length=100)] = "", descending: bool = True,
+           sort_by: Literal["usage_count", "name"] = "usage_count"):
     rows, catalog, _, status = _read_skill(request, scope, tenant)
-    items = _skill_items(rows, catalog, status, search, descending)
+    items = _skill_items(rows, catalog, status, search, descending, sort_by)
     start = (page - 1) * page_size
     return {"data": {"items": items[start:start + page_size], "total": len(items)}, **status}
 
@@ -271,6 +282,8 @@ def _agent_items(items, metric, search="", descending=True):
     items = [item for item in items if any(needle in (item.get(name) or "").casefold()
                                          for name in ("name", "display_name"))]
     items.sort(key=lambda item: (item["tenant_id"], item["agent_id"]))
+    if metric == "name":
+        return _sort_names(items, lambda item: item.get("display_name") or item.get("name"), descending)
     present = [item for item in items if _agent_metric_value(item, metric) is not None]
     missing = [item for item in items if _agent_metric_value(item, metric) is None]
     return sorted(present, key=lambda item: _agent_metric_value(item, metric), reverse=descending) + missing
@@ -280,7 +293,7 @@ def _agent_items(items, metric, search="", descending=True):
 def agents(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
            user: Annotated[CurrentUser, Depends(authenticate)],
            page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-           search: Annotated[str, Query(max_length=100)] = "", sort_by: AgentMetric = "execution_count",
+           search: Annotated[str, Query(max_length=100)] = "", sort_by: AgentMetric | Literal["name"] = "execution_count",
            descending: bool = True):
     items, current_count, _, status = _read_agent_views(request, scope, user)
     items = _agent_items(items, sort_by, search, descending)
@@ -499,6 +512,8 @@ def _tool_items(rows, status, metric, search="", descending=True):
     items = mcp_tool_rows(rows)
     items = [item for item in items if search.casefold() in (item.get("tool_name") or "").casefold()]
     items.sort(key=lambda item: (item["tenant_id"], item.get("mcp_server_id") or 0, item["tool_name"]))
+    if metric == "name":
+        return _sort_names(items, lambda item: item.get("tool_name"), descending)
     present = [item for item in items if metric_value(item, metric) is not None]
     missing = [item for item in items if metric_value(item, metric) is None]
     return sorted(present, key=lambda item: metric_value(item, metric), reverse=descending) + missing
@@ -508,6 +523,8 @@ def _server_items(rows, status, metric, search="", descending=True):
     items = mcp_server_rows(rows)
     items = [item for item in items if search.casefold() in (item.get("mcp_server_name") or "").casefold()]
     items.sort(key=lambda item: (item["tenant_id"], item.get("mcp_server_id") or 0))
+    if metric == "name":
+        return _sort_names(items, lambda item: item.get("mcp_server_name"), descending)
     present = [item for item in items if metric_value(item, metric) is not None]
     missing = [item for item in items if metric_value(item, metric) is None]
     return sorted(present, key=lambda item: metric_value(item, metric), reverse=descending) + missing
@@ -518,7 +535,7 @@ def mcp_tools(request: Request, scope: Annotated[ToolSelection, Depends(tool_sel
               tenant: Annotated[str | None, Depends(ops_tenant)],
               dimension: Literal["tools", "services"] = "services",
               page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-              search: Annotated[str, Query(max_length=100)] = "", sort_by: ToolMetric = "request_count",
+              search: Annotated[str, Query(max_length=100)] = "", sort_by: ToolMetric | Literal["name"] = "request_count",
               descending: bool = True):
     rows, _, status = _read_tools(request, scope, tenant)
     build = _server_items if dimension == "services" else _tool_items

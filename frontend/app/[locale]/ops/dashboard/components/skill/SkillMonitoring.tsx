@@ -42,7 +42,8 @@ export function SkillMonitoring({
     page: 1,
     pageSize: 10,
     search: "",
-    descending: true,
+    sortBy: "name" as "name" | "usage_count",
+    descending: false,
   });
   const selection = queryKey[3];
   const summary = useQuery({
@@ -236,8 +237,13 @@ export function SkillMonitoring({
                 title: t("ops.monitoring.skill.usageColumn"),
                 key: "usage",
                 sorter: true,
-                sortDirections: ["descend", "ascend", "descend"],
-                sortOrder: list.descending ? "descend" : "ascend",
+                sortDirections: ["ascend", "descend"],
+                sortOrder:
+                  list.sortBy === "usage_count"
+                    ? list.descending
+                      ? "descend"
+                      : "ascend"
+                    : null,
                 render: (_, row) =>
                   formatUsage(row.metrics?.usage_count ?? null),
               },
@@ -279,8 +285,12 @@ export function SkillMonitoring({
                   ? {
                       ...current,
                       page: 1,
+                      sortBy:
+                        !Array.isArray(sorter) && sorter.order
+                          ? "usage_count"
+                          : "name",
                       descending:
-                        !Array.isArray(sorter) && sorter.order !== "ascend",
+                        !Array.isArray(sorter) && sorter.order === "descend",
                     }
                   : {
                       ...current,
