@@ -10,8 +10,8 @@ feature:
     Agent chat.
   business_rules:
   - rule_id: WB-CONTROLS-RULE-001
-    description: Direct controls open draft resource drawers with Mine/Repository and structured filtering; cancel never mounts
-      resources.
+    description: Direct controls open draft resource drawers with Mine/Repository and structured filtering.
+      Closing with the close control or mask cancels pending resource mounts.
   - rule_id: WB-CONTROLS-RULE-002
     description: Manual creation actions select isolated modes. Ordinary Workbench intent is interpreted by the main AI using
       conversation context, without frontend keyword classification or a separate classification model call. AI asks a versioned

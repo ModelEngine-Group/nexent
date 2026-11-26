@@ -24,12 +24,12 @@ case:
     action: Release execution readiness, open the Agent drawer with its first catalog request failing, then refresh and reopen it.
     expected: Failure is confined to the drawer, refresh loads candidates, and the identical composer retains its draft; reopening reuses fresh cached candidates.
   - order: 3
-    action: Close Agent, open Skill, close it and open Knowledge, then close without confirming.
+    action: Close Agent and Skill, open Knowledge, stage a selection and click the mask.
     expected: Each catalog is first queried on opening its own drawer; Skill requests use view=mount, entries render, and the original composer draft survives all drawers.
   expected_results:
   - Unopened resource catalogs never gate page rendering or execution readiness.
   - Local failure and retry preserve composer identity and draft and reuse fresh Agent data.
-  - Each drawer loads its own resources on demand and cancellation leaves mounts unchanged.
+  - Each drawer loads its own resources on demand and clicking the mask discards pending mounts.
   forbidden_side_effects:
   - No generation, persistent configuration mutation, mounting on cancellation or real external API traffic.
   actor: Authorized mock tenant user
@@ -53,7 +53,7 @@ case:
     expected_results: [2]
     forbidden_side_effects: [1]
   - id: AC-03
-    description: Skill and Knowledge load only on explicit opening and cancellation preserves mounts.
+    description: Skill and Knowledge load only on explicit opening and clicking the mask preserves mounts.
     steps: [3]
     expected_results: [3]
     forbidden_side_effects: [1]

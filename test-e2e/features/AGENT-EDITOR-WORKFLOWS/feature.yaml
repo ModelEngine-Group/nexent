@@ -22,8 +22,8 @@ feature:
       reload while preserving Agent identity and resource associations. Changes in the
       expanded prompt editor autosave while the dialog remains open.
   - rule_id: AGENT-EDITOR-RULE-004
-    description: Cancelling all five resource drawers preserves original associations
-      and leaves no blocking overlay or business mutation.
+    description: Closing any resource drawer with its close control or mask preserves
+      original associations and leaves no blocking overlay or business mutation.
   - rule_id: AGENT-EDITOR-RULE-005
     description: Read-only configuration remains protected before and after debug
       navigation and reload, while switching modes never writes or runs an Agent.
