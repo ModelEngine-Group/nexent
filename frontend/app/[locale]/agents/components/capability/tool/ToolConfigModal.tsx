@@ -2238,7 +2238,7 @@ export default function ToolConfigModal({
     <>
       <ParamDialog
         variant="tool"
-        splitLayout
+        layout="split"
         description={getLocalizedDescription(
           tool?.description,
           tool?.description_zh
@@ -2619,86 +2619,84 @@ export default function ToolConfigModal({
             </Form>
           </div>
         </div>
-        <div data-config-part="test-column">
-          {isOpen && (
-            <ToolTestPanel
-              visible={isOpen}
-              tool={tool}
-              onClose={handleClose}
-              configParams={currentParams}
-              toolRequiresKbSelection={toolRequiresKbSelection}
-              knowledgeBases={knowledgeBases}
-              kbLoading={kbLoading}
-              selectedKbIds={selectedKbIds}
-              selectedKbDisplayNames={selectedKbDisplayNames}
-              onOpenKbSelector={(paramIndex) => {
-                // For aidp_search and knowledge_base_search, mark that KB selection is from test panel
-                if (
-                  toolKbType === "aidp_search" ||
-                  toolKbType === "ind_aidp_search" ||
-                  isKnowledgeBaseSearchTool
-                ) {
-                  setIsTestPanelKbSelection(true);
-                }
-                // paramIndex === -1 means the call originates from the test
-                // panel's KbSelectorDisplay, which doesn't know which slot in
-                // currentParams holds the KB parameter. Resolve the real
-                // index here so the KB selection updates the correct param
-                // (and only the KB param) instead of overwriting param_0
-                // (top_k for knowledge_base_search).
-                const kbParamIndex =
-                  paramIndex === -1
-                    ? currentParams.findIndex(
-                        (p) =>
-                          p.name === "index_names" ||
-                          p.name === "dataset_ids" ||
-                          p.name === "kds_list"
-                      )
-                    : paramIndex;
-                openKbSelector(kbParamIndex >= 0 ? kbParamIndex : 0, true);
-              }}
-              onKbSelectionChange={(ids, displayNames) => {
-                // For aidp_search and knowledge_base_search, this is handled by onTestPanelKbSelect
+        {isOpen && (
+          <ToolTestPanel
+            visible={isOpen}
+            tool={tool}
+            onClose={handleClose}
+            configParams={currentParams}
+            toolRequiresKbSelection={toolRequiresKbSelection}
+            knowledgeBases={knowledgeBases}
+            kbLoading={kbLoading}
+            selectedKbIds={selectedKbIds}
+            selectedKbDisplayNames={selectedKbDisplayNames}
+            onOpenKbSelector={(paramIndex) => {
+              // For aidp_search and knowledge_base_search, mark that KB selection is from test panel
+              if (
+                toolKbType === "aidp_search" ||
+                toolKbType === "ind_aidp_search" ||
+                isKnowledgeBaseSearchTool
+              ) {
+                setIsTestPanelKbSelection(true);
+              }
+              // paramIndex === -1 means the call originates from the test
+              // panel's KbSelectorDisplay, which doesn't know which slot in
+              // currentParams holds the KB parameter. Resolve the real
+              // index here so the KB selection updates the correct param
+              // (and only the KB param) instead of overwriting param_0
+              // (top_k for knowledge_base_search).
+              const kbParamIndex =
+                paramIndex === -1
+                  ? currentParams.findIndex(
+                      (p) =>
+                        p.name === "index_names" ||
+                        p.name === "dataset_ids" ||
+                        p.name === "kds_list"
+                    )
+                  : paramIndex;
+              openKbSelector(kbParamIndex >= 0 ? kbParamIndex : 0, true);
+            }}
+            onKbSelectionChange={(ids, displayNames) => {
+              // For aidp_search and knowledge_base_search, this is handled by onTestPanelKbSelect
+              if (
+                toolKbType !== "aidp_search" &&
+                toolKbType !== "ind_aidp_search" &&
+                !isKnowledgeBaseSearchTool
+              ) {
+                setSelectedKbIds(ids);
+                setSelectedKbDisplayNames(displayNames);
+              }
+            }}
+            onRemoveKb={(index, paramIndex) => {
+              if (paramIndex === -1) {
+                // Called from test panel - for aidp_search and knowledge_base_search, this is handled by onTestPanelKbRemove
                 if (
                   toolKbType !== "aidp_search" &&
                   toolKbType !== "ind_aidp_search" &&
                   !isKnowledgeBaseSearchTool
                 ) {
-                  setSelectedKbIds(ids);
-                  setSelectedKbDisplayNames(displayNames);
+                  const newIds = selectedKbIds.filter((_, i) => i !== index);
+                  const newDisplayNames = selectedKbDisplayNames.filter(
+                    (_, i) => i !== index
+                  );
+                  setSelectedKbIds(newIds);
+                  setSelectedKbDisplayNames(newDisplayNames);
                 }
-              }}
-              onRemoveKb={(index, paramIndex) => {
-                if (paramIndex === -1) {
-                  // Called from test panel - for aidp_search and knowledge_base_search, this is handled by onTestPanelKbRemove
-                  if (
-                    toolKbType !== "aidp_search" &&
-                    toolKbType !== "ind_aidp_search" &&
-                    !isKnowledgeBaseSearchTool
-                  ) {
-                    const newIds = selectedKbIds.filter((_, i) => i !== index);
-                    const newDisplayNames = selectedKbDisplayNames.filter(
-                      (_, i) => i !== index
-                    );
-                    setSelectedKbIds(newIds);
-                    setSelectedKbDisplayNames(newDisplayNames);
-                  }
-                } else {
-                  // Called from config panel
-                  removeKbFromSelection(index, paramIndex);
-                }
-              }}
-              onTestPanelKbSelect={handleTestPanelKbSelect}
-              onTestPanelKbRemove={handleTestPanelKbRemove}
-              onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
-              testPanelKbIds={testPanelKbIds}
-              testPanelKbDisplayNames={testPanelKbDisplayNames}
-              configInvalid={hasFormErrors || hasEmptyRequired || aidpInvalid}
-              toolKbType={toolKbType}
-              haotianKnowledgeSets={haotianKnowledgeSets}
-            />
-          )}
-        </div>
+              } else {
+                // Called from config panel
+                removeKbFromSelection(index, paramIndex);
+              }
+            }}
+            onTestPanelKbSelect={handleTestPanelKbSelect}
+            onTestPanelKbRemove={handleTestPanelKbRemove}
+            onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
+            testPanelKbIds={testPanelKbIds}
+            testPanelKbDisplayNames={testPanelKbDisplayNames}
+            configInvalid={hasFormErrors || hasEmptyRequired || aidpInvalid}
+            toolKbType={toolKbType}
+            haotianKnowledgeSets={haotianKnowledgeSets}
+          />
+        )}
       </ParamDialog>
 
       {/* Knowledge Base Selector Modal */}

@@ -40,6 +40,9 @@ feature:
       fullscreen and comparison transitions without writing Agent configuration.
       NL2Agent resizing reserves at least 800px for configuration when space permits,
       keeping the publication action on the same row as the workflow controls.
+  - rule_id: AGENT-EDITOR-RULE-009
+    description: Test retrieval from the knowledge section using the current bound sources
+      and settings. Only explicit execution queries the tool and no configuration is saved.
   required_test_stages:
   - D4
   source:
@@ -52,4 +55,5 @@ feature:
     - AGENT-EDITOR-REQ-006
     - AGENT-EDITOR-REQ-007
     - AGENT-PANEL-RESIZE-20261111
+    - AGENT-KNOWLEDGE-RETRIEVAL-TEST-20261126
     spec_path: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md

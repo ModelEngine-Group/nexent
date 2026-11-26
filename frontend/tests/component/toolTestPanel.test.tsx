@@ -46,6 +46,88 @@ beforeEach(() => {
   vi.mocked(validateTool).mockResolvedValue('{"ok":true}');
 });
 
+describe("bound knowledge in the shared tool test panel", () => {
+  it.each([
+    ["knowledge_base_search", "index_names"],
+    ["aidp_search", "kds_list"],
+  ] as const)(
+    "passes the bound %s scope through the existing tool form",
+    async (name, selectionParam) => {
+      vi.mocked(parseToolInputs).mockReturnValue({
+        query: { type: "string", description: "Search query", required: true },
+        [selectionParam]: { type: "array" },
+      });
+      vi.mocked(validateTool).mockResolvedValue(
+        '{"results":[{"text":"Keep your receipts."}]}'
+      );
+      render(
+        <ToolTestPanel
+          {...props}
+          tool={{ ...tool, name }}
+          configParams={[
+            { name: "top_k", type: "number", required: false, value: 5 },
+          ]}
+          toolRequiresKbSelection
+          toolKbType={name}
+          boundKnowledgeIds={["policy", "other"]}
+          testPanelKbIds={["policy"]}
+          testPanelKbDisplayNames={["Travel policy"]}
+        />
+      );
+      const run = screen.getByRole("button", {
+        name: "agent.knowledge.test.run",
+      });
+      expect(run).toBeDisabled();
+      expect(await screen.findByText("Travel policy")).toBeVisible();
+      fireEvent.change(screen.getByPlaceholderText("Search query"), {
+        target: { value: " receipts " },
+      });
+      await waitFor(() => expect(run).toBeEnabled());
+      expect(validateTool).not.toHaveBeenCalled();
+      fireEvent.click(run);
+      await waitFor(() =>
+        expect(validateTool).toHaveBeenCalledExactlyOnceWith(
+          name,
+          "local",
+          "",
+          { query: "receipts", [selectionParam]: ["policy"] },
+          { top_k: 5, [selectionParam]: ["policy"] },
+          "zh"
+        )
+      );
+      expect(await screen.findByText(/Keep your receipts/)).toBeVisible();
+    }
+  );
+
+  it("rejects a scope outside the binding when using the existing JSON mode", async () => {
+    vi.mocked(parseToolInputs).mockReturnValue({
+      query: { type: "string", description: "Search query" },
+      index_names: { type: "array" },
+    });
+    render(
+      <ToolTestPanel
+        {...props}
+        tool={{ ...tool, name: "knowledge_base_search" }}
+        toolRequiresKbSelection
+        boundKnowledgeIds={["policy"]}
+        testPanelKbIds={["policy"]}
+        testPanelKbDisplayNames={["Travel policy"]}
+      />
+    );
+    fireEvent.click(await screen.findByText("JSON"));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: '{"query":"receipts","index_names":["unbound"]}' },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "agent.knowledge.test.run" })
+    );
+    expect(
+      await screen.findByText("agent.knowledge.test.invalidInputs")
+    ).toBeVisible();
+    expect(validateTool).not.toHaveBeenCalled();
+  });
+});
+
 describe("tool testing in the split configuration dialog", () => {
   it("shows the empty result and runs with the current unsaved configuration", async () => {
     const { rerender } = render(<ToolTestPanel {...props} />);
