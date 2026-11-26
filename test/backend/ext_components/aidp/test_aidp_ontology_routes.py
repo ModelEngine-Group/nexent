@@ -719,3 +719,136 @@ def test_batch_async_and_invalid_import(monkeypatch):
         headers=_bearer(),
         json={"file_name": "bad.json", "document": {"Demo": {"types": "bad"}}},
     ).status_code == 400
+
+
+def test_domain_count_failures_degrade(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_domain_routes as routes
+
+    _allow_manager(monkeypatch)
+
+    async def failing_count(_domain_id):
+        raise routes.AppException(_Code(), "down")
+
+    monkeypatch.setattr(routes, "_binding_count", failing_count)
+    monkeypatch.setattr(
+        routes,
+        "list_ontology_domains_impl",
+        lambda *a, **kw: {
+            "value": [{"id": 1, "name": "Demo"}],
+            "total_count": 1,
+        },
+    )
+    monkeypatch.setattr(
+        routes,
+        "list_ontology_bindings_impl",
+        lambda *a, **kw: (_ for _ in ()).throw(routes.AppException(None, "down")),
+    )
+    assert _client().get(
+        "/aidp-mgmt/ontology/domains", headers=_bearer()
+    ).status_code == 200
+
+    monkeypatch.setattr(routes, "_binding_count", lambda *_a, **_kw: _async(1))
+    monkeypatch.setattr(
+        routes,
+        "get_ontology_domain_impl",
+        lambda *a, **kw: {"id": 1, "name": "Demo"},
+    )
+    monkeypatch.setattr(
+        routes,
+        "list_ontology_entities_impl",
+        lambda *a, **kw: (_ for _ in ()).throw(routes.AppException(None, "down")),
+    )
+    monkeypatch.setattr(
+        routes,
+        "list_ontology_metadata_fields_impl",
+        lambda *a, **kw: (_ for _ in ()).throw(routes.AppException(None, "down")),
+    )
+    assert _client().get(
+        "/aidp-mgmt/ontology/domains/1", headers=_bearer()
+    ).status_code == 200
+
+
+def test_entity_relation_writeback_and_synonyms(monkeypatch):
+    from ext_components.aidp.apps import aidp_ontology_domain_routes as routes
+
+    _allow_manager(monkeypatch)
+    monkeypatch.setattr(
+        routes, "_binding_count", lambda *_a, **_kw: _async(1)
+    )
+
+    async def failing_reconcile(*_a, **_kw):
+        raise RuntimeError("writeback failed")
+
+    monkeypatch.setattr(routes, "_reconcile_entity_relations", failing_reconcile)
+    monkeypatch.setattr(
+        routes,
+        "create_ontology_entity_impl",
+        lambda *a, **kw: {"entity_id": "1"},
+    )
+    created = _client().post(
+        "/aidp-mgmt/ontology/domains/1/entities",
+        headers=_bearer(),
+        json={
+            "api_name": "Phone",
+            "parent_entities": ["2"],
+            "child_entities": ["3"],
+        },
+    )
+    assert created.status_code == 200
+    assert created.json()["relation_error"] == routes.ENTITY_RELATION_WRITEBACK_FAILED
+
+    async def ok_reconcile(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(routes, "_reconcile_entity_relations", ok_reconcile)
+    monkeypatch.setattr(
+        routes,
+        "update_ontology_entity_impl",
+        lambda *a, **kw: {"api_name": "Phone"},
+    )
+    updated = _client().patch(
+        "/aidp-mgmt/ontology/domains/1/entities/1",
+        headers=_bearer(),
+        json={
+            "properties": [{"api_name": "price", "data_type": "float"}],
+            "synonym_entities": ["Mobile"],
+        },
+    )
+    assert updated.status_code == 200
+
+
+class _Code:
+    value = "000001"
+
+
+async def _async(value):
+    return value
+
+
+def test_kb_summary_and_chunk_request_validators():
+    from ext_components.aidp.apps import aidp_mgmt_app as mgmt
+
+    base = {
+        "name": "kb",
+        "description": "d",
+        "embedding_model": "m",
+        "chunk_token_num": 512,
+        "chunk_overlap_num": 10,
+    }
+    created = mgmt.CreateKbRequest(**base, summary_enable=True, summary_model=" llm ")
+    assert created.summary_model == "llm"
+    assert created.summary_preview is True
+    assert mgmt.CreateKbRequest(**base).summary_model is None
+    with pytest.raises(ValidationError):
+        mgmt.CreateKbRequest(**{**base, "chunk_overlap_num": 300})
+    with pytest.raises(ValidationError):
+        mgmt.CreateKbRequest(**base, caption_enable=1, vlm_model="")
+    with pytest.raises(ValidationError):
+        mgmt.CreateKbRequest(**base, summary_enable=True, summary_model="")
+
+    updated = mgmt.UpdateKbRequest(summary_enable=True, summary_model="llm")
+    assert updated.summary_preview is True
+    with pytest.raises(ValidationError):
+        mgmt.UpdateKbRequest(summary_enable=True, summary_model="")
+    with pytest.raises(ValidationError):
+        mgmt.UpdateKbRequest(chunk_token_num=512, chunk_overlap_num=300)
