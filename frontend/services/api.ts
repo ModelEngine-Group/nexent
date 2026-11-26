@@ -22,6 +22,16 @@ export const API_ENDPOINTS = {
   systemConfigurations: `${API_BASE_URL}/system_configurations`,
   evolutionPublicBenchmarks: (id: number) =>
     `${API_BASE_URL}/agent-evolution/experiments/${id}/public_benchmark_reports`,
+  businessEvaluationSets: {
+    list: (agent: number) => `${API_BASE_URL}/agent-evolution/agents/${agent}/evaluation-sets`,
+    choices: (agent: number) => `${API_BASE_URL}/agent-evolution/agents/${agent}/evaluation-set-case-choices`,
+    detail: (agent: number, setId: number) => `${API_BASE_URL}/agent-evolution/agents/${agent}/evaluation-sets/${setId}`,
+    cases: (agent: number, setId: number) => `${API_BASE_URL}/agent-evolution/agents/${agent}/evaluation-sets/${setId}/cases`,
+    member: (agent: number, setId: number, caseId: number) =>
+      `${API_BASE_URL}/agent-evolution/agents/${agent}/evaluation-sets/${setId}/cases/${caseId}`,
+    select: (agent: number, version: number, setId: number) =>
+      `${API_BASE_URL}/agent-evolution/agents/${agent}/versions/${version}/evaluation-sets/${setId}/select`,
+  },
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
     importArchive: `${API_BASE_URL}/trajectory/import`,

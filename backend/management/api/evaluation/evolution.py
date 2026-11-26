@@ -11,6 +11,7 @@ from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
 from contracts.evolution import PublicBenchmarkRequest, ReviseSkillCandidateRequest
+from contracts.evolution import BusinessEvaluationSetMembers, BusinessEvaluationSetRequest
 from contracts.skill_script_repair import ReviewedScriptBuild, ScriptDraftRequest, ScriptRepairFeedback
 from management.services.evaluation.skill_script_repairs import build_reviewed_script, draft_script, share_script_feedback
 from contracts.tool_repair import ReviewedToolBuild, ToolCallerApproval, ToolRepairRequest
@@ -34,6 +35,7 @@ from management.services.agent.preparation.evaluation_snapshot import prepare_ev
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate, resolve_prompt_candidate
 from management.services.evaluation.skill_candidates import generate_skill_step_candidate
 from management.services.evaluation.replay_cases import freeze_development_case, get_development_case, preview_trace_case
+from management.services.evaluation import business_sets
 from management.services.evaluation.experiments import create_experiment, experiment_report, retry_experiment, workspace_choices
 from management.services.evaluation.public_benchmarks import read_reports, record_report
 from management.services.evaluation.feedback_handoff import examples_from_experiment, generate_from_handoff, handoff
@@ -384,6 +386,105 @@ async def create_development_case(request: ReplayCaseRequest, authorization: str
     user_id, tenant_id = get_current_user_id(authorization)
     result = await run_blocking("freeze-development-case", freeze_development_case, request, user_id, tenant_id,
                                 lane="evaluation", owner="management")
+    return {"data": result}
+
+
+@router.get("/agents/{agent_id}/evaluation-sets")
+async def list_business_evaluation_sets(
+    agent_id: int = Path(gt=0),
+    authorization: str | None = Header(None),
+):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking(
+        "list-business-evaluation-sets", business_sets.list_business_sets,
+        tenant, user, agent_id, lane="control-io", owner="management",
+    )
+    return {"data": result}
+
+
+@router.post("/agents/{agent_id}/evaluation-sets")
+async def create_business_evaluation_set(
+    request: BusinessEvaluationSetRequest,
+    agent_id: int = Path(gt=0),
+    authorization: str | None = Header(None),
+):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking(
+        "create-business-evaluation-set", business_sets.create_business_set,
+        tenant, user, agent_id, request.name, lane="control-io", owner="management",
+    )
+    return {"data": result}
+
+
+@router.get("/agents/{agent_id}/evaluation-set-case-choices")
+async def list_business_evaluation_set_cases(
+    agent_id: int = Path(gt=0),
+    authorization: str | None = Header(None),
+):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking(
+        "list-business-evaluation-set-cases", business_sets.business_case_choices,
+        tenant, user, agent_id, lane="control-io", owner="management",
+    )
+    return {"data": result}
+
+
+@router.get("/agents/{agent_id}/evaluation-sets/{set_id}")
+async def read_business_evaluation_set(
+    agent_id: int = Path(gt=0),
+    set_id: int = Path(gt=0),
+    authorization: str | None = Header(None),
+):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking(
+        "read-business-evaluation-set", business_sets.read_business_set,
+        tenant, user, agent_id, set_id, lane="control-io", owner="management",
+    )
+    return {"data": result}
+
+
+@router.post("/agents/{agent_id}/evaluation-sets/{set_id}/cases")
+async def add_business_evaluation_set_cases(
+    request: BusinessEvaluationSetMembers,
+    agent_id: int = Path(gt=0),
+    set_id: int = Path(gt=0),
+    authorization: str | None = Header(None),
+):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking(
+        "add-business-evaluation-set-cases", business_sets.add_business_set_cases,
+        tenant, user, agent_id, set_id, request.case_ids, lane="control-io", owner="management",
+    )
+    return {"data": result}
+
+
+@router.delete("/agents/{agent_id}/evaluation-sets/{set_id}/cases/{case_id}")
+async def remove_business_evaluation_set_case(
+    agent_id: int = Path(gt=0),
+    set_id: int = Path(gt=0),
+    case_id: int = Path(gt=0),
+    authorization: str | None = Header(None),
+):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking(
+        "remove-business-evaluation-set-case", business_sets.remove_business_set_case,
+        tenant, user, agent_id, set_id, case_id, lane="control-io", owner="management",
+    )
+    return {"data": result}
+
+
+@router.post("/agents/{agent_id}/versions/{version_no}/evaluation-sets/{set_id}/select")
+async def select_business_evaluation_set(
+    agent_id: int = Path(gt=0),
+    version_no: int = Path(gt=0),
+    set_id: int = Path(gt=0),
+    authorization: str | None = Header(None),
+):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking(
+        "select-business-evaluation-set", business_sets.select_business_set,
+        tenant, user, agent_id, version_no, set_id, lane="control-io", owner="management",
+    )
     return {"data": result}
 
 

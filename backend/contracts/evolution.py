@@ -2,7 +2,7 @@
 """Development-only evidence and local edits for a published business prompt."""
 
 import json
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, field_validator, model_validator
 from contracts.replay_files import FileStateCheck, TextFiles
@@ -184,6 +184,16 @@ class ReplayFollowup(BaseModel):
     attachment_names: list[str] = Field(default_factory=list, max_length=32)
 
 
+class BusinessEvaluationSetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    name: str = Field(min_length=1, max_length=100)
+
+
+class BusinessEvaluationSetMembers(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    case_ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=1, max_length=100)
+
+
 class ReplayCaseRequest(BaseModel):
     """A business-approved development task. Only the query and files reach the Agent."""
 
@@ -200,9 +210,15 @@ class ReplayCaseRequest(BaseModel):
     tool_use: ToolUseExpectation | None = None
     file_state: FileStateCheck | None = None
     trace: TraceCaseApproval | None = None
+    evaluation_set_id: int | None = Field(default=None, gt=0)
+    new_evaluation_set_name: str | None = Field(default=None, min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def check_inputs(self):
+        if self.evaluation_set_id is not None and self.new_evaluation_set_name is not None:
+            raise ValueError("Choose an existing evaluation set or name a new set")
+        if self.new_evaluation_set_name is not None and not self.new_evaluation_set_name.strip():
+            raise ValueError("Provide an evaluation set name")
         if self.expected_skill_names is not None and (
                 len(set(self.expected_skill_names)) != len(self.expected_skill_names)
                 or any(not name.strip() or len(name) > 100 for name in self.expected_skill_names)):

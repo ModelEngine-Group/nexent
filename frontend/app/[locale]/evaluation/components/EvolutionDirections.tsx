@@ -19,11 +19,14 @@ export function readEvolutionDirection(value: string | null | undefined): Evolut
   return directions.find(({ id }) => id === value)?.id;
 }
 
-export function evolutionHref(direction?: EvolutionDirection, scope?: { agent?: number; version?: number }) {
+type EvolutionScope = { agent?: number; version?: number; evaluationSet?: number };
+
+export function evolutionHref(direction?: EvolutionDirection, scope?: EvolutionScope) {
   const params = new URLSearchParams({ tab: "evolution" });
   if (direction) params.set("direction", direction);
   if (scope?.agent) params.set("agent_id", String(scope.agent));
   if (scope?.version) params.set("version_no", String(scope.version));
+  if (scope?.evaluationSet) params.set("set_id", String(scope.evaluationSet));
   return `?${params}`;
 }
 
@@ -39,7 +42,7 @@ export function matchesDirection(direction: EvolutionDirection | undefined, kind
   return direction === "combination" && kind === "combination";
 }
 
-export function EvolutionDirectionGuide({ scope }: { scope: { agent?: number; version?: number } }) {
+export function EvolutionDirectionGuide({ scope }: { scope: EvolutionScope }) {
   const { t } = useTranslation("common");
   return (
     <Flex vertical gap={16}>

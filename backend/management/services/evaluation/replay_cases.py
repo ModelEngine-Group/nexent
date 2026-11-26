@@ -12,6 +12,7 @@ from contracts.errors.exceptions import AppException
 from contracts.evolution import ReplayCaseRequest
 from infrastructure.object_storage.client import minio_client
 from infrastructure.rdb.client import get_db_session
+from management.db.evaluation import business_sets
 from management.db.evaluation.trace_cases import trace_case_draft, verified_baseline, verified_repair
 from management.db.evaluation.replay_cases import read_replay_case, regression_members, save_replay_case, set_regression_membership
 from management.db.evaluation.evaluator import get_evaluator
@@ -127,13 +128,23 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Provide a non-empty source group")
         task["source_group"] = request.source_group.strip()
     require_business_agent_edit(request.agent_id, tenant_id, user_id)
-    if request.trace:
-        with get_db_session() as session:
+    if not (request.trace or request.evaluation_set_id or request.new_evaluation_set_name):
+        return save_replay_case(tenant_id, request.agent_id, request.version_no, user_id, task)
+
+    with get_db_session() as session:
+        set_id = request.evaluation_set_id
+        if request.new_evaluation_set_name is not None:
+            group = business_sets.create_set(session, tenant_id, request.agent_id, user_id, request.new_evaluation_set_name)
+            set_id = group["evaluation_set_id"]
+        if request.trace:
             draft = trace_case_draft(session, tenant_id, user_id, request.agent_id, request.version_no,
                                      request.trace.turn_id, request.trace.use_previous_task, request.trace.preceding_turns)
             task["trace_source"] = _approve_trace(request, draft)
-            return save_replay_case(tenant_id, request.agent_id, request.version_no, user_id, task, transaction=session)
-    return save_replay_case(tenant_id, request.agent_id, request.version_no, user_id, task)
+        saved = save_replay_case(tenant_id, request.agent_id, request.version_no, user_id, task, transaction=session)
+        if set_id is not None:
+            business_sets.add_cases(session, tenant_id, request.agent_id, user_id, set_id, [saved["case_id"]])
+            saved["evaluation_set_id"] = set_id
+        return saved
 
 
 def get_development_case(tenant_id, user_id, agent_id, version_no, case_id):

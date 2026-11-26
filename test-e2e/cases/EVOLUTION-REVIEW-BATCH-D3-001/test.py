@@ -25,6 +25,8 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     from management.db.conversation import evolution_review as registrar, prepared_turn
     from management.db.conversation.repository import update_message_opinion
     from management.services.evaluation import online_observation as reader
+    from management.services.evaluation import business_sets
+    from management.db.evaluation.sets import get_evaluation_set, list_evaluation_sets
     from management.services.evaluation.replay_cases import freeze_development_case, preview_trace_case
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from test.backend.utils.test_trajectory_file_store import request as otlp_request
@@ -39,7 +41,7 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
         for name in ("003_conversation_run_admission", "004_agent_execution", "006_prepared_conversation_turn",
                      "011_trajectory", "015_conversation_evolution", "018_evolution_replay_cases", "021_evolution_online_reviews",
                      "028_evolution_confirmation_suites", "041_evolution_generation_attempts",
-                     "043_evolution_model_charges", "046_evolution_online_diagnosis"):
+                     "043_evolution_model_charges", "046_evolution_online_diagnosis", "052_business_evaluation_sets"):
             cursor.execute((directory / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
         for chat in (1, 2, 3, 4):
             conn.execute(text("""INSERT INTO nexent.conversation_record_t
@@ -191,8 +193,10 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     trace = {"turn_id":end, "purpose":"reproduce", "inputs_reviewed":True, "use_previous_task":True,
              "preceding_turns":1, "draft_digest":draft["draft_digest"]}
     request = ReplayCaseRequest(agent_id=7, version_no=1, family="two turns", query="列出合成议题",
-                                expected="附来源", followups=[{"query":"为这些议题补上来源"}], trace=trace)
+                                expected="附来源", followups=[{"query":"为这些议题补上来源"}], trace=trace,
+                                new_evaluation_set_name="议题专项")
     saved = freeze_development_case(request, owner, tenant)
+    assert freeze_development_case(request, owner, tenant) == saved
     with engine.begin() as conn:
         frozen = conn.scalar(text("SELECT task FROM nexent.evolution_replay_case_t WHERE case_id=:id"), {"id":saved["case_id"]})
         assert len(frozen["trace_source"]["turn_sources"]) == 2 and "你漏了一项" not in str(frozen)
@@ -229,3 +233,32 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     reviews = {row["turn_id"]: row for row in registrar.recent_reviews(tenant, 7, 1)}
     assert reviews[source]["signals"] == []
     assert reviews[source]["diagnosis"] == {"status": "needs_evidence", "reason": "trajectory_expired"}
+
+    set_id = saved["evaluation_set_id"]
+    manual = freeze_development_case(ReplayCaseRequest(
+        agent_id=7, version_no=1, family="manual", query="核对议题数量", expected="两个",
+        evaluation_set_id=set_id,
+    ), owner, tenant)
+    summary = business_sets.add_business_set_cases(tenant, owner, 7, set_id, [saved["case_id"], manual["case_id"]])
+    assert summary["case_count"] == 2
+    assert [row["from_trace"] for row in business_sets.read_business_set(tenant, owner, 7, set_id)["cases"]] == [True, False]
+    assert set_id not in {row["evaluation_set_id"] for row in list_evaluation_sets(tenant)}
+    with pytest.raises(AppException):
+        get_evaluation_set(set_id, tenant)
+    with pytest.raises(AppException):
+        business_sets.read_business_set(tenant, owner, 8, set_id)
+    with pytest.raises(AppException):
+        business_sets.add_business_set_cases(tenant, owner, 7, set_id, [saved["case_id"], 999999])
+
+    with get_db_session() as session:
+        session.add(models.AgentInfo(agent_id=7, version_no=2, tenant_id=tenant, name="meeting-actions",
+                                     created_by=owner, updated_by=owner, delete_flag="N", ingroup_permission="PRIVATE"))
+    selected = business_sets.select_business_set(tenant, owner, 7, 2, set_id)
+    assert [row["digest"] for row in selected] == [saved["digest"], manual["digest"]]
+    assert all(row["version_no"] == 2 for row in selected)
+    with engine.connect() as conn:
+        cloned = conn.scalar(text("SELECT task FROM nexent.evolution_replay_case_t WHERE case_id=:id"),
+                             {"id": selected[0]["case_id"]})
+    assert cloned == frozen
+    business_sets.remove_business_set_case(tenant, owner, 7, set_id, saved["case_id"])
+    assert business_sets.select_business_set(tenant, owner, 7, 2, set_id) == [selected[1]]

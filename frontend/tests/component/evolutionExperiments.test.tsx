@@ -2,7 +2,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { useState } from "react";
 import EvolutionExperiments, { EvolutionWorkspace } from "@/app/evaluation/components/EvolutionExperiments";
+import BusinessEvaluationSetDialog from "@/app/evaluation/components/BusinessEvaluationSetDialog";
 import NewSkillBriefForm from "@/app/evaluation/components/NewSkillBriefForm";
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
@@ -32,13 +34,20 @@ vi.mock("react-i18next", () => ({
     i18n: { language: "zh" },
   }),
 }));
-vi.mock("@/services/evolutionService", () => ({
+vi.mock("@/services/evolutionService", async (importOriginal) => ({
+  businessSetKeys: (await importOriginal<typeof import("@/services/evolutionService")>()).businessSetKeys,
   evolutionService: {
     agents: vi.fn(),
     versions: vi.fn(),
     evaluators: vi.fn(),
     workspace: vi.fn(),
     traceCaseDraft: vi.fn(),
+    businessSets: vi.fn().mockResolvedValue([]),
+    selectBusinessSet: vi.fn(),
+    createBusinessSet: vi.fn(),
+    businessSet: vi.fn(),
+    businessSetChoices: vi.fn(),
+    addBusinessSetCases: vi.fn(),
     createCase: vi.fn(),
     report: vi.fn(),
     retry: vi.fn(),
@@ -120,6 +129,67 @@ it.each([
     const options = document.querySelectorAll(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content");
     expect(Array.from(options, option => option.textContent)).toEqual(visible);
   });
+});
+
+it("uses all cases from the selected business set in the baseline request", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Meeting" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 2, version_name: "Pilot" }]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({ cases: [], candidates: [], experiments: [] });
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([
+    { evaluator_id: 3, name: "Rules", evaluator_type: "code", status: "PUBLISHED" },
+  ]);
+  vi.mocked(evolutionService.businessSets).mockResolvedValueOnce([
+    { evaluation_set_id: 8, business_agent_id: 7, name: "Handover", description: null, case_count: 2 },
+  ]);
+  vi.mocked(evolutionService.selectBusinessSet).mockResolvedValue([
+    { case_id: 21, version_no: 2, digest: "a", family: "Manual", query: "Keep owners", from_trace: false },
+    { case_id: 22, version_no: 2, digest: "b", family: "Trace", query: "Keep open items", from_trace: true },
+  ]);
+  vi.mocked(evolutionService.submit).mockResolvedValue({ experiment_id: 42 });
+
+  vi.mocked(evolutionService.report).mockResolvedValue({
+    experiment_id: 42, status: "finished", total_pairs: 0, valid_pairs: 0, pairs: {},
+  });
+
+  render(<QueryClientProvider client={new QueryClient()}>
+    <EvolutionExperiments focusParams={new URLSearchParams("agent_id=7&version_no=2")} />
+  </QueryClientProvider>);
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.workflow.baseline" }));
+  await choose("evolution.sets.select", "Handover (2)");
+  fireEvent.click(screen.getByRole("button", { name: "evolution.sets.useCases" }));
+  expect(await screen.findByText("Trace · Keep open items")).toBeInTheDocument();
+  expect(evolutionService.selectBusinessSet).toHaveBeenCalledWith(7, 2, 8);
+  await choose("evolution.evaluator", "Rules");
+  fireEvent.click(screen.getByRole("button", { name: "evolution.workflow.startBaseline" }));
+  await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
+    agent_id: 7, version_no: 2, candidate_type: "baseline", case_ids: [21, 22], evaluator_id: 3,
+  })));
+});
+
+it("creates an evaluation set in the catalog and fills it with an existing business case", async () => {
+  const group = { evaluation_set_id: 8, business_agent_id: 7, name: "Handover", description: null, case_count: 0 };
+  const member = { case_id: 21, version_no: 1, digest: "a", family: "Manual", query: "Keep owners", from_trace: false };
+  vi.mocked(evolutionService.createBusinessSet).mockResolvedValue(group);
+  vi.mocked(evolutionService.businessSet).mockResolvedValue({ ...group, cases: [] });
+  vi.mocked(evolutionService.businessSetChoices).mockResolvedValue([member]);
+  vi.mocked(evolutionService.addBusinessSetCases).mockImplementation(async () => {
+    const updated = { ...group, case_count: 1 };
+    vi.mocked(evolutionService.businessSet).mockResolvedValue({ ...updated, cases: [member] });
+    return updated;
+  });
+  function CatalogDialog() {
+    const [id, setId] = useState<number>();
+    return <BusinessEvaluationSetDialog agent={7} viewer="editor" setId={id} onCreated={setId} close={() => {}} />;
+  }
+
+  render(<QueryClientProvider client={new QueryClient()}><CatalogDialog /></QueryClientProvider>);
+  fireEvent.change(screen.getByLabelText("evolution.sets.name"), { target: { value: "Handover" } });
+  fireEvent.click(screen.getByRole("button", { name: "evolution.sets.create" }));
+  await choose("evolution.sets.existingCases", "Manual · Keep owners");
+  fireEvent.click(screen.getByRole("button", { name: "evolution.sets.addCases" }));
+  expect(await screen.findByText("evolution.sets.manual")).toBeInTheDocument();
+  expect(evolutionService.createBusinessSet).toHaveBeenCalledWith(7, "Handover");
+  expect(evolutionService.addBusinessSetCases).toHaveBeenCalledWith(7, 8, [21]);
 });
 
 it("retries only the inconclusive result and displays its previous receipt", async () => {
@@ -460,6 +530,34 @@ it("requires a business expectation before freezing a trace draft, then selects 
       inputs_reviewed: true, tools_require_no_reset: false, unused_attachment_slots: [], use_previous_task: false },
   })));
   expect(await screen.findByRole("button", { name: "evolution.workflow.startBaseline" })).toBeInTheDocument();
+});
+
+it("saves an approved Trace case into a new business set and stays on case preparation", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Meeting" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({ candidates: [], cases: [], experiments: [],
+    reviews: [{ turn_id: 3, batch_id: null, state: "observed", signals: [] }] });
+  vi.mocked(evolutionService.traceCaseDraft).mockResolvedValue({ turn_id: 3, draft_digest: "a".repeat(64),
+    trajectory_id: "scope-run", attachment_count: 0, tool_count: 0, tools: [], signals: [], query: "List actions." });
+  vi.mocked(evolutionService.createCase).mockResolvedValue({ case_id: 12, evaluation_set_id: 8 });
+
+  render(<QueryClientProvider client={new QueryClient()}>
+    <EvolutionExperiments focusParams={new URLSearchParams("agent_id=7&version_no=1")} />
+  </QueryClientProvider>);
+  fireEvent.click(await screen.findByText("evolution.recentObservations"));
+  fireEvent.click(screen.getByRole("button", { name: "evolution.makeTraceCase" }));
+  await choose("evolution.sets.destination", "evolution.sets.create");
+  fireEvent.change(screen.getByLabelText("evolution.sets.name"), { target: { value: "Handover" } });
+  fireEvent.change(screen.getByLabelText("evolution.family"), { target: { value: "meeting" } });
+  fireEvent.change(screen.getByLabelText("evolution.expected"), { target: { value: "A1" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "evolution.traceApproval" }));
+  fireEvent.click(screen.getByRole("button", { name: "evolution.saveCase" }));
+  await waitFor(() => expect(evolutionService.createCase).toHaveBeenCalledWith(expect.objectContaining({
+    query: "List actions.", expected: "A1", new_evaluation_set_name: "Handover",
+    trace: expect.objectContaining({ turn_id: 3, inputs_reviewed: true }),
+  })));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "evolution.saveCase" })).not.toBeInTheDocument());
+  expect(screen.getByRole("button", { name: "evolution.workflow.cases" })).toHaveAttribute("aria-current", "step");
 });
 
 it("refreshes five-turn groups and opens a draft only for an available source", async () => {

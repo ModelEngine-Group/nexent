@@ -96,6 +96,18 @@ def test_replay_paths_are_portable(name):
         ReplayAttachmentSource(name=name, object_name="attachments/editor/object")
 
 
+@pytest.mark.parametrize("destination", [
+    {"evaluation_set_id": 1, "new_evaluation_set_name": "Another set"},
+    {"evaluation_set_id": 0},
+    {"new_evaluation_set_name": "   "},
+])
+def test_replay_case_declines_ambiguous_or_invalid_set_choices(destination):
+    from contracts.evolution import ReplayCaseRequest
+
+    with pytest.raises(ValidationError):
+        ReplayCaseRequest(agent_id=7, version_no=1, family="handover", query="List items", expected="A1", **destination)
+
+
 def test_fixed_regression_report_accounts_for_missing_trials_and_unresolved_failures(monkeypatch):
     from management.services.evaluation import experiments as service
 

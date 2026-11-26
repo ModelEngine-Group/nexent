@@ -53,6 +53,7 @@ def list_evaluation_sets(tenant_id: str, limit: int = 50, offset: int = 0) -> li
             session.query(EvaluationSet)
             .filter(
                 EvaluationSet.tenant_id == tenant_id,
+                EvaluationSet.business_agent_id.is_(None),
                 # Hide virtual sets created by no-set evaluation mode.
                 # - New virtual sets have source_filename='__no_set_virtual__'
                 # - Old virtual sets (before the marker was added) have NULL source_filename
@@ -78,6 +79,7 @@ def get_evaluation_set(evaluation_set_id: int, tenant_id: str) -> dict[str, Any]
             .filter(
                 EvaluationSet.evaluation_set_id == evaluation_set_id,
                 EvaluationSet.tenant_id == tenant_id,
+                EvaluationSet.business_agent_id.is_(None),
             )
             .first()
         )
@@ -92,6 +94,7 @@ def count_evaluation_sets(tenant_id: str) -> int:
             session.query(EvaluationSet)
             .filter(
                 EvaluationSet.tenant_id == tenant_id,
+                EvaluationSet.business_agent_id.is_(None),
             )
             .count()
         )

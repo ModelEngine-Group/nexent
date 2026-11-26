@@ -207,9 +207,9 @@ export interface FileStateCheck {
   adapter: "text-files-v1"; initial: Record<string, string>; expected: Record<string, string>; protected: string[];
 }
 
-async function read<T>(url: string, body?: unknown): Promise<T> {
+async function read<T>(url: string, body?: unknown, method?: "DELETE"): Promise<T> {
   const response = await fetch(url, {
-    method: body === undefined ? "GET" : "POST",
+    method: method ?? (body === undefined ? "GET" : "POST"),
     headers: getAuthHeaders(),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -225,6 +225,30 @@ async function read<T>(url: string, body?: unknown): Promise<T> {
   }
   return payload.data ?? payload.items ?? payload;
 }
+
+export interface BusinessEvaluationSet {
+  evaluation_set_id: number;
+  business_agent_id: number;
+  name: string;
+  description: string | null;
+  case_count: number;
+}
+
+export interface BusinessSetCase {
+  case_id: number;
+  version_no: number;
+  digest: string;
+  family: string;
+  query: string;
+  from_trace: boolean;
+  expected_skill_names?: string[];
+}
+
+export const businessSetKeys = {
+  list: (viewer: string, agent?: number) => ["business-evaluation-sets", viewer, agent],
+  detail: (viewer: string, agent: number, id?: number) => ["business-evaluation-set", viewer, agent, id],
+  choices: (viewer: string, agent: number) => ["business-evaluation-case-choices", viewer, agent],
+};
 
 export const evolutionService = {
   suggestionActions: (receipt: SuggestionReceipt) =>
@@ -286,11 +310,25 @@ export const evolutionService = {
     read<Workspace>(`${root}/agents/${agent}/versions/${version}/workspace`),
   traceCaseDraft: (agent: number, version: number, turn: number, previous = false, preceding = 0) =>
     read<TraceCaseDraft>(`${root}/agents/${agent}/versions/${version}/reviews/${turn}/case-draft?use_previous_task=${previous}&preceding_turns=${preceding}`),
+  businessSets: (agent: number) => read<BusinessEvaluationSet[]>(API_ENDPOINTS.businessEvaluationSets.list(agent)),
+  createBusinessSet: (agent: number, name: string) =>
+    read<BusinessEvaluationSet>(API_ENDPOINTS.businessEvaluationSets.list(agent), { name }),
+  businessSetChoices: (agent: number) => read<BusinessSetCase[]>(API_ENDPOINTS.businessEvaluationSets.choices(agent)),
+  businessSet: (agent: number, setId: number) =>
+    read<BusinessEvaluationSet & { cases: BusinessSetCase[] }>(API_ENDPOINTS.businessEvaluationSets.detail(agent, setId)),
+  addBusinessSetCases: (agent: number, setId: number, caseIds: number[]) =>
+    read<BusinessEvaluationSet>(API_ENDPOINTS.businessEvaluationSets.cases(agent, setId), { case_ids: caseIds }),
+  removeBusinessSetCase: (agent: number, setId: number, caseId: number) =>
+    read<BusinessEvaluationSet>(API_ENDPOINTS.businessEvaluationSets.member(agent, setId, caseId), undefined, "DELETE"),
+  selectBusinessSet: (agent: number, version: number, setId: number) =>
+    read<BusinessSetCase[]>(API_ENDPOINTS.businessEvaluationSets.select(agent, version, setId), {}),
   createCase: (body: {
     agent_id: number;
     version_no: number;
     family: string;
     source_group?: string;
+    evaluation_set_id?: number;
+    new_evaluation_set_name?: string;
     query: string;
     expected: string;
     expected_skill_names?: string[];
@@ -301,7 +339,7 @@ export const evolutionService = {
     trace?: { turn_id: number; draft_digest: string; purpose: "reproduce" | "protect";
       inputs_reviewed: true; tools_require_no_reset: boolean; unused_attachment_slots?: number[]; use_previous_task?: boolean;
       preceding_turns?: number };
-  }) => read<{ case_id: number }>(`${root}/development-cases`, body),
+  }) => read<{ case_id: number; evaluation_set_id?: number }>(`${root}/development-cases`, body),
   submit: (body: {
     budget?: DevelopmentRunBudget;
     components?: EvaluatedCandidate[];

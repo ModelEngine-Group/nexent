@@ -454,6 +454,69 @@
       "credential_kinds": ["session"]
     },
     {
+      "method": "GET",
+      "path": "/api/agent-evolution/agents/{agent_id}/evaluation-sets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-business-sets-list",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/agents/{agent_id}/evaluation-sets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-business-sets-create",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evolution/agents/{agent_id}/evaluation-set-case-choices",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-business-set-case-choices",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evolution/agents/{agent_id}/evaluation-sets/{set_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-business-set-read",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/agents/{agent_id}/evaluation-sets/{set_id}/cases",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-business-set-add-cases",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-evolution/agents/{agent_id}/evaluation-sets/{set_id}/cases/{case_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-business-set-remove-case",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/evaluation-sets/{set_id}/select",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-business-set-select",
+      "credential_kinds": ["session"]
+    },
+    {
       "method": "POST",
       "path": "/api/agent-evolution/development-cases",
       "transport": "http",

@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: EVOLUTION-BUSINESS-EVALUATION-SETS
+  change_type: requirement
+  requirement_id: EVOLUTION-BUSINESS-EVALUATION-SETS
+  title: 用评测集组织自演进业务题
+  description: 授权 Trace 和手工任务归入业务评测集，并在基线与候选评测中按集合选题。
+  affected_features:
+    existing: [AGENT-EVOLUTION-REPLAY]
+    added: []
+    modified: [AGENT-EVOLUTION-ONLINE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [EVOLUTION-REVIEW-BATCH-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_evolution_replay.py
+    - test/backend/services/test_evaluation_set_service.py
+    - test/backend/gateway/test_exposure.py
+    - frontend/tests/component/evolutionExperiments.test.tsx
+    behaviors:
+    - 业务题可加入已有集或和新集一同保存，失败时不提交部分成员。
+    - 所选集合在另一发布版本保持题目摘要和业务判据，固定回归选择规则继续生效。
+    reason: 复用出题、冻结和选择的单元测试，D3 另验证真实数据库成员与版本边界。
+  notes: See nexent-doc/docs/Developing/management-agent-self-evolution/design.md section 6.1.

@@ -10,6 +10,7 @@ acceptance_bindings:
   AC-03: [test_review_batch]
   AC-04: [test_review_batch]
   AC-05: [test_review_batch]
+  AC-06: [test_review_batch]
 preparation:
   families: []
   anchors: false

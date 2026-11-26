@@ -55,6 +55,7 @@ class EvaluationSet(TableBase):
     )
 
     tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    business_agent_id = Column(Integer, comment="Business Agent owning the replay set. Null for a conventional evaluation set.")
     name = Column(String(255), nullable=False, doc="Evaluation set name")
     description = Column(Text, doc="Evaluation set description")
 

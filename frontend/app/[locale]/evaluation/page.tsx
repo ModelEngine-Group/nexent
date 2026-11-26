@@ -33,6 +33,7 @@ import {
 } from "antd";
 import { useTranslation } from "react-i18next";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   Plus,
   Upload,
@@ -49,6 +50,8 @@ import {
 } from "lucide-react";
 import { API_ENDPOINTS } from "@/services/api";
 import { EvolutionWorkspace } from "./components/EvolutionExperiments";
+import BusinessEvaluationSetDialog from "./components/BusinessEvaluationSetDialog";
+import { businessSetKeys, evolutionService } from "@/services/evolutionService";
 import { getAuthHeaders } from "@/lib/auth";
 import {
   DEFAULT_EVALUATION_SET_FILE_SIZE_MB,
@@ -2156,6 +2159,25 @@ function EvaluatorsTab() {
 function SetsTab() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
+  const viewer = JSON.stringify([user?.tenantId, user?.id]);
+  const routeAgent = Number(useSearchParams()?.get("agent_id"));
+  const [businessAgent, setBusinessAgent] = useState<number | undefined>(
+    Number.isSafeInteger(routeAgent) && routeAgent > 0 ? routeAgent : undefined,
+  );
+  const [businessDialog, setBusinessDialog] = useState<{ id?: number }>();
+  const businessAgents = useQuery({
+    queryKey: ["evolution-agents", viewer],
+    queryFn: evolutionService.agents,
+    enabled: !!user,
+  });
+  const selectedAgent = businessAgents.data?.find((agent) => agent.agent_id === businessAgent);
+  const businessSets = useQuery({
+    queryKey: businessSetKeys.list(viewer, businessAgent),
+    queryFn: () => evolutionService.businessSets(businessAgent!),
+    enabled: !!selectedAgent && !!user,
+  });
+  const businessSetError = businessAgents.error || businessSets.error;
   const [sets, setSets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploadD, setUploadD] = useState(false);
@@ -2361,7 +2383,9 @@ function SetsTab() {
       title: t("agentEvaluation.colHeader.description"),
       dataIndex: "description",
       ellipsis: true,
-      render: (v: any) => v || "-",
+      render: (v: string | null, row: { business_agent_id?: number }) => row.business_agent_id
+        ? selectedAgent?.display_name || selectedAgent?.name
+        : v || "-",
     },
     {
       title: t("agentEvaluation.caseCount"),
@@ -2395,7 +2419,11 @@ function SetsTab() {
     {
       title: t("agentEvaluation.colHeader.actions"),
       width: 110,
-      render: (_: any, r: any) => (
+      render: (_: any, r: any) => r.business_agent_id ? (
+        <Button type="link" size="small" onClick={() => setBusinessDialog({ id: r.evaluation_set_id })}>
+          {t("evolution.sets.manage")}
+        </Button>
+      ) : (
         <Space size={0}>
           <Tooltip title={t("agentEvaluation.view")}>
             <Button
@@ -2859,14 +2887,26 @@ function SetsTab() {
           </Button>
         </Space>
       </Flex>
+      <Flex gap={8} wrap className="mb-4">
+        <Select<number> allowClear showSearch={{ optionFilterProp: "label" }} className="min-w-56"
+          loading={businessAgents.isFetching} aria-label={t("evolution.sets.agentFilter")}
+          placeholder={t("evolution.sets.agentFilter")} value={businessAgent}
+          options={businessAgents.data?.map((agent) => ({ value: agent.agent_id, label: agent.display_name || agent.name }))}
+          onChange={(id) => { setBusinessAgent(id); setBusinessDialog(undefined); }} />
+        {selectedAgent && <Button onClick={() => setBusinessDialog({})}>{t("evolution.sets.create")}</Button>}
+      </Flex>
+      {businessSetError instanceof Error && <Text type="danger">{businessSetError.message}</Text>}
       <Table
         columns={cols}
-        dataSource={sets}
+        dataSource={[...(businessSets.data ?? []), ...sets]}
         rowKey="evaluation_set_id"
         size="small"
-        loading={loading}
+        loading={loading || businessSets.isFetching}
         pagination={{ pageSize: 10 }}
       />
+      {selectedAgent && businessDialog && <BusinessEvaluationSetDialog key={`${viewer}:${selectedAgent.agent_id}`}
+        agent={selectedAgent.agent_id} viewer={viewer} setId={businessDialog.id}
+        onCreated={(id) => setBusinessDialog({ id })} close={() => setBusinessDialog(undefined)} />}
       <Drawer
         title={t("agentEvaluation.uploadTitle")}
         open={uploadD}

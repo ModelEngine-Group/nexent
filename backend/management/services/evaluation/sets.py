@@ -214,6 +214,7 @@ def count_active_runs_using_set(evaluation_set_id: int, tenant_id: str) -> int:
 
 def _check_set_not_in_use(evaluation_set_id: int, tenant_id: str) -> None:
     """Raise AppException if any active evaluation run references this set."""
+    get_evaluation_set_impl(evaluation_set_id, tenant_id)
     n = count_active_runs_using_set(evaluation_set_id, tenant_id)
     if n > 0:
         raise AppException(
@@ -233,6 +234,7 @@ def delete_evaluation_set_impl(
     runs never lose their context. Use ``count_active_runs_using_set`` first if
     the caller wants to surface the referenced count to the user before deletion.
     """
+    get_evaluation_set_impl(evaluation_set_id, tenant_id)
     referenced = count_active_runs_using_set(evaluation_set_id, tenant_id)
     if referenced > 0:
         raise AppException(

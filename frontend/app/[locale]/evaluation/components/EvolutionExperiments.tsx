@@ -16,10 +16,11 @@ import {
   Table,
   Typography,
 } from "antd";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useModelList } from "@/hooks/model/useModelList";
-import { evolutionService as api, type Trial, type TraceCaseDraft, type ScreeningCriteria, type LocalFeedback } from "@/services/evolutionService";
+import { businessSetKeys, evolutionService as api, type BusinessEvaluationSet, type BusinessSetCase,
+  type Trial, type TraceCaseDraft, type ScreeningCriteria, type LocalFeedback } from "@/services/evolutionService";
 import { storageService } from "@/services/storageService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { ResourceCandidateGenerator } from "./DiscoveryFeedback";
@@ -40,6 +41,8 @@ function CaseForm({
   skills,
   direction,
   draft,
+  groups,
+  initialSet,
   close,
   saved,
 }: {
@@ -48,8 +51,10 @@ function CaseForm({
   skills: { name: string }[];
   direction?: EvolutionDirection;
   draft?: TraceCaseDraft;
+  groups: BusinessEvaluationSet[];
+  initialSet?: number;
   close: () => void;
-  saved: (id: number) => void;
+  saved: (id: number, setId?: number) => void;
 }) {
   const { t } = useTranslation("common");
   const [files, setFiles] = useState<File[]>([]);
@@ -60,6 +65,8 @@ function CaseForm({
   const [verifyFiles, setVerifyFiles] = useState(false);
   const [unused, setUnused] = useState<number[]>([]);
   const [purpose, setPurpose] = useState<"reproduce" | "protect">("reproduce");
+  const [group, setGroup] = useState<number | "new" | undefined>(initialSet);
+  const [groupName, setGroupName] = useState("");
   const [form] = Form.useForm<ToolRuleFields & {
     family: string;
     fileRules?: FileRule[];
@@ -93,6 +100,8 @@ function CaseForm({
         source_group: values.source_group?.trim() || undefined,
         agent_id: agent,
         version_no: version,
+        evaluation_set_id: typeof group === "number" ? group : undefined,
+        new_evaluation_set_name: group === "new" ? groupName.trim() : undefined,
         attachments,
         expected_skill_names: labelSkill ? expectedSkills : undefined,
         trace: draft && { turn_id: draft.turn_id, draft_digest: draft.draft_digest, purpose,
@@ -101,7 +110,7 @@ function CaseForm({
           ...(draft.preceding_turns ? { preceding_turns: draft.preceding_turns } : {}) },
       });
     },
-    onSuccess: (response) => saved(response.case_id),
+    onSuccess: (response) => saved(response.case_id, response.evaluation_set_id),
   });
   return (
     <Modal
@@ -110,8 +119,8 @@ function CaseForm({
       onCancel={close}
       onOk={() => mutation.mutate()}
       confirmLoading={mutation.isPending}
-      okButtonProps={{ disabled: !!draft && (!reviewed || draft.attachment_count == null ||
-        files.length + unused.length < draft.attachment_count || (draft.tool_count > 0 && !stateless && !verifyFiles)) }}
+      okButtonProps={{ disabled: (group === "new" && !groupName.trim()) || (!!draft && (!reviewed || draft.attachment_count == null ||
+        files.length + unused.length < draft.attachment_count || (draft.tool_count > 0 && !stateless && !verifyFiles))) }}
       okText={t("evolution.saveCase")}
       cancelText={t("common.cancel")}
     >
@@ -143,6 +152,16 @@ function CaseForm({
           {!!draft.tool_count && !verifyFiles && <p><Checkbox checked={stateless} onChange={e => setStateless(e.target.checked)}>
             {t("evolution.traceStateless")}</Checkbox></p>}
         </>}
+        <Form.Item label={t("evolution.sets.destination")}>
+          <Select<number | "new"> allowClear aria-label={t("evolution.sets.destination")}
+            placeholder={t("evolution.sets.destinationPlaceholder")} value={group} onChange={setGroup}
+            options={[...groups.map((item) => ({ value: item.evaluation_set_id, label: item.name })),
+              { value: "new", label: t("evolution.sets.create") }]} />
+        </Form.Item>
+        {group === "new" && <Form.Item label={t("evolution.sets.name")} required>
+          <Input aria-label={t("evolution.sets.name")} value={groupName} maxLength={100}
+            onChange={(event) => setGroupName(event.target.value)} />
+        </Form.Item>}
         {(["family", "query", "expected"] as const).map((field) => (
           <Form.Item
             key={field}
@@ -212,6 +231,7 @@ interface ComparisonFocus {
   suggestion?: number;
   candidate?: number;
   experiment?: number;
+  evaluationSet?: number;
 }
 
 const evolutionSteps = ["cases", "baseline", "generate", "compare", "release"] as const;
@@ -238,9 +258,12 @@ function Experiments({
 }) {
   const { t, i18n } = useTranslation("common");
   const { availableLlmModels } = useModelList();
+  const queryClient = useQueryClient();
   const [stage, setStage] = useState<EvolutionStep>();
   const [feedback, setFeedback] = useState<{ id: number; kind: "resource" | "script" }>();
   const [caseIds, setCases] = useState<number[]>([]);
+  const [evaluationSet, setEvaluationSet] = useState<number | undefined>(focus?.agent === agent ? focus.evaluationSet : undefined);
+  const [loadedSetCases, setLoadedSetCases] = useState<BusinessSetCase[]>([]);
   const [screen, setScreen] = useState(false);
   const [chosenMetric, setMetric] = useState<ScreeningCriteria["metric"]>("tasks_fixed");
   const [turnLimit, setTurnLimit] = useState<number | null>(1000);
@@ -273,6 +296,20 @@ function Experiments({
     queryKey: ["evolution", viewer, agent, version],
     queryFn: () => api.workspace(agent, version),
     retry: false,
+  });
+  const businessSets = useQuery({
+    queryKey: businessSetKeys.list(viewer, agent),
+    queryFn: () => api.businessSets(agent),
+  });
+  const loadBusinessSet = useMutation({
+    mutationFn: (setId: number) => api.selectBusinessSet(agent, version, setId),
+    onSuccess: (cases) => {
+      setLoadedSetCases(cases);
+      setCases(cases.map((item) => item.case_id));
+      setTargets([]);
+      setTargetCase(undefined);
+      void workspace.refetch();
+    },
   });
   const rules = useQuery({
     queryKey: ["evolution-evaluators", viewer],
@@ -364,7 +401,10 @@ function Experiments({
     retry: false,
     refetchInterval: query => query.state.data?.some(row => !row.summary) ? 10000 : false,
   });
-  const choices = workspace.data;
+  const choices = workspace.data && {
+    ...workspace.data,
+    cases: [...new Map([...workspace.data.cases, ...loadedSetCases].map((item) => [item.case_id, item])).values()],
+  };
   const candidates = choices?.candidates.filter(c => matchesDirection(direction, c.kind, c.optimization_methods)) ?? [];
   const history = choices?.experiments.filter(e => !e.candidate_type || step === "generate" ||
     (step === "baseline" ? e.candidate_type === "baseline" : e.candidate_type !== "baseline"))
@@ -411,6 +451,8 @@ function Experiments({
   };
   const error =
     workspace.error ||
+    businessSets.error ||
+    loadBusinessSet.error ||
     rules.error ||
     start.error ||
     report.error ||
@@ -451,6 +493,7 @@ function Experiments({
             />
           )}
           {step === "cases" && <>
+          <Link href={`?tab=sets&agent_id=${agent}`}>{t("evolution.sets.catalog")}</Link>
           <FixedRegressionCases agent={agent} version={version} workspace={choices} refresh={workspace.refetch}
             rubrics={publishedRules} models={modelOptions} suggestedEvaluator={evaluatorId} suggestedJudge={judge}
             onNewCase={() => setAdding(true)} />
@@ -513,6 +556,17 @@ function Experiments({
               options={eligible.map(e => ({ value: e.experiment_id, label: t("evolution.sourceExperiment", {
                 experiment: e.experiment_id, candidate: e.candidate_id, type: t(`evolution.kind.${e.candidate_type}`),
               }) }))} />}
+            {!!businessSets.data?.length && <>
+              <Select<number> allowClear aria-label={t("evolution.sets.select")}
+                placeholder={t("evolution.sets.select")} style={{ minWidth: 220 }}
+                disabled={loadBusinessSet.isPending} value={evaluationSet} onChange={setEvaluationSet}
+                options={businessSets.data.map((group) => ({ value: group.evaluation_set_id,
+                  label: `${group.name} (${group.case_count})`, disabled: !group.case_count }))} />
+              <Button disabled={!evaluationSet} loading={loadBusinessSet.isPending}
+                onClick={() => { if (evaluationSet) loadBusinessSet.mutate(evaluationSet); }}>
+                {t("evolution.sets.useCases")}
+              </Button>
+            </>}
             <Select
               mode="multiple"
               showSearch={{ optionFilterProp: "label" }}
@@ -614,7 +668,7 @@ function Experiments({
                   const c = choices.cases.find(task => task.case_id === id);
                   return c?.expected_skill_names == null;
                 })) ||
-                caseIds.length < (step === "compare" && suggestion ? 2 : 1) ||
+                loadBusinessSet.isPending || caseIds.length < (step === "compare" && suggestion ? 2 : 1) ||
                 (step === "compare" && !!suggestion && !caseIds.includes(targetCase ?? 0)) ||
                 !evaluatorId ||
                 (needsJudge && !judge)
@@ -917,12 +971,20 @@ function Experiments({
           agent={agent}
           version={version}
           direction={direction}
+          groups={businessSets.data ?? []}
+          initialSet={evaluationSet}
           skills={[...new Set([...(choices?.skills || []).map(s => s.name),
             ...(choices?.released_guides || []).map(s => s.name),
             ...(choices?.candidates || []).filter(c => c.kind === "skill_new").map(c => c.name)])].map(name => ({name}))}
           close={() => setAdding(false)}
-          saved={(id) => {
-            if (typeof adding === "number") {
+          saved={(id, setId) => {
+            if (setId) {
+              setEvaluationSet(setId);
+              void queryClient.invalidateQueries({ queryKey: businessSetKeys.list(viewer, agent) });
+              void queryClient.invalidateQueries({ queryKey: businessSetKeys.detail(viewer, agent, setId) });
+            }
+            void queryClient.invalidateQueries({ queryKey: businessSetKeys.choices(viewer, agent) });
+            if (typeof adding === "number" && !setId) {
               setCases([id]);
               advanceToBaseline();
             } else {
@@ -946,14 +1008,14 @@ function readFocus(focusParams?: FocusParams) {
     return raw && /^\d+$/.test(raw) && Number.isSafeInteger(id) && id > 0 ? id : undefined;
   };
   const focus = { agent: readId("agent_id"), version: readId("version_no"), suggestion: readId("suggestion_id"),
-    candidate: readId("candidate_id"), experiment: readId("experiment_id") };
+    candidate: readId("candidate_id"), experiment: readId("experiment_id"), evaluationSet: readId("set_id") };
   return { focus, feedback: readId("feedback_id") };
 }
 
 export function EvolutionWorkspace({ focusParams }: { focusParams?: FocusParams }) {
   const { focus, feedback } = readFocus(focusParams);
   const direction = focus.suggestion || focus.candidate ? "skill" : readEvolutionDirection(focusParams?.get("direction"));
-  return direction || focus.experiment || feedback
+  return direction || focus.experiment || focusParams?.get("open_cases") === "1" || feedback
     ? <EvolutionExperiments focusParams={focusParams} direction={direction} />
     : <EvolutionDirectionGuide scope={focus} />;
 }
@@ -964,7 +1026,7 @@ export default function EvolutionExperiments({ focusParams, direction }: { focus
   const viewer = JSON.stringify([user.tenantId, user.id]);
   const { focus, feedback } = readFocus(focusParams);
   return <>
-    <AgentPicker key={`${viewer}:${direction ?? ""}`} viewer={viewer} focus={focus} direction={direction} />
+    <AgentPicker key={`${viewer}:${direction ?? ""}:${focus.evaluationSet ?? ""}`} viewer={viewer} focus={focus} direction={direction} />
     {feedback && <ResourceHandoff key={`${viewer}:${feedback}`} id={feedback}
       script={focusParams?.get("feedback_kind") === "script"} />}
   </>;
@@ -1000,7 +1062,7 @@ function AgentPicker({ viewer, focus, direction }: { viewer: string; focus: Comp
   return (
     <Flex vertical gap={16}>
       {direction && <Flex vertical gap={6}>
-        <Link href={evolutionHref(undefined, { agent, version })} className="self-start text-primary hover:underline">
+        <Link href={evolutionHref(undefined, { agent, version, evaluationSet: agent === focus.agent ? focus.evaluationSet : undefined })} className="self-start text-primary hover:underline">
           {t("evolution.direction.back")}
         </Link>
         <Typography.Title level={4} className="!m-0">{t(`evolution.direction.${direction}`)}</Typography.Title>
