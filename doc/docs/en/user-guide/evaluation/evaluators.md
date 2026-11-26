@@ -6,6 +6,12 @@ An evaluator defines what to measure and how to score it. A task can select up t
 
 In **Agent Evaluation**, open the **Evaluators** tab and switch between **Built-in Evaluators** and **Custom Evaluators** using the sub-tabs. Built-in evaluators appear as cards showing the name, judgment type (LLM / Code), and published status:
 
+Example of the evaluator page:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/06-evaluator-list.png" style="width: 100%; height: auto;" alt="Built-in and custom evaluator list" />
+</div>
+
 | Evaluator | Type | Main purpose | Reference answer |
 |-----------|------|--------------|:----------------:|
 | Answer Accuracy | LLM | Compare key points with the reference answer | Yes |
@@ -27,6 +33,12 @@ No-set evaluation has no reference answers, so evaluators that require one canno
 ## Create a custom evaluator
 
 On the **Evaluators > Custom Evaluators** sub-tab, select **Create Evaluator** in the top-right corner. A drawer slides out with the **AI Generate** and **Evaluator Configuration** sections.
+
+Example of the custom evaluator creation UI:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/07-create-evaluator.png" style="width: 75%; height: auto;" alt="Custom evaluator creation UI" />
+</div>
 
 ### AI Generate
 

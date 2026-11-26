@@ -11,6 +11,18 @@ On the **Runs** tab, select **Create Evaluation** in the top-right corner. A dra
 | **Evaluation with a set** | Runs questions from an existing evaluation set; suitable for regression and release validation |
 | **Evaluation without a set** | Has AI generate test questions from the agent configuration before running the agent; suitable for quick exploration |
 
+Example of the create dialog with a test set:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/02-create-task-with-set.png" style="width: 75%; height: auto;" alt="Create dialog with a test set" />
+</div>
+
+Example of the create dialog without a test set. The system generates test questions from the agent configuration and runs the evaluation with the configured count:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/03-create-task-no-set.png" style="width: 75%; height: auto;" alt="Create dialog without a test set" />
+</div>
+
 ## Create the task
 
 1. In the left navigation, select **Agent Evaluation**, then open the **Runs** tab.

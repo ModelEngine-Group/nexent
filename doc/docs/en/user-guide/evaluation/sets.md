@@ -8,6 +8,12 @@ An evaluation set is a collection of test cases used to drive an evaluation. Eve
 2. Select **Upload**, and fill in the set name (up to 64 characters) and an optional description (up to 200 characters) in the drawer.
 3. Choose an `.xlsx` or `.xls` file in the drag-and-drop area and upload it (the file must contain "Question" and "Answer" columns). You can also select **Download Template** first and fill in the data with it.
 
+Example of the upload dialog:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/05-upload-set.png" style="width: 75%; height: auto;" alt="Upload evaluation set dialog" />
+</div>
+
 The following column names are supported. Chinese and English headers are accepted:
 
 | Field | Chinese header | Required | Description |
@@ -26,6 +32,12 @@ Leave session fields empty for single-turn cases. For multi-turn cases, keep tur
 3. Enter a scene description (required, up to 1,000 characters) and select a generation model.
 4. Add optional context as needed.
 5. Set the generation count (1–200, 10 by default) and select **Generate**.
+
+Example of the AI generation dialog:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/04-ai-generate-set.png" style="width: 75%; height: auto;" alt="AI generate evaluation set dialog" />
+</div>
 
 Optional context includes:
 

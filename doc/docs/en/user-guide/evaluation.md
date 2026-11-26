@@ -13,6 +13,10 @@ Use evaluation to:
 
 After signing in, select **Agent Evaluation** from the left navigation. You can also open an agent card on the **Agent Configuration** page and select **Evaluate** from its **More** menu. This entry is only available for agents with a published version, and the evaluation task list is filtered by that agent automatically.
 
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/evaluation/01-overview.png" style="width: 100%; height: auto;" alt="Agent Evaluation overview page" />
+</div>
+
 The page contains four tabs:
 
 | Tab | Purpose |

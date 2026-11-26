@@ -7,6 +7,12 @@ After an evaluation task completes, open its details to review aggregate metrics
 1. In **Agent Evaluation**, open the **Runs** tab.
 2. Select the details icon in the actions column of a task.
 
+Example of a completed task's detail page:
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/08-evaluation-detail.png" style="width: 100%; height: auto;" alt="Evaluation task detail page" />
+</div>
+
 Task details include:
 
 - **Header actions**: completed tasks provide **Annotation Labels**, **AI Analysis** (which becomes **Re-analyze** after a report is generated), and **Download Report**; failed tasks display the failure reason;
