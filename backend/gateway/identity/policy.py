@@ -9,7 +9,8 @@ _PUBLIC = {
     "GET": {"/user/service_health", "/user/oauth/config", "/user/oauth/providers",
             "/user/oauth/authorize", "/user/oauth/callback", "/user/oauth/pending",
             "/user/cas/config", "/user/cas/login", "/user/cas/callback", "/user/cas/renew",
-            "/user/cas/renew_callback", "/nb/v1/health", "/user/current_user_info"},
+            "/user/cas/renew_callback", "/nb/v1/health", "/nb/v1/file/fetch",
+            "/user/current_user_info"},
 }
 
 

@@ -53,6 +53,9 @@ case:
       and tampered delegation body.
     expected: MCP receives verified user context only for its tenant; invalid calls
       never reach its handler and context is restored.
+  - order: 5
+    action: Download an uploaded image without login through both presigned fetch aliases. Repeat with an expired storage URL and make a direct unsigned request to Management.
+    expected: Both Gateway aliases return the image with its content type and download filename. Storage denial returns the existing 502 response. Direct unsigned access returns 401 before storage.
   expected_results:
   - Authoritative account and API-key identities cross real HTTP network hops without
     cross-user contamination.
@@ -62,6 +65,7 @@ case:
     work, with no residual identity or managed work.
   - MCP uses Gateway authentication and retains tenant authorization; unsigned or
     body-tampered delegation is rejected.
+  - Anonymous Gateway requests carry a verified internal signature and only fetch the authorized object.
   forbidden_side_effects:
   - Rejected credentials must never reach Runtime, Northbound or MCP business handlers.
   - Fixture verification must not use production storage, model credentials or leave
@@ -121,3 +125,8 @@ case:
     forbidden_side_effects:
     - 1
     - 2
+  - id: AC-05
+    description: The exact presigned file proxy accepts anonymous Gateway requests while Management and storage enforce their own signatures.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]

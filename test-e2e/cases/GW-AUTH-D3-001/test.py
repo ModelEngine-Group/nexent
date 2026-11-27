@@ -287,3 +287,62 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     assert identity_context.get() is None
     assert context_checks and all(context_checks)
     assert reached == [("management", "u1"), ("management", "u2"), ("current-user", "su"), ("northbound", "u1"), ("voice", "u2")]
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("GW-AUTH-D3-001")
+@pytest.mark.asyncio
+async def test_anonymous_presigned_file_download(monkeypatch):
+    from fastapi import Request, Response
+
+    from management.api import northbound
+
+    secret = "local-gateway-file-fetch-fixture-secret"
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", secret)
+    monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+    management = create_app(enable_monitoring=False, gateway_identity_audience="management")
+    management.include_router(northbound.router)
+    storage = FastAPI()
+    received = []
+    accepted_query = b"X-Amz-Expires=300&X-Amz-Signature=fixture%2Fsignature"
+    expired_query = b"X-Amz-Expires=0&X-Amz-Signature=expired"
+    image = b"fixture image"
+
+    @storage.get("/objects/saved-image.png")
+    async def authorize_object(request: Request):
+        query = request.scope["query_string"]
+        received.append(query)
+        if query != accepted_query:
+            return Response(status_code=403)
+        return Response(image, media_type="image/png", headers={
+            "Content-Disposition": 'attachment; filename="saved-image.png"',
+        })
+
+    async def unexpected_identity_lookup(_payload):
+        pytest.fail("Presigned downloads should not look up external credentials")
+
+    with serve(storage) as storage_url, serve(management) as management_url:
+        monkeypatch.setattr(northbound, "MINIO_ENDPOINT", storage_url)
+        settings = GatewaySettings(jwt_secret=secret, jwt_issuer=environment.JWT_ISSUER, signing_secret=secret)
+        edge = create_gateway_app(
+            authentication=True, settings=settings, identity_lookup=unexpected_identity_lookup,
+            upstreams={"management": management_url, "runtime": management_url},
+        )
+        with serve(edge) as gateway_url:
+            object_url = storage_url + "/objects/saved-image.png?"
+            params = {"presigned_url": object_url + accepted_query.decode("ascii")}
+            async with httpx.AsyncClient(trust_env=False, timeout=5) as client:
+                for path in ("/nb/v1/file/fetch", "/api/nb/v1/file/fetch"):
+                    result = await client.get(gateway_url + path, params=params)
+                    assert result.status_code == 200
+                    assert result.content == image
+                    assert result.headers["content-type"] == "image/png"
+                    assert 'filename="saved-image.png"' in result.headers["content-disposition"]
+                    assert (await client.get(management_url + path, params=params)).status_code == 401
+                expired = await client.get(gateway_url + "/nb/v1/file/fetch", params={
+                    "presigned_url": object_url + expired_query.decode("ascii"),
+                })
+                assert expired.status_code == 502
+                assert "status: 403" in expired.json()["message"]
+                assert (await client.get(gateway_url + "/nb/v1/agents")).status_code == 401
+    assert received == [accepted_query, accepted_query, expired_query]
