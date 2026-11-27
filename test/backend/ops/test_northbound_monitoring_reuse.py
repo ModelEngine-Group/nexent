@@ -481,3 +481,142 @@ def test_nb_lane_rejects_a_session_kind_gateway_identity(nb_client, monkeypatch)
         assert response.status_code == 401
     finally:
         client.app.dependency_overrides.pop(ops_principal, None)
+
+
+# ---------------------------------------------------------------------------
+# Middleware and shared-layer defensive paths (codecov patch coverage).
+# ---------------------------------------------------------------------------
+
+def test_error_body_falls_back_to_a_phrase_for_unknown_status():
+    from backend.ops.api.northbound_envelope import _error_body
+
+    body = _error_body(None, 419, "req-1")
+    assert body == {"code": "HTTP_419", "message": "Request failed", "status": 419,
+                    "requestId": "req-1"}
+    phrase = _error_body({}, 503, "req-2")
+    assert phrase["message"] == "Service Unavailable"
+
+
+@pytest.mark.asyncio
+async def test_envelope_middleware_passes_non_json_and_undecodable_bodies_through():
+    from backend.ops.api.northbound_envelope import NorthboundEnvelopeMiddleware
+
+    async def drive(app, *, content_type, body):
+        sent = []
+        scope = {"type": "http", "path": "/nb/ops/v1/monitoring/models",
+                 "method": "GET", "headers": [], "query_string": b""}
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            sent.append(message)
+
+        await app(scope, receive, send)
+        return sent
+
+    async def text_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"text/plain")]})
+        await send({"type": "http.response.body", "body": b"plain-bytes"})
+
+    sent = await drive(NorthboundEnvelopeMiddleware(text_app), content_type=b"text/plain",
+                       body=b"plain-bytes")
+    assert sent[-1]["body"] == b"plain-bytes"  # passthrough, not enveloped
+
+    async def undecodable_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"application/json")]})
+        await send({"type": "http.response.body", "body": b"\xff\xfe not-json"})
+
+    sent = await drive(NorthboundEnvelopeMiddleware(undecodable_app),
+                       content_type=b"application/json", body=b"\xff\xfe not-json")
+    assert sent[-1]["body"] == b"\xff\xfe not-json"
+
+
+@pytest.mark.asyncio
+async def test_envelope_middleware_reassembles_chunked_bodies_and_forwards_other_messages():
+    from backend.ops.api.northbound_envelope import NorthboundEnvelopeMiddleware
+
+    sent = []
+    forwarded = []
+
+    async def chunked_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"application/json")]})
+        await send({"type": "http.response.body", "body": b'{"data"', "more_body": True})
+        await send({"type": "http.response.trailers", "headers": []})
+        await send({"type": "http.response.body", "body": b': 1}'})
+
+    async def send(message):
+        if message["type"] == "http.response.trailers":
+            forwarded.append(message)
+            return
+        sent.append(message)
+
+    scope = {"type": "http", "path": "/nb/ops/v1/monitoring/models",
+             "method": "GET", "headers": [], "query_string": b""}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    await NorthboundEnvelopeMiddleware(chunked_app)(scope, receive, send)
+    assert forwarded and forwarded[0]["type"] == "http.response.trailers"
+    body = json.loads(sent[-1]["body"])
+    assert body["data"] == {"data": 1} and body["message"] == "success" and body["requestId"]
+
+
+def test_audit_helpers_cover_the_fail_open_paths():
+    from backend.http.server import security_audit
+
+    assert security_audit._compact(None) == ""
+    entry = security_audit.format_audit_entry(
+        "evt", user_id="u", tenant_id="t", details={"unserializable": object()})
+    assert "unserializable" in entry
+    # A request whose attribute access raises takes the never-raises path.
+    class Broken:
+        @property
+        def headers(self):
+            raise RuntimeError("boom")
+
+    security_audit.record_security_event("evt", request=Broken(), user_id="u", tenant_id="t")
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_degrades_to_process_memory_without_the_redis_adapter(monkeypatch):
+    import sys as sys_module
+
+    from backend.http.server import northbound as shared
+
+    # A None entry makes the lazy import raise ImportError: the adapter is
+    # treated as unavailable and the in-process bucket keeps protecting.
+    monkeypatch.setitem(sys_module.modules, "infrastructure.redis.run_state", None)
+    await shared.check_and_consume_rate_limit("tenant-adapter-missing")
+    assert shared._RATE_STATE["tenant-adapter-missing"]
+
+
+def test_record_usage_skips_legacy_self_accounting_paths(monkeypatch):
+    from backend.http.server import northbound as shared
+
+    calls = []
+    monkeypatch.setattr(shared, "log_token_usage", lambda **kw: calls.append(kw))
+    principal = AuthenticatedIdentity(user_id="u", tenant_id="t", token_id=7,
+                                      kind=CredentialKind.API_KEY)
+    shared.record_api_key_usage(
+        principal, SimpleNamespace(url=SimpleNamespace(path="/nb/v1/chat/stop/abc"),
+                                   method="GET", headers={}, scope={}))
+    shared.record_api_key_usage(
+        principal, SimpleNamespace(url=SimpleNamespace(path="/nb/v1/conversations/1/title"),
+                                   method="PUT", headers={}, scope={}))
+    assert calls == []
+
+
+def test_token_usage_resolves_the_session_factory_lazily(monkeypatch):
+    """The registry stays client-free at import; the factory binds on first write."""
+    from infrastructure.rdb import token_usage
+
+    monkeypatch.setattr(token_usage, "get_db_session", None)
+    factory = token_usage._resolve_session_factory()
+    from infrastructure.rdb.client import get_db_session
+    assert factory is get_db_session
+    assert token_usage.get_db_session is get_db_session
