@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { DictationAdapter } from "@assistant-ui/react";
 
 import type { STTModelConfig } from "@/types/modelConfig";
@@ -6,6 +8,7 @@ import { conversationService } from "@/services/conversationService";
 export type DictationConfigProvider = () => STTModelConfig | undefined;
 
 const STOP_FLUSH_TIMEOUT_MS = 1500;
+const VOLC_STT_2_HOURLY_MODEL = "volc.seedasr.sauc.duration";
 
 const getTextFromResponse = (response: Record<string, unknown>): string => {
   if (typeof response.text === "string") return response.text;
@@ -49,6 +52,13 @@ export class ServerDictationAdapter implements DictationAdapter {
         if (stopped || cancelled) return;
         stopped = true;
         this.stopAudioCapture(stream, audioContext, processor);
+        if (
+          config?.modelFactory === "volcengine" &&
+          config.modelName === VOLC_STT_2_HOURLY_MODEL &&
+          socket?.readyState === WebSocket.OPEN
+        ) {
+          socket.send(new ArrayBuffer(0));
+        }
 
         await new Promise<void>((resolve) => {
           stopTimer = setTimeout(() => {
@@ -226,6 +236,7 @@ export class ServerDictationAdapter implements DictationAdapter {
     if (isVolcSTT) {
       return {
         language: "zh",
+        model: config?.modelName || "",
         model_factory: "volcengine",
         model_appid: config?.modelAppid || "",
         access_token: config?.accessToken || "",

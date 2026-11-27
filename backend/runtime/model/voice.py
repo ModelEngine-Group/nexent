@@ -5,7 +5,13 @@ from typing import Any, Dict, Optional
 
 from nexent.core.models.stt_model import BaseSTTModel
 from nexent.core.models.tts_model import BaseTTSModel
-from nexent.core.models.volc_stt_model import VolcSTTConfig, VolcSTTModel
+from nexent.core.models.volc_stt_model import (
+    VOLC_STT_2_HOURLY_RESOURCE_ID,
+    VOLC_STT_LEGACY_RESOURCE_ID,
+    VOLC_STT_LEGACY_WS_URL,
+    VolcSTTConfig,
+    VolcSTTModel,
+)
 from nexent.core.models.ali_stt_model import AliSTTConfig, AliSTTModel
 from nexent.core.models.volc_tts_model import VolcTTSConfig, VolcTTSModel
 from nexent.core.models.ali_tts_model import AliTTSConfig, AliTTSModel
@@ -51,12 +57,18 @@ class VoiceService:
 
         if use_volc:
             # Use Volcano Engine STT
+            resource_id = (
+                VOLC_STT_2_HOURLY_RESOURCE_ID
+                if model_name == VOLC_STT_2_HOURLY_RESOURCE_ID
+                else VOLC_STT_LEGACY_RESOURCE_ID
+            )
             volc_config = VolcSTTConfig(
                 appid=model_appid or "",
                 access_token=access_token or "",
-                ws_url=base_url if base_url else "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+                ws_url=base_url or VOLC_STT_LEGACY_WS_URL,
                 format="pcm",
-                rate=16000
+                rate=16000,
+                resourceid=resource_id,
             )
             return VolcSTTModel(volc_config, TEST_PCM_PATH)
         else:

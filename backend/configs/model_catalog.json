@@ -507,6 +507,14 @@
           "requires_appid": true,
           "requires_access_token": true
         },
+        "volc.seedasr.sauc.duration": {
+          "model_type": "stt",
+          "display_name": "豆包流式语音识别 2.0（小时版）",
+          "base_url_override": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async",
+          "model_factory_override": "volcengine",
+          "requires_appid": true,
+          "requires_access_token": true
+        },
         "speech_tts": {
           "model_type": "tts",
           "display_name": "火山语音合成",

@@ -265,7 +265,7 @@ async def _perform_connectivity_check(
 
         # Determine STT provider based on model_factory
         use_volc = model_factory and model_factory.lower() in [
-            "volcengine",
+            "volc",
             "volcano",
             "volcengine",
             "火山引擎",
@@ -277,6 +277,7 @@ async def _perform_connectivity_check(
                 model_type="stt",
                 stt_config={
                     "model_factory": model_factory,
+                    "model": model_name,
                     "model_appid": model_appid,
                     "access_token": access_token,
                     "base_url": model_base_url,

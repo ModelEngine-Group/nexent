@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for Volcano STT model.
 
@@ -448,6 +449,23 @@ class TestVolcSTTModelAuthHeaders:
         headers = model.get_auth_headers()
         assert "X-Api-Access-Key" not in headers
 
+    def test_seed_hourly_resource_uses_legacy_credentials_and_request_id(self):
+        config = VolcSTTConfig(
+            appid="test_appid", access_token="test_token", resourceid="volc.seedasr.sauc.duration"
+        )
+        model = VolcSTTModel(config)
+        headers = model.get_auth_headers("request-id")
+        assert headers == {
+            "X-Api-Resource-Id": "volc.seedasr.sauc.duration",
+            "X-Api-Request-Id": "request-id",
+            "X-Api-Connect-Id": "request-id",
+            "X-Api-App-Key": "test_appid",
+            "X-Api-Access-Key": "test_token",
+        }
+        audio = model.construct_request("request-id")["audio"]
+        assert audio["rate"] == 16000
+        assert "sample_rate" not in audio
+
     def test_get_auth_headers_without_appid(self):
         """Test getting auth headers without appid."""
         config = VolcSTTConfig(appid="", access_token="test_token")
@@ -472,6 +490,54 @@ class TestVolcSTTModelAuthHeaders:
 
 class TestVolcSTTModelIntegration:
     """Integration tests for VolcSTTModel async methods."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("live", [False, True])
+    async def test_seed_hourly_stream_does_not_require_per_chunk_replies(self, live):
+        config = VolcSTTConfig(
+            appid="test-app", access_token="test-token",
+            resourceid="volc.seedasr.sauc.duration", streaming=False,
+        )
+        model = VolcSTTModel(config)
+        final_sent = asyncio.Event()
+
+        async def send(frame):
+            if frame[1] & 0x0F == NEG_WITH_SEQUENCE:
+                final_sent.set()
+
+        def response(payload, last=False):
+            data = json.dumps(payload).encode()
+            return bytes([0x11, 0x92 if last else 0x90, 0x10, 0]) + len(data).to_bytes(4, "big") + data
+
+        payload = {"result": {"text": "recognized"}}
+
+        async def responses():
+            yield response({})
+            await final_sent.wait()
+            yield response(payload, last=True)
+
+        frames = responses()
+
+        async def receive():
+            return await anext(frames)
+
+        server = AsyncMock()
+        server.send.side_effect = send
+        server.recv.side_effect = receive
+        connection = _MockAsyncContextManager(server)
+        with patch.object(_mock_websockets, "connect", return_value=connection) as connect:
+            if live:
+                client = AsyncMock()
+                client.receive_bytes.side_effect = [b"one", b"two", b""]
+                await asyncio.wait_for(model.start_streaming_session(client), timeout=2)
+                client.send_json.assert_any_await({**payload, "is_final": True})
+            else:
+                final = await asyncio.wait_for(model.process_audio_data(b"onetwo", 3), timeout=2)
+                assert final["payload_msg"] == payload
+        assert final_sent.is_set()
+        assert server.send.await_count == 3
+        assert connect.call_args.args[0].endswith("/bigmodel_async")
+        assert connect.call_args.kwargs["additional_headers"]["X-Api-Resource-Id"] == config.resourceid
 
     @pytest.mark.asyncio
     async def test_process_audio_data_connection_error(self):

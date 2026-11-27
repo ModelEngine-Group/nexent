@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import base64
 import datetime
@@ -8,7 +9,7 @@ import time
 import uuid
 import wave
 from io import BytesIO
-from typing import Any, Dict, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Optional
 
 import aiofiles
 import websockets
@@ -16,6 +17,11 @@ import websockets
 from .stt_model import BaseSTTModel
 
 logger = logging.getLogger("volc_stt_model")
+
+VOLC_STT_LEGACY_RESOURCE_ID = "volc.bigasr.sauc.duration"
+VOLC_STT_2_HOURLY_RESOURCE_ID = "volc.seedasr.sauc.duration"
+VOLC_STT_LEGACY_WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+VOLC_STT_REALTIME_WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
 
 # Protocol constants
 PROTOCOL_VERSION = 0b0001
@@ -54,7 +60,7 @@ class VolcSTTConfig:
         self,
         appid: str,
         access_token: str,
-        ws_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+        ws_url: str = VOLC_STT_LEGACY_WS_URL,
         uid: str = "streaming_asr_demo",
         format: str = "pcm",
         rate: int = 16000,
@@ -63,13 +69,17 @@ class VolcSTTConfig:
         codec: str = "raw",
         seg_duration: int = 10,
         mp3_seg_size: int = 1000,
-        resourceid: str = "volc.bigasr.sauc.duration",
+        resourceid: str = VOLC_STT_LEGACY_RESOURCE_ID,
         streaming: bool = True,
         compression: bool = True
     ):
         self.appid = appid
         self.access_token = access_token
-        self.ws_url = ws_url
+        self.ws_url = (
+            VOLC_STT_REALTIME_WS_URL
+            if resourceid == VOLC_STT_2_HOURLY_RESOURCE_ID and ws_url.rstrip("/") == VOLC_STT_LEGACY_WS_URL
+            else ws_url
+        )
         self.uid = uid
         self.format = format
         self.rate = rate
@@ -112,17 +122,20 @@ class VolcSTTModel(BaseSTTModel):
         """
         return self.config.ws_url
 
-    def get_auth_headers(self) -> Dict[str, str]:
+    def get_auth_headers(self, request_id: Optional[str] = None) -> Dict[str, str]:
         """
         Get authentication headers for the WebSocket connection.
 
         Returns:
             Headers dict with X-Api-Access-Key and X-Api-App-Key
         """
+        request_id = request_id or str(uuid.uuid4())
         headers = {
             "X-Api-Resource-Id": self.config.resourceid,
-            "X-Api-Connect-Id": str(uuid.uuid4())
+            "X-Api-Connect-Id": request_id,
         }
+        if self.config.resourceid == VOLC_STT_2_HOURLY_RESOURCE_ID:
+            headers["X-Api-Request-Id"] = request_id
 
         if self.config.access_token:
             headers["X-Api-Access-Key"] = self.config.access_token
@@ -278,11 +291,12 @@ class VolcSTTModel(BaseSTTModel):
         Returns:
             Request parameters dict
         """
+        rate_key = "rate" if self.config.resourceid == VOLC_STT_2_HOURLY_RESOURCE_ID else "sample_rate"
         req = {
             "user": {"uid": self.config.uid},
             "audio": {
                 'format': self.config.format,
-                "sample_rate": self.config.rate,
+                rate_key: self.config.rate,
                 "bits": self.config.bits,
                 "channel": self.config.channel,
                 "codec": self.config.codec
@@ -294,6 +308,64 @@ class VolcSTTModel(BaseSTTModel):
         }
         logger.info(f"req: {req}")
         return req
+
+    async def _exchange_realtime_audio(
+        self,
+        websocket,
+        chunks: AsyncIterator[tuple[bytes, bool]],
+        on_result: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> Dict[str, Any]:
+        """Handle optimized streaming, where audio frames may not receive individual replies."""
+        async def send_audio() -> None:
+            sequence = 1
+            async for chunk, last in chunks:
+                sequence += 1
+                payload = gzip.compress(chunk) if self.config.compression else chunk
+                header = self.generate_header(
+                    message_type=CLIENT_AUDIO_ONLY_REQUEST,
+                    message_type_specific_flags=NEG_WITH_SEQUENCE if last else POS_SEQUENCE,
+                )
+                await websocket.send(
+                    bytes(header) + self.generate_before_payload(sequence=-sequence if last else sequence)
+                    + len(payload).to_bytes(4, "big") + payload
+                )
+
+        async def receive_results() -> Dict[str, Any]:
+            while True:
+                result = self.parse_response(await websocket.recv())
+                if result.get("code"):
+                    return {"error": f"Volcano STT error {result['code']}"}
+                if on_result is not None:
+                    await on_result(result)
+                if result.get("is_last_package"):
+                    return result
+
+        sender = asyncio.create_task(send_audio())
+        receiver = asyncio.create_task(receive_results())
+        try:
+            done, _ = await asyncio.wait({sender, receiver}, return_when=asyncio.FIRST_COMPLETED)
+            if sender in done:
+                await sender
+                return await asyncio.wait_for(receiver, timeout=10)
+            return await receiver
+        finally:
+            sender.cancel()
+            receiver.cancel()
+            await asyncio.gather(sender, receiver, return_exceptions=True)
+
+    async def _file_chunks(self, audio_data: bytes, segment_size: int) -> AsyncIterator[tuple[bytes, bool]]:
+        for chunk, last in self.slice_data(audio_data, segment_size):
+            yield chunk, last
+            if self.config.streaming and not last:
+                await asyncio.sleep(self.config.seg_duration / 1000)
+
+    @staticmethod
+    async def _client_chunks(websocket) -> AsyncIterator[tuple[bytes, bool]]:
+        pending = await websocket.receive_bytes()
+        while pending:
+            chunk = await websocket.receive_bytes()
+            yield pending, not chunk
+            pending = chunk
 
     async def process_audio_data(self, audio_data: bytes, segment_size: int) -> Dict[str, Any]:
         """
@@ -320,9 +392,8 @@ class VolcSTTModel(BaseSTTModel):
         full_client_request.extend((len(payload_bytes)).to_bytes(4, 'big'))
         full_client_request.extend(payload_bytes)
 
-        headers = self.get_auth_headers()
-        headers["X-Api-Connect-Id"] = reqid
-        logger.info(f"Connecting to {self.config.ws_url} with headers: {headers}")
+        headers = self.get_auth_headers(reqid)
+        logger.info("Connecting to Volcano STT resource %s, request %s", self.config.resourceid, reqid)
 
         try:
             async with websockets.connect(self.config.ws_url, additional_headers=headers,
@@ -333,6 +404,11 @@ class VolcSTTModel(BaseSTTModel):
                     logger.info(f"Response headers: {ws.response_headers}")
                 result = self.parse_response(res)
                 logger.info(f"Initial response: {result}")
+
+                if self.config.resourceid == VOLC_STT_2_HOURLY_RESOURCE_ID:
+                    if result.get("code"):
+                        return {"error": f"Volcano STT error {result['code']}"}
+                    return await self._exchange_realtime_audio(ws, self._file_chunks(audio_data, segment_size))
 
                 for _, (chunk, last) in enumerate(self.slice_data(audio_data, segment_size), 1):
                     seq += 1
@@ -445,9 +521,8 @@ class VolcSTTModel(BaseSTTModel):
         full_client_request.extend((len(payload_bytes)).to_bytes(4, 'big'))
         full_client_request.extend(payload_bytes)
 
-        headers = self.get_auth_headers()
-        headers["X-Api-Connect-Id"] = reqid
-        logger.info(f"Request headers: {headers}")
+        headers = self.get_auth_headers(reqid)
+        logger.info("Starting Volcano STT stream for resource %s, request %s", self.config.resourceid, reqid)
 
         try:
             async with websockets.connect(self.config.ws_url, additional_headers=headers,
@@ -458,12 +533,28 @@ class VolcSTTModel(BaseSTTModel):
                 response = await ws_server.recv()
                 result = self.parse_response(response)
                 logger.info("Initial response received")
+                if self.config.resourceid == VOLC_STT_2_HOURLY_RESOURCE_ID and result.get("code"):
+                    await ws_client.send_json({"error": f"Volcano STT error {result['code']}"})
+                    return
 
                 try:
                     await ws_client.send_json({"status": "ready"})
                 except Exception as e:
                     logger.error(f"Client disconnected: {e}")
                     client_connected = False
+                    return
+
+                if self.config.resourceid == VOLC_STT_2_HOURLY_RESOURCE_ID:
+                    async def forward_result(result: Dict[str, Any]) -> None:
+                        payload = result.get("payload_msg")
+                        if isinstance(payload, dict):
+                            await ws_client.send_json({**payload, "is_final": bool(result.get("is_last_package"))})
+
+                    final = await self._exchange_realtime_audio(
+                        ws_server, self._client_chunks(ws_client), forward_result
+                    )
+                    if "error" in final:
+                        await ws_client.send_json(final)
                     return
 
                 last_chunk_received = False
