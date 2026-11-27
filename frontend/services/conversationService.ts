@@ -1459,15 +1459,6 @@ export const conversationService = {
           } else if (typeof payload?.current_version === "number") {
             details = { current_version: payload.current_version };
           }
-          if (
-            code === "model_not_available" &&
-            typeof details?.agent_name === "string" &&
-            details.agent_name.trim()
-          ) {
-            errorMessage = translate("agent.error.noAvailableModel", {
-              agentName: details.agent_name,
-            });
-          }
         } catch {
           // Preserve the HTTP status when the error response is not JSON.
         }
@@ -1488,6 +1479,17 @@ export const conversationService = {
 
       return response.body.getReader();
     } catch (error: any) {
+      if (error instanceof ApiError && error.code === "model_not_available") {
+        // The shared request interceptor rejects HTTP errors before response parsing.
+        const agentName = error.details?.agent_name;
+        throw new ApiError(
+          error.code,
+          typeof agentName === "string" && agentName.trim()
+            ? translate("agent.error.noAvailableModel", { agentName })
+            : translate("agent.error.modelUnavailable"),
+          error.details
+        );
+      }
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
       if (error instanceof Error && error.name === "AbortError") {
         log.log("Agent请求已被取消");

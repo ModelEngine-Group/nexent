@@ -28,6 +28,7 @@ change:
       - Preserve failing root or pinned child identity and safe display-name fallback.
       - Preserve public status/code and legacy generic error shape.
       - Parse both error envelopes and localize named errors without rejecting a healthy root selection.
+      - Exercise real fetchWithAuth and fetchWithErrorHandling so an intercepted 404 reaches the composer as a localized model error; retain unrelated errors and successful streams.
     test_selectors:
       - test/backend/agents/test_agent_outlet_run_snapshot.py
       - test/backend/app/test_agentos_raw_handoff.py
@@ -41,3 +42,6 @@ change:
     D2 responsibility inherits model. Self-contained in-process HTTP/compiler fixtures use no
     shared asset families, persistent writes or provider calls; close TestClient and restore patches.
     D3/D5 contracts are unchanged; frontend parser/rejection checks cover presentation logic separately.
+    Follow-up reproduction found the shared interceptor throws before runAgent response parsing.
+    Strengthen the frontend UT through the real interceptor and composer error formatter; retain
+    the existing D2 API contract unchanged because backend payloads do not change in this follow-up.
