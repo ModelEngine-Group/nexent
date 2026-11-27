@@ -28,9 +28,15 @@ def export_scoped_shared_aidp(
             row = read_workbench_scoped_aidp_tool(catalog_id, agent_id, version_no)
     if row is None:
         raise ValueError("Scoped shared AIDP requires an available tenant catalog tool")
-    options = ScopedSharedAidpOptions.model_validate(tool.params)
+    params = dict(tool.params)
+    # Some catalogs record the variadic constructor argument as an empty default.
+    if params.get("kwargs") is None:
+        params.pop("kwargs", None)
+    options = ScopedSharedAidpOptions.model_validate(params)
     base = build_local_tool(row, language, None, row["inputs"])
-    if base.model_copy(update={"params": options.model_dump(), "metadata": tool.metadata}) != tool:
+    if base.model_copy(update={"params": options.model_dump(), "metadata": tool.metadata}) != tool.model_copy(
+        update={"params": params},
+    ):
         raise ValueError("Scoped shared AIDP differs from its catalog tool")
     binding = ScopedSharedAidpBinding(
         catalog_tool_id=catalog_id, revision=scoped_shared_aidp_revision(tenant_id, agent_id, version_no, row),

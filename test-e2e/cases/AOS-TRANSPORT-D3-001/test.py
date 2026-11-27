@@ -302,7 +302,7 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
 
     provider = FastAPI()
     searches = []
-    retrieval_options = []
+    retrieval_payloads = []
     catalog_calls = []
     groups = [17]
     acl = [
@@ -325,7 +325,7 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     async def retrieve(request: Request):
         payload = await request.json()
         searches.append((request.headers.get("authorization"), payload["kds_list"]))
-        retrieval_options.append((payload["search_method"], payload["topk"]))
+        retrieval_payloads.append(payload)
         return {"result": []}
 
     observed_whitelists = []
@@ -436,12 +436,23 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
         groups.clear()
         assert await client.start_prepared_run(scoped, "user-a", "tenant-a") == reference
 
-        platform_row = {**row, "tool_id": 110}
+        migrated = {
+            "search_method": "vector_search|full_text_search|graph_search",
+            "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 0, "graph_top_k": 0,
+            "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0, "graph_score_threshold": 0.0,
+            "graph_reranking_enable": True, "query_expansion_enable": False, "kwargs": None,
+        }
+        platform_row = {
+            **row, "tool_id": 110,
+            "params": [param for param in row["params"] if param["name"] not in migrated]
+            + [{"name": name, "default": value} for name, value in migrated.items()],
+        }
         with _published_workbench_aidp_catalog(platform_row) as session_factory:
             with monkeypatch.context() as catalog_patches:
                 catalog_patches.setattr(rdb_client, "get_db_session", session_factory)
                 default_agent = agent.model_copy(update={
                     "agent_id": 81, "version_no": 3, "name": "workbench_main", "origin": "SYSTEM",
+                    "tools": [build_local_tool(platform_row, "en", None, None)],
                 })
                 default_ref = AgentRunReference(conversation_id=62, run_id="d" * 32)
                 default = evaluation_snapshot.compile_snapshot(
@@ -457,9 +468,9 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
                 groups.clear()
                 assert await client.start_prepared_run(default, "user-a", "tenant-a") == default_ref
 
-                scoped_platform_tool = scoped_tool.model_copy(update={
-                    "metadata": {SCOPED_SHARED_AIDP_CATALOG_ID: platform_row["tool_id"]},
-                })
+                scoped_platform_tool = build_local_tool(platform_row, "en", None, None)
+                scoped_platform_tool.params["kds_list"] = ["group-kb"]
+                scoped_platform_tool.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: platform_row["tool_id"]}
                 scoped_platform_agent = default_agent.model_copy(update={"tools": [scoped_platform_tool]})
                 scoped_platform_ref = AgentRunReference(conversation_id=63, run_id="f" * 32)
                 scoped_platform = evaluation_snapshot.compile_snapshot(
@@ -470,17 +481,28 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
                     ),
                 )
                 assert scoped_platform.resource.tools[0].parameters["catalog_tool_id"] == platform_row["tool_id"]
-                assert scoped_platform.resource.tools[0].parameters["options"] == scoped.resource.tools[0].parameters["options"]
+                assert scoped_platform.resource.tools[0].parameters["options"] == {
+                    **{name: value for name, value in migrated.items() if name != "kwargs"},
+                    "kds_list": ["group-kb"], "top_k": 10,
+                }
                 groups.append(17)
                 assert await client.start_prepared_run(scoped_platform, "user-a", "tenant-a") == scoped_platform_ref
 
     assert observed_whitelists == [["group-kb"], []] * 3 + [["group-kb"]]
     assert catalog_calls == ["Bearer synthetic-shared-aidp-key"]
     assert searches == [("Bearer synthetic-shared-aidp-key", ["group-kb"])] * 4
-    assert retrieval_options == [
+    assert [(item["search_method"], item["topk"]) for item in retrieval_payloads] == [
         ("vector_search|full_text_search|graph_search", 10), ("full_text_search", 7),
-        ("vector_search|full_text_search|graph_search", 10), ("full_text_search", 7),
+        ("vector_search|full_text_search|graph_search", 10), ("vector_search|full_text_search|graph_search", 10),
     ]
+    assert retrieval_payloads[-1]["hybrid_search_config"] == {
+        "vector_candidates": 10, "full_text_candidates": 10,
+        "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0,
+    }
+    assert retrieval_payloads[-1]["graph_search_config"] == {
+        "graph_score_threshold": 0.0, "graph_reranking_enable": True,
+    }
+    assert retrieval_payloads[-1]["query_expansion_enable"] is False
     assert len(scoped_runs) == 5 and all(events[-1]["content"] == "done" for events in scoped_runs)
 
 

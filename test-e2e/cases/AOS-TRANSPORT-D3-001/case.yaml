@@ -99,7 +99,7 @@ case:
     expected: Signed execution receives the metadata and both revisions. The public response exposes both versions and one projected turn.
   - order: 24
     action: Send Workbench turns using the published default without mounts, an explicitly scoped platform binding and a tenant catalog mount. Revoke the actor group before repeating the unscoped and tenant-mounted turns.
-    expected: The unscoped turn reuses the exact enabled platform instance. Scoped turns preserve typed retrieval options. Runtime permits only the KDS still authorized for the signed actor.
+    expected: The unscoped turn reuses the exact enabled platform instance. Scoped turns preserve typed retrieval options, including migrated combined channels and tuning fields with zero-cap defaults. Runtime permits only the KDS still authorized for the signed actor.
   - order: 25
     action: Submit a clarification response for an owned conversation and retry with the same key.
     expected: Management stages the structured response locally and sends only the prepared execution input to Runtime. The retry keeps the original run ID and another tenant receives 404.
@@ -457,7 +457,7 @@ case:
     expected_results: [23]
     forbidden_side_effects: [1, 2]
   - id: AC-32
-    description: Signed Workbench turns support the published AIDP default and scoped catalog bindings with Runtime ACL rechecks.
+    description: Signed Workbench turns support the published AIDP default and scoped catalog bindings with Runtime ACL rechecks, including the migrated channel and tuning parameters.
     steps: [24]
     expected_results: [24]
     forbidden_side_effects: [1, 2]

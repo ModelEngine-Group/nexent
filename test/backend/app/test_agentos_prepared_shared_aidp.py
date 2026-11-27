@@ -316,3 +316,61 @@ def test_stored_platform_aidp_requires_workbench_run(mocker, platform_allowed, o
         assert error.value.status_code == 404
         platform.assert_not_called()
         bind_access.assert_not_called()
+
+
+@pytest.mark.parametrize("method", [
+    "vector_search|full_text_search|graph_search", "graph_search|vector_search",
+])
+def test_scoped_shared_aidp_exports_migrated_parameters(mocker, method):
+    from infrastructure.local_tool_execution import build_local_tool
+    from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
+    from management.services.agent.preparation import local_tool
+    from runtime.agentos import prepared_local_tool
+
+    mocker.patch.object(environment, "JWT_SECRET", "fixture-signing-key")
+    migrated = {
+        "search_method": method,
+        "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 0, "graph_top_k": 0,
+        "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0, "graph_score_threshold": 0.0,
+        "graph_reranking_enable": True, "query_expansion_enable": False, "kwargs": None,
+    }
+    row = {
+        "tool_id": 7, "name": "aidp_search", "class_name": "AidpSearchTool", "source": "local",
+        "description": "AIDP search", "inputs": None, "usage": None, "output_type": "string",
+        "params": [{"name": key, "default": value} for key, value in migrated.items()],
+        "instance_params": {},
+    }
+    tool = build_local_tool(row, "en", None, None)
+    tool.params["kds_list"] = ["authorized"]
+    tool.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: row["tool_id"]}
+    mocker.patch.object(local_tool, "read_shared_aidp_catalog_tool", return_value=row)
+    mocker.patch.object(prepared_local_tool, "read_shared_aidp_catalog_tool", return_value=row)
+    binding = local_tool.export_scoped_shared_aidp(tool, 8, 3, "tenant-a", "en")
+    expected = {key: value for key, value in migrated.items() if key != "kwargs"}
+    assert binding.parameters["options"] == {**expected, "kds_list": ["authorized"]}
+    resource = SimpleNamespace(agent_id=8, version_no=3, tools=[binding])
+    actor = ServicePrincipal("user-a", "tenant-a")
+    bind_access = mocker.patch.object(prepared_local_tool, "_bind_shared_aidp_access")
+    rebound = prepared_local_tool.materialize_local_tools(resource, actor, "en", allow_scoped_aidp=True)
+    assert rebound["aidp_search"].params == binding.parameters["options"]
+    bind_access.assert_called_once_with(rebound["aidp_search"], actor)
+
+
+@pytest.mark.parametrize("invalid", [
+    {"search_method": "vector_search|unknown"},
+    {"vector_candidates": 0},
+    {"full_text_candidates": 501},
+    {"hybrid_top_k": 101},
+    {"graph_top_k": -1},
+    {"vector_score_threshold": 1.1},
+    {"graph_reranking_enable": 1},
+    {"kwargs": {"server_url": "unexpected"}},
+    {"api_key": "unexpected"},
+])
+def test_scoped_shared_aidp_rejects_invalid_retrieval_options(invalid):
+    from pydantic import ValidationError
+
+    from contracts.agentos import ScopedSharedAidpOptions
+
+    with pytest.raises(ValidationError):
+        ScopedSharedAidpOptions.model_validate({"kds_list": [], **invalid})
