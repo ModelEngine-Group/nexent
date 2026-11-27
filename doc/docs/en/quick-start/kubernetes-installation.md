@@ -7,8 +7,8 @@
 | **CPU**  | 4 cores | 8 cores |
 | **RAM**  | 16 GiB | 64 GiB |
 | **Disk** | 100 GiB | 200 GiB |
-| **Architecture** | x86_64 / ARM64 | x86_64 |
-| **Software** | Kubernetes 1.24+, Helm 3+, kubectl configured | Kubernetes 1.28+ |
+| **Architecture** | x86_64 / ARM64 | Images matching the node architecture |
+| **Software** | Kubernetes 1.24+, Helm 3+, Bash 4+, and kubectl configured for cluster access | Kubernetes 1.28+ |
 
 > **💡 Note**: The recommended configuration is suitable for a complete deployment. Actual resource requirements also depend on the replica count, knowledge-base size, and number of concurrent agents. Set requests and limits in production according to load-test results.
 
@@ -21,11 +21,12 @@
 
 #### 1. Prepare Kubernetes Cluster
 
-Ensure your Kubernetes cluster is running and kubectl is configured with cluster access:
+On the deployment host, check the cluster, nodes, and storage classes. For a fresh installation, Kubernetes dynamically provisions persistent volumes through the cluster's default StorageClass. Shared storage needs `ReadWriteMany` (RWX) access. If there is no suitable default, pass `--storage-class <storage-class-name>` to the deployment command. For single-node testing or pre-created persistent volume claims (PVCs), see [Data Persistence](#data-persistence).
 
 ```bash
 kubectl cluster-info
 kubectl get nodes
+kubectl get storageclass
 ```
 
 #### 2. Clone and Navigate
@@ -35,6 +36,8 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
+For a new multi-node cluster, choose storage that supports reads and writes from different nodes. Local trace capture is enabled by default. To use it across nodes, copy `deploy/env/.env.example` to a new `deploy/env/.env` and set `TRAJECTORY_STORAGE_MODE=shared_directory` before the first startup. For storage requirements and a three-replica installation, see [Deploy Multiple Runtime Replicas](#deploy-multiple-runtime-replicas).
+
 #### 3. Deployment
 
 Run the deployment script:
@@ -43,7 +46,7 @@ Run the deployment script:
 bash deploy.sh k8s
 ```
 
-The default flow uses two independent Helm releases. It installs `nexent-infrastructure` (Elasticsearch, PostgreSQL, Redis, and MinIO), waits for all four services, initializes the Elasticsearch API key, and only then installs the application-side `nexent` release for the first time. Application Pods therefore do not roll a second time to receive the key. Use `--release-scope all|infrastructure|nexent` for the complete flow or either release independently:
+The script installs two Helm releases in the `nexent` namespace. It installs `nexent-infrastructure` first, waits for Elasticsearch, PostgreSQL, Redis, and MinIO to become ready, and initializes the Elasticsearch API key. It then deploys the `nexent` application release. On first installation, a bootstrap Job runs database migrations and initializes system agents before the application services start. The deployment account needs permission to manage workloads and Jobs in the namespace and run `kubectl exec` in the PostgreSQL and Elasticsearch Pods. Choose the release scope for your deployment.
 
 ```bash
 bash deploy.sh k8s --release-scope all
@@ -51,33 +54,33 @@ bash deploy.sh k8s --release-scope infrastructure
 bash deploy.sh k8s --release-scope nexent
 ```
 
-The `nexent` scope requires an existing, healthy infrastructure release. Infrastructure-only uninstall is rejected while the Nexent release exists. If a legacy single `nexent` release still owns infrastructure resources, deployment stops because automatic migration is not supported; this version supports fresh dual-release installations only.
+Deploying only `nexent` requires the infrastructure release and all four of its services to be ready. Before uninstalling infrastructure on its own, uninstall the `nexent` application release. If a legacy single `nexent` release still owns infrastructure resources, the script stops. The two-release layout requires a fresh installation.
 
-After running the command, the script opens Bash TUI menus for configuration. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
+The script opens an interactive Bash menu. Use the arrow keys or `j/k` to move, Space to toggle items, Enter to confirm, `b` or Backspace to return to the previous step, and `q` to quit.
 
-**Deployment Components:**
-- **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
-- **application (selected by default, optional)**: config, runtime, mcp, northbound, web
-- **data-process (selected by default, optional)**: data processing service
-- **terminal (optional)**: enables the OpenSSH terminal tool
-- **monitoring (optional)**: enables observability components and then prompts for a provider
+**Deployment components**
 
-The `application` component also prepares the agent sandbox image configuration. The Runtime service uses a shared workspace to process uploaded and generated files, and synchronizes artifacts that must be retained to MinIO.
+| Option | Default | What it deploys |
+| --- | --- | --- |
+| `infrastructure` | Required | Elasticsearch, PostgreSQL, Redis, and MinIO |
+| `application` | Selected | Gateway, Management, Runtime, MCP, Web, and Ops |
+| `data-process` | Selected | Data processing service |
+| `terminal` | Optional | OpenSSH terminal |
+| `monitoring` | Optional | Exports telemetry to the selected provider |
 
-**Port Policy:**
-- **development (default)**: uses NodePort for Web and selected debug/internal services
-- **production**: keeps internal services as ClusterIP and exposes only production entrypoints
+The `application` component also prepares the agent sandbox image configuration. Runtime uses a shared workspace for uploads and generated files and syncs artifacts that need to be retained to MinIO.
 
-**Image Source:**
-- **general (default)**: uses standard public registries
-- **mainland**: uses mainland China mirrors
-- **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
+**Port policy**
 
-Kubernetes uses the same `deploy/env/.env` file as Docker. Before every deployment, existing values, comments, and old variables are preserved while variables newly introduced by the current `deploy/env/.env.example` are appended. If `.env` does not exist, the scripts first reuse legacy `docker/.env`, then fall back to the current template. A readable `.env.example` is required.
+The default `development` policy exposes Web, Gateway, Ops, and selected internal services through NodePorts for debugging. The `production` policy uses ClusterIP for internal services such as Management, Runtime, and infrastructure. Web, Gateway, and Ops still have NodePorts. The port mapping table below lists the defaults.
 
-Use `bash deploy.sh k8s --defaults` to skip the TUI and deploy with saved `deploy.options` or built-in defaults.
+**Image source**
 
-After a successful deployment, non-sensitive choices are saved to `deploy/k8s/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
+The default, `general`, uses standard public registries. Use `mainland` for mainland China mirrors. With `local-latest`, Nexent uses local application images tagged `latest`. Without a private registry prefix, the pull policy is `Never`. Import the images on every node that might run the application Pods.
+
+Docker and Kubernetes share `deploy/env/.env`. Before each deployment, the script preserves existing values, comments, and legacy variables and appends new variables from `deploy/env/.env.example`. If `.env` is missing, the script first looks for the legacy `docker/.env`, then falls back to the current template. The installer requires a readable `.env.example`.
+
+Run `bash deploy.sh k8s --defaults` to skip the interactive menu. The script reads component, storage, and other settings from `deploy/k8s/deploy.options` and uses built-in defaults for missing options. The application version comes from `VERSION` in the current repository or deployment package. Use `--version` to override it. The script ignores application versions saved in older options files.
 
 #### ⚠️ Important Notes
 
@@ -93,10 +96,10 @@ When the target cluster cannot access public image registries, download a prebui
 2. Select a successful run for the required version and download `nexent-<version>-<platform>.zip` matching the cluster node architecture from **Artifacts**.
 3. Copy the archive to a management host that can access the target cluster and extract it. Workflow artifacts are retained for 30 days; if one has expired, ask a maintainer to rerun the workflow.
 
-Extract the offline deployment package:
+Replace the example filename with the package you downloaded, then extract it and enter the deployment directory.
 
 ```bash
-unzip nexent-<version>-amd64.zip -d nexent
+unzip 'nexent-<version>-amd64.zip' -d nexent
 cd nexent
 ```
 
@@ -115,7 +118,7 @@ bash deploy.sh \
   k8s
 ```
 
-The specified directory must be the root of an extracted previous package and contain `deploy/env/.env`. This option imports the old `.env`, preserves its values, and immediately appends variables newly introduced by the current package's `.env.example`. It also reuses `monitoring.env` and Kubernetes `deploy.options` when present; the new scripts regenerate Helm generated values. `--reuse-from` can be combined with `--config`, `--defaults`, or `--push-images`.
+The directory must be the root of the extracted previous package and contain `deploy/env/.env`. The script preserves the old environment values, appends new variables from the current template, and reuses existing `monitoring.env` and Kubernetes deployment options. When reusing settings, run the command from the new package directory. Check that the application version shown in the terminal matches the packaged images. You can combine `--reuse-from` with `--config`, `--defaults`, or `--push-images`.
 
 For other single-node and multi-node clusters, push images to an internal registry accessible to the cluster, or import them with the container runtime's tooling on every node that may run Nexent Pods:
 
@@ -126,41 +129,50 @@ bash deploy.sh \
   k8s
 ```
 
-The offline package installs all Nexent components by default. Add `--config` to reselect deployment settings. When the super administrator is created for the first time, this mode prompts for and confirms the password without displaying or persisting it. Non-interactive deployment uses `NEXENT_SUPER_ADMIN_PASSWORD`, which defaults to `Nexent@123`, and displays the effective password after successful creation.
+The offline package lists its components and images in `manifest.yaml`. The entry point reuses saved options or built-in defaults. Add `--config` to choose different settings. Before enabling an optional component, confirm that the cluster can pull its images or that the nodes already have them.
 
 ### Access Your Installation
 
-When deployment completes successfully:
+Check the releases, workloads, and assigned NodePorts from the deployment host. After a default installation, both Helm releases should show `deployed`, and the `READY` column should show the desired number of replicas for each application you selected.
 
-> **Get the administrator password**: The super administrator account is `suadmin@nexent.com`. On its first non-interactive creation, the terminal displays the effective password; when no value was configured, the default password is `Nexent@123`. For an offline deployment using `--config`, the manually entered password is neither saved nor displayed. If it is forgotten, recreate the account by following the earlier "Recreate the `suadmin` account" steps.
+```bash
+helm list -n nexent
+kubectl get deployments,svc -n nexent
+```
 
-| Service | Default Address |
-|---------|-----------------|
-| Web Application | http://localhost:30000 |
-| SSH Terminal | localhost:30022 (if enabled) |
+The default Web address is `http://<node-address>:30000`. For a temporary local check, run the following command and open `http://localhost:3000` on the same machine.
 
-Access steps:
-1. Open **http://localhost:30000** in your browser
-2. Log in with the super administrator account
-3. Access tenant resources → Create tenant and tenant administrator
-4. Log in with the tenant administrator account
-5. Refer to the [User Guide](../user-guide/home-page) to develop agents
+```bash
+kubectl -n nexent port-forward svc/nexent-web 3000:3000
+```
+
+**Use HTTPS to sign in from another machine.** Web sets the `Secure` attribute on session cookies by default, so a browser connecting to a remote node over HTTP may not retain the session. Use the domain for your existing HTTPS endpoint, or enable the built-in Nginx proxy at deployment time. Its default HTTPS NodePort is `31000`. To use an existing certificate, replace the paths below with the PEM certificate and private key on the deployment host. Then open `https://<domain-on-certificate>:31000`.
+
+```bash
+bash deploy.sh k8s --defaults --https-mode custom \
+  --https-cert-file /path/to/fullchain.pem --https-key-file /path/to/private.key
+```
+
+Sign in as `suadmin@nexent.com` with the password set during the first deployment. Under **Tenant Resources**, create a tenant and its administrator. Sign in as the tenant administrator to configure models or agents. See the [User Guide](../user-guide/home-page).
 
 ## 🏗️ Service Architecture
 
-Nexent uses a microservices architecture deployed via Helm charts:
+Helm charts deploy the following Nexent services.
 
-**Application Services:**
+**Application Services**
+
 | Service | Description | Default Port |
 |---------|-------------|--------------|
 | nexent-config | Configuration and management API | 5010 |
 | nexent-runtime | Agent runtime API | 5014 |
 | nexent-mcp | MCP management and tool service | 5011 |
-| nexent-northbound | Northbound API service | 5013 |
+| nexent-gateway | Entry point for the northbound API and Web requests | 5013 |
+| nexent-ops | Operations API for runtime metrics and historical traces | 5016 |
 | nexent-web | Web frontend | 3000 |
 | nexent-data-process | Data processing service | 5012 |
 
-**Infrastructure Services:**
+**Infrastructure Services**
+
 | Service | Description |
 |---------|-------------|
 | nexent-elasticsearch | Search and indexing engine |
@@ -168,27 +180,40 @@ Nexent uses a microservices architecture deployed via Helm charts:
 | nexent-redis | Cache, distributed locks, and task message broker |
 | nexent-minio | S3-compatible object storage |
 
-**Optional Services:**
+**Optional Services**
+
 | Service | Description |
 |---------|-------------|
 | nexent-openssh-server | SSH terminal for AI agents |
-| nexent-monitoring | Optional observability stack |
-
-Sandboxes are not persistent business Pods. The Runtime service creates isolated execution environments according to the deployment configuration to run model-generated code and Skill scripts.
+| nexent-otel-collector | OpenTelemetry Collector, deployed when `monitoring` is enabled |
+| nexent-nginx | Reverse proxy, deployed when built-in HTTPS is enabled |
 
 ## 🔌 Port Mapping
 
 | Service | Internal Port | NodePort | Description |
 |---------|---------------|----------|-------------|
 | Web Interface | 3000 | 30000 | Main application access |
-| Northbound API | 5013 | 30013 | Northbound API service |
-| SSH Server | 22 | 30022 | Terminal tool access |
+| HTTPS endpoint | 3000 | 31000 | Nginx accepts TLS connections when built-in HTTPS is enabled |
+| Gateway | 5013 | 30013 | Northbound API |
+| Ops | 5016 | 30016 | Operations service |
+| SSH Server | 22 | 30022 | Available when the terminal component is enabled |
 
 For internal service communication, services use Kubernetes internal DNS (e.g., `http://nexent-config:5010`).
 
-## 💾 Data Persistence
+## Data Persistence
 
-Nexent uses PersistentVolumes for data persistence:
+Run the deployment command from the repository root and choose the mode that matches your storage.
+
+| Available storage | Deployment command and behavior |
+| --- | --- |
+| Default StorageClass supports RWX | Run `bash deploy.sh k8s --defaults`. A fresh installation uses `dynamic`, and Kubernetes provisions a volume for each claim. |
+| A specific StorageClass supports dynamic provisioning | Run `bash deploy.sh k8s --defaults --persistence-mode dynamic --storage-class my-rwx-storage`. Replace the example name with your storage class. |
+| Host directories on a single node | Run `bash deploy.sh k8s --defaults --persistence-mode local`. The chart creates static PVs backed by `hostPath`. |
+| The required PVCs already exist | Run `bash deploy.sh k8s --defaults --persistence-mode existing`. Check that the claim names and access modes match the deployment configuration. |
+
+On subsequent deployments, an explicit `--persistence-mode` overrides the mode saved in `deploy/k8s/deploy.options`. Keep the original storage settings for existing deployments so services continue to use the same data. When you use Helm directly to upgrade a release backed by static volumes, retain its `local` settings.
+
+The following paths are the defaults for `local` mode.
 
 | Data Type | PersistentVolume | Default Host Path |
 |-----------|------------------|-------------------|
@@ -198,39 +223,64 @@ Nexent uses PersistentVolumes for data persistence:
 | MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
 | Shared workspace | nexent-workspace-pv | `/var/lib/nexent` |
 | Shared skills | nexent-skills-pv | `/var/lib/nexent-data/skills` |
+| Memory plugins | nexent-memory-plugins-pv | `/var/lib/nexent-data/memory-provider-plugins` |
+| Service logs | nexent-logs-pv | `/var/lib/nexent-data/logs` |
+| Local traces | nexent-trajectory-pv | `/var/lib/nexent-data/trajectory` |
+| Web project configuration | nexent-project-config-pv | `/var/lib/nexent-data/project-config` |
 
-By default, `nexent-workspace` requests 10 GiB of `ReadWriteMany` storage and transfers the inputs and outputs of each run between application services. When using a custom StorageClass, make sure it supports the configured access mode. In multi-replica deployments, all related Pods must be able to access the same workspace.
+By default, `nexent-workspace` requests 10 GiB of `ReadWriteMany` storage. Application services use it to exchange inputs and outputs during a run. On multi-node clusters, check that Pods on different nodes can read and write the same files.
 
-Helm uninstall does not delete local hostPath data by default. Use `bash deploy/k8s/uninstall.sh --delete-local-data true` or `bash uninstall.sh k8s --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`; use `--keep-local-data` to preserve them explicitly.
+### Deploy Multiple Runtime Replicas
+
+Runtime starts with one replica. To handle more concurrent work, set a fixed count with `--runtime-replicas`. This example installs three replicas on a new cluster. Replace `my-rwx-storage` with a StorageClass that supports shared reads and writes across nodes. Before the first startup, set the trace storage mode if you plan to capture local traces across nodes. See [Monitoring Configuration](#monitoring-configuration).
+
+```bash
+bash deploy.sh k8s --defaults --runtime-replicas 3 \
+  --persistence-mode dynamic --storage-class my-rwx-storage
+kubectl -n nexent rollout status deployment/nexent-runtime
+kubectl -n nexent get deployment nexent-runtime
+```
+
+For multiple replicas, use a dynamic StorageClass that supports RWX or pre-create shared PVCs and use `existing` mode. You can omit `--storage-class` if the default StorageClass supports RWX. The deployment account must be able to read the five PVCs below and their bound PVs. The script checks that both the claims and volumes are `Bound`, include `ReadWriteMany`, and use the `Filesystem` volume mode. It rejects PVs with `spec.local`.
+
+| Shared data | Default PVCs |
+| --- | --- |
+| Workspace, skills, logs | `nexent-workspace`, `nexent-skills`, `nexent-logs` |
+| Memory plugins, traces | `nexent-memory-plugins`, `nexent-trajectory` |
+
+To change the replica count on an existing installation, keep its storage settings and run `bash deploy.sh k8s --defaults --release-scope nexent --runtime-replicas 3` during a maintenance window with no active tasks. The standard deployment pauses the application Pods, runs bootstrap, and starts the configured replicas. Runtime uses the `Recreate` strategy and may be briefly unavailable. Set the count to `1` to return to one replica.
+
+For a healthy, initialized application where only the replica count is changing, you can add `--direct-upgrade` to the same command to skip the application-wide pause and bootstrap Job. Use the standard deployment flow for a first installation, a paused application, reinitialization of system agents, or an upgrade with incompatible database changes.
+
+### Use Kubernetes SYSTEM Sandboxes
+
+The Runtime replica count and sandbox provider are independent settings. The default provider is `docker`. To use Kubernetes Pods for SYSTEM sandbox tasks, first verify that the cluster CNI blocks traffic denied by NetworkPolicy and that the nodes can pull the sandbox image.
+
+Set `sandboxProvider` to `kubernetes` in the existing `global` section of `deploy/k8s/helm/nexent/values.yaml`. Once you have verified the network policy, set `sandboxNetworkPolicyVerified` to `true` and run the deployment script. Use shared RWX storage for the workspace. For single-node development with a local workspace, you can explicitly set `global.sandboxSingleNodeDevelopment: true`. Multiple Runtime replicas still require the storage described above.
+
+Each Runtime Pod creates its own sandbox Pod the first time it executes a task that needs a SYSTEM sandbox. After running an agent that uses the sandbox, list the Pods it created.
+
+```bash
+kubectl -n nexent get pods -l nexent.ai/sandbox=system
+```
 
 ### Uninstall Kubernetes Deployment
 
-Use the root uninstall entrypoint from the repository root:
+Run `bash uninstall.sh k8s` from the repository root to remove the application release followed by the infrastructure release. In interactive mode, the script asks whether to delete dynamic PVCs and defaults to keeping them. The following command keeps dynamic PVCs, the namespace, and local data.
 
 ```bash
-# Remove nexent first, then nexent-infrastructure
-bash uninstall.sh k8s
-
-# Remove only the application release
-bash uninstall.sh k8s --release-scope nexent --keep-namespace
-
-# Remove only infrastructure (the application release must already be absent)
-bash uninstall.sh k8s --release-scope infrastructure --keep-namespace
-
-# Clean only Helm release state, useful for stuck releases
-bash uninstall.sh k8s clean
-
-# Remove Helm release and namespace, but keep local hostPath data
-bash uninstall.sh k8s delete --keep-local-data
-
-# Delete known local hostPath data after uninstall
-bash uninstall.sh k8s --delete-local-data true
-
-# Full cleanup: Helm release, namespace, and local hostPath data
-bash uninstall.sh k8s delete-all
+bash uninstall.sh k8s --delete-pvc false --keep-namespace --keep-local-data
 ```
 
-`--delete-data` and `--delete-volumes` are compatibility options for Helm-managed resources. For local disks, use `--delete-local-data` or `--keep-local-data`; `delete-all --keep-local-data` removes the namespace while preserving local volume contents.
+Add `--release-scope nexent` to remove only the application. To remove only infrastructure, confirm that the application release has been uninstalled, then use `--release-scope infrastructure`.
+
+| Resource | Option and effect |
+| --- | --- |
+| Dynamic PVCs to keep | The default, `--delete-pvc false`, retains dynamic PVCs for the selected releases and keeps their namespace, even with `delete` or `delete-all`. If an older release manifest lacks the PVC retention policy, the script stops. First upgrade that release with the current chart and its original storage settings, then uninstall. |
+| Dynamic PVCs to delete | `bash uninstall.sh k8s --delete-pvc true --keep-namespace` deletes the dynamic PVCs belonging to the selected releases. The bound PV's reclaim policy determines what happens to the underlying data. A `Delete` policy may delete the data as well. |
+| Local hostPath data | With `local` storage, `--delete-local-data true` removes host directories managed by the deployment script. Use `--keep-local-data` to keep them. By default, `delete-all` requests deletion of the namespace and local data. |
+
+Use `--keep-namespace` explicitly to retain pre-created PVCs or other resources in the same namespace. The compatibility options `--delete-data` and `--delete-volumes` control cleanup after a failed Helm uninstall. Use `--delete-pvc` to control dynamic PVC deletion.
 
 ## 🔧 Deployment Commands
 
@@ -243,7 +293,7 @@ bash deploy.sh k8s --release-scope infrastructure
 bash deploy.sh k8s --release-scope nexent
 
 # Non-interactive deployment with the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process --port-policy development --image-source general
+bash deploy.sh k8s --defaults --components infrastructure,application,data-process --port-policy development --image-source general
 
 # Add the terminal tool to the default component set
 bash deploy.sh k8s --components infrastructure,application,data-process,terminal
@@ -254,103 +304,63 @@ bash deploy.sh k8s --image-source mainland
 # Use local latest images
 bash deploy.sh k8s --image-source local-latest
 
-# Clean helm state only (fixes stuck releases)
-bash uninstall.sh k8s clean
-
-# Uninstall; local data is preserved by default, with interactive prompts for namespace and local data deletion
-bash uninstall.sh k8s
-
-# Uninstall and delete the namespace
-bash uninstall.sh k8s --delete-namespace true
-
-# Uninstall and delete local hostPath data
-bash uninstall.sh k8s --delete-local-data true
-
-# Complete uninstall including namespace and local hostPath data
-bash uninstall.sh k8s delete-all
-
-# Complete uninstall but preserve local hostPath data
-bash uninstall.sh k8s delete-all --keep-local-data
+# Select a StorageClass using the --sc alias
+bash deploy.sh k8s --persistence-mode dynamic --sc fast-storage
 ```
 
 ## 🔧 Advanced Configuration
 
+### Use an Uploaded MCP Image
+
+To upload a custom MCP image through the UI, first push the image to a registry that the cluster can reach, or preload it on every node that may run MCP Pods. In `deploy/env/.env`, set `ENABLE_UPLOAD_IMAGE=true` and use `NEXENT_MCP_KUBERNETES_PRELOADED_IMAGES` to map the SHA-256 of the original tar file to its image reference. After redeployment, the Config service uses the mapping when it creates an MCP Pod. For an example, see [Uploading an image on Kubernetes](../user-guide/resource-repository/mcp-repository#uploading-an-image-on-kubernetes).
+
 ### Monitoring Configuration
 
-Kubernetes deployments enable monitoring through the `monitoring` component in the deployment script UI. The deployment script synchronizes provider settings in `deploy/env/monitoring.env`, renders runtime Helm values for `global.monitoring.*` and `nexent-monitoring.*`, and enables the `nexent-monitoring` subchart.
+#### View Local Traces in the Observability Center
+
+The installer enables local trace capture when you deploy the `application` component. It reads `LOCAL_FILE_MONITORING_ENABLED` from `deploy/env/.env` (default `true`) and writes `TRAJECTORY_READ_ENABLED=true` to `deploy/env/monitoring.env` when capture is enabled. The default component selection includes everything needed for the built-in Observability Center.
+
+1. Check that Runtime and Ops are ready and that the trajectory PVC is `Bound`. The default namespace is `nexent`.
+
+   ```bash
+   kubectl -n nexent get deployment nexent-runtime nexent-ops
+   kubectl -n nexent get pvc nexent-trajectory
+   ```
+
+2. Verify that Config, Runtime, and Ops mount the same trace storage. The default container path is `/mnt/nexent-data/trajectory`. For a multi-node deployment, set `TRAJECTORY_STORAGE_MODE=shared_directory` in `deploy/env/.env` before the first capture. Use a shared filesystem that supports cross-node file locking and atomic replacement. An existing trace directory checks the storage mode registered when it was created. Plan for data migration when moving from a single node.
+3. Complete a conversation turn with an agent and copy its conversation ID. With an operations or super administrator account that can access the **Observability Center**, look up the ID and open the call timeline for that turn. See the [Observability Center guide](../user-guide/observability).
+
+To stop capturing new conversations while keeping existing traces available, set `LOCAL_FILE_MONITORING_ENABLED=false` in `deploy/env/.env`, keep `TRAJECTORY_READ_ENABLED=true` in `deploy/env/monitoring.env`, and redeploy with the original options. If you manage the Helm release directly, use `global.monitoring.localFileEnabled: false` and `global.monitoring.trajectoryReadEnabled: true`.
+
+#### Export Traces to a Third-Party Platform
+
+To also send traces to a third-party platform, add the `monitoring` component and choose a provider. The script generates the Helm configuration and installs the Collector. Local capture retains its own setting. The following example adds Phoenix to the default components.
 
 ```bash
-cd nexent
-bash deploy.sh k8s
+bash deploy.sh k8s --components infrastructure,application,data-process,monitoring --monitoring-provider phoenix
 ```
 
-If `deploy/k8s/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
+| Provider | Where to access the data |
+| --- | --- |
+| `otlp` | Starts the OpenTelemetry Collector. Its default debug exporter writes to the Collector logs. |
+| `phoenix` | Deploys Phoenix. Open the dashboard on port `30006` of a reachable node. |
+| `langfuse` | Deploys Langfuse. Open the dashboard on port `30001` of a reachable node. |
+| `langsmith` | Sends traces to hosted LangSmith. Set `LANGSMITH_API_KEY` in `deploy/env/monitoring.env` before deployment and optionally set the project with `LANGSMITH_PROJECT`. |
 
-Supported providers:
-
-| Provider | Purpose | Default URL |
-|----------|---------|-------------|
-| `otlp` | OpenTelemetry Collector only, useful for forwarding to an external platform | No dashboard |
-| `phoenix` | Local Phoenix trace analysis | `http://localhost:30006` |
-| `langfuse` | Local Langfuse observability stack | `http://localhost:30001` |
-| `langsmith` | Forwarding to hosted LangSmith | `https://smith.langchain.com/` |
-| `grafana` | Local Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
-| `zipkin` | Local Zipkin | `http://localhost:30011` |
-
-Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` and optionally `LANGSMITH_PROJECT` in `deploy/env/monitoring.env`. To change local Grafana, Langfuse, or dashboard ports, adjust the related `K8S_*_NODE_PORT` or service variables in `deploy/env/monitoring.env`, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
-
-Common generated Helm values:
-
-| Value | Description |
-|-------|-------------|
-| `global.monitoring.enabled` | Enables OpenTelemetry export in the Nexent backend |
-| `global.monitoring.provider` | Backend provider label: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
-| `global.monitoring.otlpEndpoint` | Backend OTLP HTTP endpoint, default `http://nexent-otel-collector:4318` |
-| `global.monitoring.dashboardUrl` | Frontend monitoring entry URL; leave empty to hide the entry |
-| `global.monitoring.dashboardAllowedRoles` | Comma-separated roles that can see the entry; defaults to `SU,SPEED` |
-| `global.monitoring.traceContentMode` | Trace content capture mode: `summary`, `metrics`, or `full` |
-| `nexent-monitoring.<provider>.service.nodePort` | NodePort override for provider dashboards |
-| `nexent-monitoring.langfuse.init.*` | Local Langfuse bootstrap organization, project, and admin account |
-| `nexent-monitoring.grafana.adminUser` / `adminPassword` | Local Grafana admin credentials |
-
-Common `deploy/env/monitoring.env` variables:
-
-| Variable | Description |
-|----------|-------------|
-| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith forwarding configuration |
-| `K8S_PHOENIX_NODE_PORT` / `K8S_LANGFUSE_NODE_PORT` / `K8S_GRAFANA_NODE_PORT` / `K8S_ZIPKIN_NODE_PORT` | NodePort overrides for local dashboards |
-| `K8S_LANGFUSE_NEXTAUTH_URL` | Browser-accessible Langfuse URL used by the K8s Langfuse stack |
-
-Check monitoring status:
-
-```bash
-kubectl get pods -n nexent | grep -E 'otel|phoenix|grafana|tempo|zipkin|langfuse'
-kubectl get svc -n nexent | grep -E 'otel|phoenix|grafana|zipkin|langfuse'
-```
-
-> **Production note**: Replace default passwords, secrets, and the Langfuse `encryptionKey`. Prefer ClusterIP services or a controlled Ingress for dashboards.
+To change the dashboard NodePort, set `K8S_PHOENIX_NODE_PORT` or `K8S_LANGFUSE_NODE_PORT` in `deploy/env/monitoring.env`. For remote access, set `MONITORING_DASHBOARD_URL` to an address the user's browser can reach. For Langfuse, also check `K8S_LANGFUSE_NEXTAUTH_URL`. After deployment, inspect the Collector logs with `kubectl -n nexent logs deployment/nexent-otel-collector`.
 
 ### OAuth Login Configuration
 
-OAuth login uses local accounts in the application component. When enabling third-party login, set `nexent-common.config.oauth.callbackBaseUrl` to the browser-accessible Nexent Web URL.
+OAuth login uses local Nexent accounts. When using the installer, enter the provider credentials in `deploy/env/.env` and set the callback base URL to the Web address users can reach from their browsers. This example configures GitHub login.
 
-```bash
-bash deploy.sh k8s --components infrastructure,application
+```dotenv
+OAUTH_CALLBACK_BASE_URL=https://nexent.example.com
+GITHUB_OAUTH_CLIENT_ID=your_github_client_id
+GITHUB_OAUTH_CLIENT_SECRET=your_github_client_secret
+OAUTH_LOGIN_MODE=button
 ```
 
-Kubernetes writes OAuth settings into backend environment variables through `nexent-common` `config.oauth.*` values:
-
-```bash
-helm upgrade --install nexent deploy/k8s/helm/nexent \
-  --namespace nexent --create-namespace \
-  -f /path/to/private-application-values.yaml \
-  --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
-  --set nexent-common.config.oauth.githubClientId=your_github_client_id \
-  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret \
-  --set nexent-common.config.oauth.loginMode=force
-```
-
-Configurable OAuth values:
+Save the file and redeploy the application with its original options. If you manage the Helm release directly, use the corresponding values below.
 
 | Value | Environment variable | Description |
 |-------|----------------------|-------------|
@@ -381,21 +391,17 @@ For local NodePort, a GitHub callback example is `http://localhost:30000/api/use
 
 ### CAS Login Configuration
 
-CAS SSO uses local application accounts. Set `nexent-common.config.cas.callbackBaseUrl` to the browser-accessible Nexent Web URL without a trailing `/`. `nexent-common.config.cas.serverUrl` is the CAS Server root URL and should also not include a trailing `/`.
+CAS single sign-on uses local Nexent accounts. When using the installer, enter the CAS server address and the browser-accessible Nexent Web address in `deploy/env/.env`. Omit the trailing `/` from both URLs.
 
-Kubernetes writes CAS settings into backend environment variables through `nexent-common` `config.cas.*` values:
-
-```bash
-helm upgrade --install nexent nexent \
-  --namespace nexent --create-namespace \
-  --set nexent-common.config.cas.enabled=true \
-  --set nexent-common.config.cas.serverUrl=https://cas.example.com/cas \
-  --set nexent-common.config.cas.callbackBaseUrl=https://nexent.example.com \
-  --set nexent-common.config.cas.loginMode=force \
-  --set nexent-common.config.cas.logoutUrl=/logout
+```dotenv
+CAS_ENABLED=true
+CAS_SERVER_URL=https://cas.example.com/cas
+CAS_CALLBACK_BASE_URL=https://nexent.example.com
+CAS_LOGIN_MODE=force
+CAS_LOGOUT_URL=/logout
 ```
 
-Configurable CAS values:
+Save the file and redeploy the application with its original options. If you manage the Helm release directly, use the corresponding values below.
 
 | Value | Environment variable | Description |
 |-------|----------------------|-------------|
@@ -518,6 +524,8 @@ kubectl describe pod <pod-name> -n nexent
 
 ### View Logs
 
+The installer prints the current stage and the path to the deployment log. It writes Helm output, Pod readiness checks, and available bootstrap Job output to `logs/deploy/deploy-YYYYMMDD-HHMMSS.log` under the deployment directory. If deployment fails, use the exit code and log path shown in the terminal to locate the failed step. To investigate a running service, check the logs for its Pods.
+
 ```bash
 kubectl logs -n nexent -l app=nexent-config
 kubectl logs -n nexent -l app=nexent-web
@@ -531,18 +539,21 @@ kubectl rollout restart deployment/nexent-config -n nexent
 kubectl rollout restart deployment/nexent-runtime -n nexent
 ```
 
-### Re-initialize Elasticsearch
+### Elasticsearch Initialization Failed
 
-If Elasticsearch initialization failed:
+Check the Elasticsearch Pod status and logs. After fixing any storage, resource, or permission errors, rerun the application deployment from the repository root. The script checks Elasticsearch again, prepares the API key, and resumes initialization.
 
 ```bash
-bash init-elasticsearch.sh
+bash deploy.sh k8s --defaults --release-scope nexent
 ```
 
-### Clean Up Stale PersistentVolumes
+### Pods Waiting for Storage
+
+If a Pod stays `Pending`, check the PVCs and Pod events. With default dynamic provisioning, verify that the cluster has a suitable default StorageClass or that you passed an RWX-capable class with `--storage-class`. Check available capacity and volume binding. For multiple Runtime replicas, confirm that all five shared volumes are bound.
 
 ```bash
-kubectl delete pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
+kubectl -n nexent get pvc
+kubectl -n nexent get events --sort-by=.lastTimestamp
 ```
 
 ## 💡 Need Help

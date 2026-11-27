@@ -18,7 +18,7 @@ bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
 
 脚本会先回显 `ROOT_DIR`、`NEXENT_USER_DIR`、本次部署使用的 named volumes、未压缩数据总量以及备份目录可用空间。`NEXENT_USER_DIR` 未显式设置时使用部署默认值 `${HOME}/nexent`。出现 `[PASS] Pre-upgrade space check passed.` 表示空间充足，随后脚本直接开始复制；空间不足时会在复制前输出 `[ERROR]` 并退出。数据不会压缩，因此空间检查按文件原始大小计算。
 
-脚本会直接复制 `ROOT_DIR`、`NEXENT_USER_DIR` 和 Docker named volumes 中的文件，不使用 `sudo`，不生成压缩包或 SHA-256 文件。实际备份目录的最外层使用数据源原名：两个宿主机目录使用各自的目录名，每个 named volume 使用其 volume 名；例如默认部署会生成 `nexent-data/`、`nexent/`、`nexent-agent-workspace/` 和 `nexent_db-config/`。通过 `[INFO]` 查看复制进度；只有出现 `[PASS] Backup complete: <path>` 才表示完成，`<path>` 是实际备份目录。出现 `[ERROR]` 时不要使用脚本回显的未完成目录。
+每次运行在 `--backup-dir` 下生成一个 `docker-时间戳/` 目录。其中包含 `ROOT_DIR`、`NEXENT_USER_DIR` 和检测到的 Docker 命名卷，子目录沿用各自的原名。脚本直接复制文件，不使用 `sudo`，也不生成压缩包或 SHA-256 文件。看到 `[PASS] Backup complete: <path>` 后，整份保留 `<path>` 指向的目录供回滚使用。以 `.partial` 结尾的目录尚未复制完成。
 
 ## 2. 执行升级
 

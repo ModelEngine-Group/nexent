@@ -4,20 +4,34 @@
 
 ## 1. 停止写入
 
-确认 `kubectl` 指向原集群和目标命名空间。暂停用户请求和自动任务，等待正在执行的任务结束。保留当前数据，确认备份完成后新增的会话、文件等是否需要另存。恢复前停止仍在写入目标卷的工作负载。
+确认 `kubectl` 指向原集群和目标命名空间。暂停用户请求和自动任务，等待在途任务结束，另存备份之后需要保留的数据。将仍在写入目标卷的工作负载停下来，确认 Pod 已停止写入。恢复数据时无需保留原业务 Pod，后续部署会重新创建。
 
 ## 2. 将备份恢复到对应的持久卷
 
-使用备份日志中 `[PASS] Backup complete` 指向的目录。备份保存在当时执行 `kubectl` 的管理机上，每个子目录以实际的 PVC 名称命名。按旧配置核对 PVC 和绑定的卷，将普通文件恢复到对应的空卷并保留文件权限。例如，`k8s-时间戳/nexent-workspace/` 对应原命名空间中的 `nexent-workspace` 工作区卷。
+**每次备份只生成一个带时间戳的目录**，保存在执行脚本的管理机上。假设备份时指定了 `--backup-dir /mnt/backup/nexent`，脚本会在这个父目录下新建 `k8s-时间戳/`，将指定命名空间中各 PVC 的文件放在其中。以下仅展示几个子目录。
 
-数据库和索引应恢复到同一时间点。PostgreSQL 使用经过验证的数据库备份，Elasticsearch 使用兼容的快照。直接复制运行中的数据目录无法保证一致性。
+```text
+/mnt/backup/nexent/
+└── k8s-20261126-010000/
+    ├── nexent-postgresql/
+    ├── nexent-workspace/
+    └── nexent-skills/
+```
+
+**保存或搬运时，整份复制 `k8s-20261126-010000/`。** 回滚时选用升级前日志中 `[PASS] Backup complete` 指向的那一份。
+
+用 `kubectl -n nexent get pvc` 核对旧部署的 PVC 和绑定的 PV，命名空间按实际值替换。恢复普通文件时，保留 PVC 和挂载点，只清空目标数据目录的内容。
+
+- **节点本地目录（hostPath）**：在存放数据的节点上，可直接用 `mv` 将备份工作副本中对应子目录的内容移回原路径。例如，默认本地存储配置下，`nexent-skills/` 的内容移到 `/var/lib/nexent-data/skills/`。
+
+上述移动方法适用于普通文件。PostgreSQL 使用经过验证的数据库备份，Elasticsearch 使用兼容的快照，两者应恢复到同一时间点。
 
 ## 3. 在旧部署目录执行部署命令
 
-核对旧配置中的存储模式、命名空间和 PVC 绑定，确认应用将挂载已恢复的卷。使用 `--defaults` 时，核对旧目录的 `VERSION` 与升级前实际使用的镜像标签，并确认集群节点能获取旧镜像。将以下路径替换为原部署目录并执行命令。
+核对旧配置中的命名空间、存储模式和 PVC，确认旧目录的 `VERSION` 与升级前的镜像标签一致，集群节点也能获取该镜像。以下命令在保存了旧版 `deploy.sh` 和 Helm Chart 的部署目录执行，以 `/opt/nexent/previous` 为例。
 
 ```bash
-cd /path/to/previous/nexent && bash deploy.sh k8s --defaults
+cd /opt/nexent/previous && bash deploy.sh k8s
 ```
 
 如需显式指定原镜像版本，可在命令末尾添加 `--version X.Y.Z`，将 `X.Y.Z` 换成原版本号。单节点 Docker 运行时使用旧离线包时，可在旧包根目录执行 `bash deploy.sh --load-images --defaults k8s`。其他运行时或多节点集群请按 [Kubernetes 离线部署](./kubernetes-installation#离线部署)准备旧版本镜像。

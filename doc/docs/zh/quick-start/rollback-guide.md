@@ -4,25 +4,34 @@
 
 ## 1. 停止写入
 
-暂停用户请求和自动任务，等待正在执行的任务结束。保留当前数据，确认备份完成后新增的会话、文件等是否需要另存。恢复前停止仍在使用目标目录或卷的容器。
+暂停用户请求和自动任务，等待在途任务结束，另存备份之后需要保留的数据。旧业务容器仍在运行时，先停止所有会写入目标目录或卷的容器。旧容器已经移除也可以恢复，最后用旧部署目录中的脚本重新创建业务容器。
 
 ## 2. 将备份恢复到原挂载位置
 
-使用备份日志中 `[PASS] Backup complete` 指向的目录。对照旧部署配置，将普通文件恢复到对应的空目录或空卷，并保留文件权限。
+**每次备份只生成一个带时间戳的目录。** 假设备份时指定了 `--backup-dir /mnt/backup/nexent`，脚本会在这个父目录下新建 `docker-时间戳/`。下面是一份备份的示例结构，实际子目录取决于旧部署使用的路径和卷。
 
-| 备份中的内容 | 恢复位置 |
-| --- | --- |
-| 两个以原宿主机目录名保存的子目录，默认是 `nexent-data/` 和 `nexent/` | 分别恢复到旧配置的 `ROOT_DIR` 和 `NEXENT_USER_DIR` |
-| 以 Docker 命名卷名称保存的子目录，例如 `nexent-agent-workspace/` | 将目录内容恢复到旧部署挂载的对应命名卷 |
+```text
+/mnt/backup/nexent/
+└── docker-20261126-010000/
+    ├── nexent-data/             ← 原 ROOT_DIR 的全部内容
+    ├── nexent/                  ← 原 NEXENT_USER_DIR 的全部内容
+    └── nexent-agent-workspace/  ← 一个 Docker 命名卷的内容
+```
 
-数据库和索引应恢复到同一时间点。PostgreSQL 使用经过验证的数据库备份，Elasticsearch 使用兼容的快照。直接复制运行中的数据目录无法保证一致性。
+**保存或搬运时，整份复制 `docker-20261126-010000/`。** 回滚时选用升级前日志中 `[PASS] Backup complete` 指向的那一份。、
+
+**普通文件可直接移回原目录。** 按旧部署的 `ROOT_DIR` 和 `NEXENT_USER_DIR` 核对路径，保留挂载目录本身，清空目标目录的内容，再用 `mv` 把对应备份子目录里的内容（含隐藏文件）移进去，保留属主和权限。对备份的工作副本执行 `mv`，以便原始备份仍可使用。
+
+以部署用户 `admin` 为例，若 `ROOT_DIR=/home/admin/nexent-data`，备份副本中 `nexent-data/skills/` 的内容就移到已清空的 `/home/admin/nexent-data/skills/`。`nexent/` 的内容移到原 `NEXENT_USER_DIR`，例如 `/home/admin/nexent/`。
+
+上述移动方法适用于普通文件。PostgreSQL 使用经过验证的数据库备份，Elasticsearch 使用兼容的快照，两者应恢复到同一时间点。
 
 ## 3. 在旧部署目录执行部署命令
 
-确认镜像版本与升级前一致，将以下路径替换为原部署目录并执行命令。
+确认镜像版本与升级前一致，进入保存了旧版 `deploy.sh` 的部署目录执行命令。下面以 `/opt/nexent/previous` 为例，请替换为实际旧部署目录。
 
 ```bash
-cd /path/to/previous/nexent && bash deploy.sh docker --defaults
+cd /opt/nexent/previous && bash deploy.sh docker
 ```
 
 如需显式指定原镜像版本，可在命令末尾添加 `--version X.Y.Z`，将 `X.Y.Z` 换成原版本号。使用旧离线包且需要重新加载镜像时，在旧包根目录执行 `bash deploy.sh --load-images --defaults docker`。

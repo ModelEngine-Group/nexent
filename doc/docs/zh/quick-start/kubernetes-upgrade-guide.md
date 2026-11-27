@@ -24,7 +24,7 @@ bash deploy/k8s/backup.sh \
 
 脚本优先使用 `kubectl cp` 将各 PVC 的文件复制到本地；如果该命令失败且目标容器包含 `tar`，则使用 `kubectl exec ... tar -cf -` 流式传输并立即在本地解包，不保留 tar 文件。MinIO 等精简镜像不包含 `tar` 时，脚本会使用容器内的 Bash 和基础 coreutils 枚举目录，并通过 `kubectl exec ... cat` 逐文件流式导出；该路径在文件很多时会更慢。脚本不使用 `sudo`，不创建临时 Pod，也不生成压缩包或 SHA-256 文件。
 
-实际备份目录的最外层使用 PVC 原名，例如 `nexent-postgresql/`、`nexent-workspace/`、`nexent-skills/` 和已启用监控组件的 PVC 名。通过 `[INFO]` 查看来源和复制进度；只有出现 `[PASS] Backup complete: <path>` 才表示指定 namespace 中的全部 PVC 已复制完成，`<path>` 是实际备份目录。出现 `[ERROR]` 时不要使用脚本回显的 `.partial` 未完成目录。
+每次运行在管理机的 `--backup-dir` 下生成一个 `k8s-时间戳/` 目录，其中每个子目录沿用实际 PVC 名称。看到 `[PASS] Backup complete: <path>` 表示指定 namespace 中的全部 PVC 已复制完成，整份保留 `<path>` 指向的目录供回滚使用。以 `.partial` 结尾的目录尚未复制完成。
 
 ## 2. 执行升级
 
@@ -83,7 +83,7 @@ bash deploy.sh \
 在目标命名空间检查应用和存储。以下示例使用默认命名空间 `nexent`。
 
 ```bash
-kubectl -n nexent get deployment,pods,pvc
+kubectl get pods -n nexent -o wide
 ```
 
 确认各业务 Deployment 的就绪副本数符合预期，原有 PVC 仍为 `Bound` 且绑定预期的 PV。Pod 长时间处于 `Pending` 时，检查 PVC 事件和 StorageClass。最后用已有账号登录并打开一段升级前的会话或附件，确认应用实际读取了原数据。

@@ -2,6 +2,8 @@
 
 This guide applies to Nexent deployments managed with Docker Compose. Run the upgrade during an idle or low-traffic window whenever possible. Business writes must stop before the backup starts, but the containers do not need to be stopped.
 
+Keep the original deployment directory and its configuration, and record the image version. If you need to roll back, restore the pre-upgrade backup and redeploy from the old directory. See the [Docker Rollback Guide](./rollback-guide).
+
 > ⚠️ If business writes continue during the copy, data from PostgreSQL, Elasticsearch, Redis, MinIO, and other components may not represent the same point in time, and the backup may not be recoverable.
 
 ## 1. Pre-upgrade Check and Backup
@@ -16,7 +18,7 @@ bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
 
 The script first prints `ROOT_DIR`, `NEXENT_USER_DIR`, the named volumes used by this deployment, the total uncompressed data size, and the available space under the backup directory. If `NEXENT_USER_DIR` is not explicitly set, the deployment default `${HOME}/nexent` is used. `[PASS] Pre-upgrade space check passed.` means the destination has enough space, after which copying starts immediately. If space is insufficient, the script prints `[ERROR]` and exits before copying. Files are not compressed, so the check uses their original size.
 
-The script directly copies files from `ROOT_DIR`, `NEXENT_USER_DIR`, and the Docker named volumes. It does not use `sudo` and does not create compressed archives or SHA-256 files. The actual backup directory preserves source names at its top level: the two host paths use their directory names, and each named volume uses its volume name. For example, a default deployment creates `nexent-data/`, `nexent/`, `nexent-agent-workspace/`, and `nexent_db-config/`. Follow progress through `[INFO]` messages. The backup is complete only when `[PASS] Backup complete: <path>` appears; `<path>` is the actual backup directory. If `[ERROR]` appears, do not use the incomplete directory printed by the script.
+Each run creates one `docker-<timestamp>/` directory under `--backup-dir`. Its subdirectories use the original names of `ROOT_DIR`, `NEXENT_USER_DIR`, and the Docker named volumes the script finds. The script copies files directly without `sudo`, compression, or SHA-256 files. When it reports `[PASS] Backup complete: <path>`, keep the entire directory at `<path>` for rollback. A directory ending in `.partial` contains an unfinished copy.
 
 ## 2. Perform the Upgrade
 
@@ -32,15 +34,15 @@ git pull --ff-only
 bash deploy.sh docker --defaults --version X.Y.Z
 ```
 
-`--defaults` reuses the saved deployment configuration and skips the interactive interface. Before upgrading, verify that `deploy/docker/deploy.options` exists and that its components, port policy, and image source match the current environment. See [Docker Installation and Deployment](./installation.md#online-deployment) for more information about online deployment.
+Replace `X.Y.Z` with the target image tag. `--defaults` reuses the saved deployment configuration and skips the interactive interface. Before upgrading, verify that the components, port policy, and image source in `deploy/docker/deploy.options` match the current deployment. See [Docker Installation and Deployment](./installation.md#online-deployment).
 
 ### 2.2 Offline Upgrade
 
 When the target host cannot access public image registries, follow [Docker Offline Deployment](./installation.md#offline-deployment) to download a target-version package matching the server architecture, copy it to the target host, and extract it into a new directory:
 
 ```bash
-unzip nexent-<version>-amd64.zip -d nexent-<version>
-cd nexent-<version>
+unzip 'nexent-<version>-amd64.zip' -d 'nexent-<version>'
+cd 'nexent-<version>'
 bash deploy.sh \
   --reuse-from /path/to/previous/nexent \
   --load-images \
@@ -50,11 +52,13 @@ bash deploy.sh \
 
 `/path/to/previous/nexent` must be the actual root of the previously extracted deployment package and contain `deploy/env/.env`. `--reuse-from` reuses its `.env`, `monitoring.env`, and Docker deployment options, while `--load-images` loads images from the new package. Use the corresponding `arm64` package name on an ARM64 server.
 
-During the upgrade, `nexent-config` runs automatic database migrations while the other backend containers wait for migrations to reach the target state. Existing merged SQL files must not be modified, renamed, or deleted.
-
 ## 3. Post-upgrade Checks
 
-Inspect the container health status for the Nexent and optional monitoring projects:
+The deployment script prints the path to the log for this run. By default it is `logs/deploy/deploy-YYYYMMDD-HHMMSS.log` under the deployment directory. If image loading or database initialization fails, check this log for the detailed output.
+
+When upgrading to v2.9.0, the script runs database migrations in a temporary `nexent-config` container before starting the application services. The migrations for this version are bundled in `v2.9.0_merged_migrations.sql`. At startup, the long-running `nexent-config` service checks the migration records and SQL checksums and skips migrations that are already current.
+
+Check the health of the containers in the Nexent and optional monitoring projects.
 
 ```bash
 docker ps -a --filter label=com.docker.compose.project=nexent \
@@ -63,4 +67,4 @@ docker ps -a --filter label=com.docker.compose.project=monitor \
   --format 'table {{.Names}}\t{{.Status}}'
 ```
 
-The check passes when every container with a configured healthcheck reports `healthy`. Continue waiting while a container reports `starting`; the check fails if any container reports `unhealthy`. Containers without a configured healthcheck do not report `healthy` and are outside the scope of this check.
+Wait for containers with a configured health check to report `healthy`. If any report `unhealthy`, inspect the deployment log and that container's logs. Sign in with an existing account and open a conversation from before the upgrade to confirm the application can read the original data.

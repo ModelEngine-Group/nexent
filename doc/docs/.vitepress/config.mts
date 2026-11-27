@@ -88,6 +88,17 @@ export default defineConfig({
                   },
                 ],
               },
+              {
+                text: "Rollback Guide",
+                collapsed: false,
+                items: [
+                  { text: "Docker", link: "/en/quick-start/rollback-guide" },
+                  {
+                    text: "Kubernetes",
+                    link: "/en/quick-start/kubernetes-rollback-guide",
+                  },
+                ],
+              },
               { text: "FAQ", link: "/en/quick-start/faq" },
             ],
           },
