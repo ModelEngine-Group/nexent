@@ -12,4 +12,4 @@ preparation:
   d4_groups: []
 acceptance_bindings:
   AC-01:
-  - test_local_jwt_identity_and_session_without_refresh
+  - test_local_jwt_identity_and_retired_refresh_rejection

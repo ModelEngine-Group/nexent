@@ -24,6 +24,9 @@ from contracts.errors.exceptions import AccountConflictError, AppException, Inco
 from contracts.identity import UpdatePasswordRequest, UserSignInRequest, UserSignUpRequest
 from contracts.roles import has_any_role
 from management.db.identity.cas_session import revoke_cas_session_by_session_id
+from management.db.identity.local_session import revoke_local_session
+from management.services.permission.identity.local_session import RefreshConflict
+from contracts.identity_session import is_local_session_id
 
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -132,19 +135,22 @@ async def user_refresh_token(request: Request):
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="No authorization token provided")
     try:
         session_data = await request.json()
-        refresh_token = session_data.get("refresh_token")
+        refresh_token = session_data.get("refresh_token") if isinstance(session_data, dict) else None
         if not refresh_token:
             raise ValueError("No refresh token provided")
-        session_info = await refresh_user_token(extract_bearer_token(authorization), refresh_token)
+        session_info = await refresh_user_token(
+            extract_bearer_token(authorization), refresh_token, request.headers.get("X-Refresh-Request-Id"),
+        )
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": "Token refresh successful", "data": {"session": session_info}})
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
-    except ValueError as e:
-        logging.error(f"Refresh token failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="No refresh token provided")
+    except RefreshConflict as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="Invalid refresh request")
     except Exception as e:
-        logging.error(f"Refresh token failed: {str(e)}")
+        logger.error("Refresh failed (%s)", type(e).__name__)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Refresh token failed")
 
 
@@ -165,8 +171,9 @@ async def logout(request: Request):
                 pass
         if authorization:
             session_id = extract_session_id_from_authorization(authorization) if logout_user_id else None
-            if session_id:
-
+            if is_local_session_id(session_id):
+                revoke_local_session(session_id, logout_user_id)
+            elif session_id:
                 revoke_cas_session_by_session_id(session_id, actor="user")
                 try:
                     cas_logout_url = build_logout_url()

@@ -162,6 +162,7 @@ const proxy = createProxyServer({
 const COOKIE_NAMES = {
   ACCESS_TOKEN: "nexent_access_token",
   REFRESH_TOKEN: "nexent_refresh_token",
+  CAN_REFRESH: "nexent_can_refresh",
   EXPIRES_AT: "nexent_token_expires_at",
   OAUTH_PENDING: "nexent_oauth_pending",
 };
@@ -186,9 +187,13 @@ function appendSetCookies(res, cookies) {
 function setAuthCookies(res, session) {
   const cookies = [];
 
-  const expiresInSeconds = session.expires_in_seconds || 3600;
-
-  const refreshTokenMaxAge = expiresInSeconds * 10;
+  const now = Math.floor(Date.now() / 1000);
+  const expiresInSeconds = session.expires_at
+    ? Math.max(0, session.expires_at - now)
+    : session.expires_in_seconds || 3600;
+  const refreshTokenMaxAge = session.refresh_expires_at
+    ? Math.max(0, session.refresh_expires_at - now)
+    : 0;
 
   if (session.access_token) {
     cookies.push(
@@ -199,23 +204,17 @@ function setAuthCookies(res, session) {
     );
   }
 
-  if (session.refresh_token) {
-    cookies.push(
-      cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, session.refresh_token, {
-        ...buildCookieOptions(true),
-        maxAge: refreshTokenMaxAge, // 10x access token lifetime
-      })
-    );
-  }
-
-  if (!session.refresh_token) {
-    cookies.push(
-      cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", {
-        ...buildCookieOptions(true),
-        maxAge: 0,
-      })
-    );
-  }
+  const canRefresh = Boolean(session.refresh_token && refreshTokenMaxAge > 0);
+  cookies.push(
+    cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, canRefresh ? session.refresh_token : "", {
+      ...buildCookieOptions(true),
+      maxAge: canRefresh ? refreshTokenMaxAge : 0,
+    }),
+    cookie.serialize(COOKIE_NAMES.CAN_REFRESH, canRefresh ? "1" : "", {
+      ...buildCookieOptions(false),
+      maxAge: canRefresh ? refreshTokenMaxAge : 0,
+    })
+  );
 
   if (session.expires_at) {
     cookies.push(
@@ -243,6 +242,7 @@ function clearAuthCookies(res) {
       httpOnly: true,
     }),
     cookie.serialize(COOKIE_NAMES.EXPIRES_AT, "", expired),
+    cookie.serialize(COOKIE_NAMES.CAN_REFRESH, "", expired),
     cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
       ...expired,
       httpOnly: true,
@@ -383,15 +383,22 @@ function prepareAuthRequestBody(pathname, body, cookies, res) {
       res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
       return null;
     }
-    try {
-      const parsed = body.length > 0 ? JSON.parse(body.toString()) : {};
-      parsed.refresh_token = refreshToken;
-      return Buffer.from(JSON.stringify(parsed));
-    } catch {
-      return body;
-    }
+    return Buffer.from(JSON.stringify({ refresh_token: refreshToken }));
   }
   return body;
+}
+
+function isSameOriginRefresh(req) {
+  const site = req.headers["sec-fetch-site"];
+  if (site && site !== "same-origin") return false;
+  try {
+    const origin = new URL(req.headers.origin);
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname);
+    return origin.host === req.headers.host &&
+      (origin.protocol === "https:" || (origin.protocol === "http:" && (local || !authCookieSecure)));
+  } catch {
+    return false;
+  }
 }
 
 function forwardAuthRequest(req, res, targetUrl) {
@@ -399,13 +406,14 @@ function forwardAuthRequest(req, res, targetUrl) {
   const transport = parsedTarget.protocol === "https:" ? https : http;
   const cookies = parseCookies(req);
 
-  if (
-    req.parsedPathname === "/api/user/refresh_token" &&
-    !cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ) {
-    res.writeHead(204);
-    res.end();
-    return;
+  const isRefresh = req.parsedPathname === "/api/user/refresh_token";
+  if (isRefresh) {
+    res.setHeader("Cache-Control", "no-store");
+    if (!isSameOriginRefresh(req)) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
   }
 
   collectRequestBody(req)
@@ -424,7 +432,11 @@ function forwardAuthRequest(req, res, targetUrl) {
 
       const forwardHeaders = { ...req.headers, host: parsedTarget.host };
 
-      // Inject access_token from cookie as Authorization header for the backend
+      // Use only the browser's session credential for cookie-backed renewal.
+      if (isRefresh) {
+        delete forwardHeaders.authorization;
+        forwardHeaders["content-type"] = "application/json";
+      }
       if (
         cookies[COOKIE_NAMES.ACCESS_TOKEN] &&
         !forwardHeaders["authorization"]

@@ -31,9 +31,10 @@ def signup(mocker):
     )
     tools = mocker.patch.object(auth, "init_tool_list_for_tenant", new_callable=AsyncMock)
     skills = mocker.patch.object(auth, "init_skill_list_for_tenant", new_callable=AsyncMock)
-    mint = mocker.patch.object(auth, "generate_session_jwt", return_value="signed-jwt")
-    mocker.patch.object(auth, "calculate_expires_at", return_value=12345)
-    mocker.patch.object(auth, "get_jwt_expiry_seconds", return_value=3600)
+    mint = mocker.patch.object(auth, "issue_local_session", return_value={
+        "access_token": "signed-jwt", "refresh_token": "new-refresh",
+        "expires_at": 12345, "expires_in_seconds": 3600,
+    })
     return SimpleNamespace(register=register, tools=tools, skills=skills, mint=mint)
 
 
@@ -51,11 +52,11 @@ async def test_signup_uses_atomic_registration_and_optional_session(signup, auto
     if auto_login:
         assert result["session"] == {
             "access_token": "signed-jwt",
-            "refresh_token": "",
+            "refresh_token": "new-refresh",
             "expires_at": 12345,
             "expires_in_seconds": 3600,
         }
-        signup.mint.assert_called_once_with("native")
+        signup.mint.assert_called_once_with("native", None)
     else:
         assert result["session"] is None
         signup.mint.assert_not_called()
@@ -105,6 +106,7 @@ async def test_asset_owner_signin_checks_feature_before_minting_jwt(mocker):
             "password_hash": "stored",
             "password_login_enabled": True,
             "email_confirmed_at": "confirmed",
+            "token_version": 0,
         },
     )
     mocker.patch.object(auth, "verify_password", return_value=True)

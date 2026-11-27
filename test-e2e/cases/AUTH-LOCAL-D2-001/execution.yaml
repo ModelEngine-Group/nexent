@@ -12,6 +12,8 @@ acceptance_bindings:
   - test_native_http_cas_sid_revocation_remains_effective
   - test_native_account_bootstrap_and_cas_provisioning
   - test_native_http_revoke_disables_credentials_and_api_keys
+  AC-02:
+  - test_native_http_rotates_once_and_replays_only_the_same_request
 preparation:
   families: []
   anchors: false

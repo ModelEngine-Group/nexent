@@ -8,7 +8,7 @@
  * - expires_at is readable from a non-HttpOnly cookie
  */
 import { API_ENDPOINTS } from "@/services/api";
-import { sessionService } from "@/services/sessionService";
+import { sessionService, withLocalSessionLock } from "@/services/sessionService";
 
 import { Session, SessionResponse, AuthInfoResponse } from "@/types/auth";
 import { ASSET_OWNER_TENANT_ID, STATUS_CODES, USER_ROLES } from "@/const/auth";
@@ -281,10 +281,12 @@ export const authService = {
   signOut: async (): Promise<{ error: null }> => {
     authFlowState.beginExplicitLogout();
     try {
-      const response = await fetchWithAuth(API_ENDPOINTS.user.logout, {
-        method: "POST",
-        keepalive: true,
-      });
+      const response = await withLocalSessionLock(() =>
+        fetchWithAuth(API_ENDPOINTS.user.logout, {
+          method: "POST",
+          keepalive: true,
+        })
+      );
       const data = await response.json().catch(() => null);
       const casLogoutUrl = data?.data?.cas_logout_url;
 

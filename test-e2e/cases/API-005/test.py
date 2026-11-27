@@ -7,11 +7,11 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"infra/automation"))
 from local_auth_http import native_runtime, runtime, register, bearer
 pytestmark=[pytest.mark.case_id("API-005"),pytest.mark.stage("D2")]
 
-def test_local_jwt_identity_and_session_without_refresh(runtime):
+def test_local_jwt_identity_and_retired_refresh_rejection(runtime):
     client, auth, helpers, models = runtime
     data = register(client)
     token = data["session"]["access_token"]
-    assert data["session"]["refresh_token"] == ""
+    assert data["session"]["refresh_token"]
     session = client.get("/api/user/session", headers=bearer(token))
     assert session.status_code == 200
     assert session.json()["data"]["user"]["id"] == data["user"]["id"]

@@ -3,8 +3,11 @@
 
 import asyncio
 from datetime import datetime
+from time import time
 
 import asyncpg
+
+from contracts.identity_session import is_local_session_id
 
 
 class IdentityRejected(ValueError):
@@ -88,12 +91,18 @@ class IdentityRepository:
             "SELECT tenant_id FROM nexent.user_tenant_t "
             "WHERE user_id=$1 AND delete_flag='N' ORDER BY user_tenant_id LIMIT 1", user_id))
         session_active = True
-        if kind == "session" and query.get("session_id"):
+        sid = query.get("session_id") if kind == "session" else None
+        if is_local_session_id(sid):
+            session_active = bool(await connection.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM nexent.user_local_session_t "
+                "WHERE session_id=$1 AND user_id=$2 AND revoked_at IS NULL "
+                "AND idle_expires_at>$3 AND absolute_expires_at>$3)", sid, user_id, int(time())))
+        elif sid:
             # CAS stores naive local timestamps today. Gateway and Management
             # deployments use the same TZ; preserve the existing expiry contract.
             session_active = bool(await connection.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM nexent.user_cas_session_t "
                 "WHERE session_id=$1 AND user_id=$2 AND status='active' "
-                "AND delete_flag='N' AND expires_at>$3)", query["session_id"], user_id, datetime.now()))
+                "AND delete_flag='N' AND expires_at>$3)", sid, user_id, datetime.now()))
         return {"account": account, "membership": membership, "token_id": token_id,
                 "session_active": session_active}

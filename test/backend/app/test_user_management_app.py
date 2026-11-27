@@ -468,7 +468,7 @@ class TestRefreshToken:
             data = response.json()
             assert data["message"] == "Token refresh successful"
             assert "session" in data["data"]
-            mock_refresh.assert_called_once_with("old_token", "old_refresh_token")
+            mock_refresh.assert_called_once_with("old_token", "old_refresh_token", None)
 
     def test_refresh_token_no_authorization(self):
         """Test token refresh without authorization header"""
@@ -491,7 +491,7 @@ class TestRefreshToken:
 
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
         data = response.json()
-        assert data["detail"] == "No refresh token provided"
+        assert data["detail"] == "Invalid refresh request"
 
     def test_refresh_token_error(self):
         """Test token refresh with error"""

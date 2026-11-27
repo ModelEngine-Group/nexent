@@ -3,7 +3,7 @@
 
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 MERGED = ROOT / "deploy/sql/migrations/v2.9.0_merged_migrations.sql"
 
 

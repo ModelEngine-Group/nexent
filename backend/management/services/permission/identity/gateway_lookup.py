@@ -2,6 +2,7 @@
 """Authoritative account, membership and credential-state lookup for Gateway."""
 
 from gateway.identity.downstream import IdentityError
+from contracts.identity_session import is_local_session_id
 from contracts.roles import roles_from_record, primary_role
 
 
@@ -10,6 +11,7 @@ def resolve_gateway_identity(query: dict) -> dict:
     from management.db.identity.token import get_token_by_access_key
     from management.db.identity.user_tenant import get_user_tenant_by_user_id
     from management.db.identity.cas_session import is_cas_session_active
+    from management.db.identity.local_session import is_local_session_active
     from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
     kind = query.get("kind")
@@ -31,7 +33,11 @@ def resolve_gateway_identity(query: dict) -> dict:
     if kind == "session":
         if type(query.get("token_version")) is not int or query["token_version"] != account.get("token_version"):
             raise IdentityError("Credentials have changed")
-        if query.get("session_id") and not is_cas_session_active(query["session_id"]):
+        session_id = query.get("session_id")
+        if is_local_session_id(session_id):
+            if not is_local_session_active(session_id, user_id):
+                raise IdentityError("Session is unavailable")
+        elif session_id and not is_cas_session_active(session_id):
             raise IdentityError("Session is unavailable")
     membership = get_user_tenant_by_user_id(user_id)
     if not membership or membership.get("delete_flag") == "Y":

@@ -63,6 +63,8 @@ from management.services.permission.identity.signatures import (
     validate_timestamp,
 )
 from management.db.identity.cas_session import is_cas_session_active
+from management.db.identity.local_session import is_local_session_active
+from contracts.identity_session import is_local_session_id
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.utils.request_context import get_user_language
 from permissions.models import CurrentUser
@@ -348,7 +350,12 @@ def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str
         if not user_id:
             raise TokenExpiredError("Invalid or expired authentication token")
 
-        ensure_cas_session_active_from_authorization(authorization)
+        sid = decoded.get("sid")
+        if is_local_session_id(sid):
+            if not is_local_session_active(sid, user_id):
+                raise TokenExpiredError("Local session has expired or been revoked")
+        else:
+            ensure_cas_session_active_from_authorization(authorization)
 
         user_tenant_record = get_user_tenant_by_user_id(user_id)
         if not user_tenant_record:
@@ -436,7 +443,8 @@ def generate_test_jwt(user_id: str, expires_in: Optional[int] = None) -> str:
 
 
 def generate_session_jwt(
-    user_id: str, expires_in: Optional[int] = None, session_id: str = None
+    user_id: str, expires_in: Optional[int] = None, session_id: str = None,
+    *, issued_at: int | None = None, token_version: int | None = None,
 ) -> str:
     """Generate a signed JWT compatible with the existing auth verification flow."""
     if expires_in is None:
@@ -444,11 +452,12 @@ def generate_session_jwt(
 
     if not JWT_SECRET:
         raise TokenExpiredError("JWT signing is not configured")
-    account = require_active_account(user_id)
-    now = int(time.time())
+    if token_version is None:
+        token_version = require_active_account(user_id)["token_version"]
+    now = int(time.time()) if issued_at is None else issued_at
     payload = {
         "sub": user_id,
-        "ver": account["token_version"],
+        "ver": token_version,
         "role": "authenticated",
         "aud": "authenticated",
         "iat": now,

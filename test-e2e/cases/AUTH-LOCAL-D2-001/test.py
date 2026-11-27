@@ -1,7 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D2: real HTTP router, credentials/JWTs and PostgreSQL without GoTrue."""
 
+import asyncio
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -22,7 +24,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     from management.db.identity.token import create_token
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.services.permission import api_keys
-    from gateway.api import northbound as routes
+    from management.api import northbound as routes
     from management.services.permission.identity import northbound as northbound_auth
 
     client, auth, helpers, models = runtime
@@ -85,7 +87,7 @@ def test_native_http_identity_password_and_api_keys(runtime):
     assert client.get("/api/user/service_health").status_code == 200
     data = register(client)
     token = data["session"]["access_token"]
-    assert data["session"]["refresh_token"] == ""
+    assert data["session"]["refresh_token"]
     assert (
         client.get("/api/user/current_user_id", headers=bearer(token)).json()["data"][
             "user_id"
@@ -140,6 +142,67 @@ def test_native_http_identity_password_and_api_keys(runtime):
     assert signin.json()["data"]["user"]["id"] == data["user"]["id"]
     assert "password_hash" not in signin.text
     assert "NewPassword456" not in signin.text
+
+
+def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, caplog):
+    from contracts.constants import environment
+    from infrastructure.rdb.identity import IdentityRepository
+
+    client, _, helpers, _ = runtime
+    original = register(client)["session"]
+    second = client.post("/api/user/signin", json={"email": "native@example.com", "password": "Password123"})
+    assert second.status_code == 200
+    other = second.json()["data"]["session"]
+
+    def refresh(access, refresh_token, request_id):
+        return client.post(
+            "/api/user/refresh_token",
+            headers={**bearer(access), "X-Refresh-Request-Id": request_id},
+            json={"refresh_token": refresh_token},
+        )
+
+    assert refresh(original["access_token"], other["refresh_token"], "other-device-request").status_code == 401
+    ids = ["concurrent-refresh-one", "concurrent-refresh-two"]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(
+            lambda request_id: refresh(original["access_token"], original["refresh_token"], request_id),
+            ids,
+        ))
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    winner = next(i for i, response in enumerate(responses) if response.status_code == 200)
+    replacement = responses[winner].json()["data"]["session"]
+    assert replacement["refresh_token"] != original["refresh_token"]
+    retry = refresh(original["access_token"], original["refresh_token"], ids[winner])
+    assert retry.status_code == 200
+    assert retry.json()["data"]["session"] == replacement
+    assert client.get("/api/user/current_user_id", headers=bearer(original["access_token"])).status_code == 200
+
+    claims = jwt.decode(replacement["access_token"], options={"verify_signature": False})
+    claims["exp"] = claims["iat"] - 1
+    expired = jwt.encode(claims, helpers.JWT_SECRET, algorithm="HS256")
+    assert refresh(expired, replacement["refresh_token"], "expired-access-request").status_code == 401
+
+    async def gateway_session_active():
+        repo = await IdentityRepository.open(
+            host=environment.POSTGRES_HOST, port=int(environment.POSTGRES_PORT),
+            database=environment.POSTGRES_DB, user=environment.POSTGRES_USER,
+            password=environment.NEXENT_POSTGRES_PASSWORD,
+        )
+        try:
+            snapshot = await repo.snapshot({"kind": "session", "user_id": claims["sub"], "session_id": claims["sid"]})
+            return snapshot["session_active"]
+        finally:
+            await repo.close()
+
+    assert asyncio.run(gateway_session_active())
+    logout = client.post("/api/user/logout", headers=bearer(replacement["access_token"]))
+    assert logout.status_code == 200
+    assert client.get("/api/user/current_user_id", headers=bearer(replacement["access_token"])).status_code == 401
+    assert refresh(replacement["access_token"], replacement["refresh_token"], "revoked-access-request").status_code == 401
+    assert client.get("/api/user/current_user_id", headers=bearer(other["access_token"])).status_code == 200
+    assert not asyncio.run(gateway_session_active())
+    assert original["refresh_token"] not in caplog.text
+    assert replacement["refresh_token"] not in caplog.text
 
 
 def test_native_http_invalid_duplicate_disabled_and_refresh(runtime):
