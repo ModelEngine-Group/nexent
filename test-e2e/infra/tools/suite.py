@@ -512,7 +512,11 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
         for stage in STAGES:
             state["stages"][stage] = "RUNNING"
             save(directory / "status.json", state)
-            for record in [item for item in records if item["stage"] == stage]:
+            stage_records = [item for item in records if item["stage"] == stage]
+            if stage == "D5":
+                trailing_cases = {"PERF-02": 1, "DB-MIGRATION-D5-001": 2}
+                stage_records.sort(key=lambda item: trailing_cases.get(item["case_id"], 0))
+            for record in stage_records:
                 current = fingerprint(repo)
                 if any(current.get(key) != provenance.get(key) for key in
                        ("head", "test_assets_sha256", "tracked_product_diff_sha256", "untracked_product_sha256")) or \

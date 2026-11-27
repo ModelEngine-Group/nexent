@@ -337,6 +337,31 @@ def render_report(directory, plan, rows, summary, *, metadata_directory=None, ev
     def cell(value):
         return str(value if value is not None else "").replace("|", "\\|").replace("\n", "<br>").replace("\r", "")
 
+    performance = []
+    for case_id, filename in (("PERF-02", "conversation-load.json"), ("DB-MIGRATION-D5-001", "upgrade-metrics.json")):
+        path = (metadata_directory or directory) / "cases" / case_id / "runtime" / filename
+        try:
+            evidence = json.loads(path.read_text(encoding="utf-8"))
+            if case_id == "PERF-02":
+                for tier in evidence["tiers"]:
+                    if "summary" not in tier:
+                        continue
+                    measure = tier["summary"]
+                    performance.append(
+                        f"- PERF-02 target {measure['target']} · client peak {measure['client_peak']} · "
+                        f"Runtime peak {measure['execution_peak']} · completion {measure['success_rate']:.1%} · "
+                        f"first content P95 {measure['first_content_p95_seconds']} s"
+                    )
+            else:
+                performance.append(
+                    f"- DB-MIGRATION-D5-001 · {evidence['rows']:,} seeded rows · "
+                    f"upgrade {evidence.get('upgrade_seconds', 'unavailable')} s · budget {evidence['budget_seconds']} s"
+                )
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+    if performance:
+        lines += ["", "## D5 performance evidence", "", *performance]
+
     unsuccessful = [row for row in rows if row["result"] not in {"PASS", "RETIRED", "SKIPPED_BY_POLICY"}]
     lines += ["", "## Case results — not passed only", "",
               "PASS, RETIRED and SKIPPED_BY_POLICY rows are omitted from this detail table. "

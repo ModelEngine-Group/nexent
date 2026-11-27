@@ -4,13 +4,15 @@ implementations:
 - framework: pytest
   file: test.py
   selector: PERF-02
-- framework: pytest
-  file: test-e2e/infra/automation/d5/scenarios/scenario_performance_special.py
-  selector: PERF-02
-notes: V5 source binding migrated; runtime parity is not yet certified.
+required_mock_services:
+- model-provider
+timeout_seconds: 600
+acceptance_bindings:
+  AC-01: [test_perf_02]
+  AC-02: [test_perf_02]
+notes: Owns its mock-backed Agent and conversations. The default Daily stack runs through the local Gateway.
 preparation:
-  families:
-  - basic_agent
-  anchors: true
+  families: []
+  anchors: false
   special_assets: false
   d4_groups: []
