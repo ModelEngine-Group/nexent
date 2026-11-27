@@ -52,16 +52,20 @@ const AidpOntologyBindingDrawer: React.FC<AidpOntologyBindingDrawerProps> = ({
   });
 
   // One KB can bind to only one ontology/jargon library. The KB list already
-  // carries that binding, so candidates need no all-bindings scan.
+  // carries that binding, so candidates need no all-bindings scan. AIDP uses
+  // 0 (or "0") for "unbound", so only a real non-zero id means already bound.
   const candidates = useMemo(
     () =>
       (kbQuery.data?.value ?? []).filter((kb) => {
         const type = kb.bind_lib_type;
-        return (
-          type !== "ontology" &&
-          type !== "jargon" &&
-          (kb.bind_lib_id === null || kb.bind_lib_id === undefined)
-        );
+        const boundId = kb.bind_lib_id;
+        const hasBinding =
+          type === "ontology" ||
+          type === "jargon" ||
+          (boundId !== null &&
+            boundId !== undefined &&
+            String(boundId).trim() !== "0");
+        return !hasBinding;
       }),
     [kbQuery.data?.value]
   );
