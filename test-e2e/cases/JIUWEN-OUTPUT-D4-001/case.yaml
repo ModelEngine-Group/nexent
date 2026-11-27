@@ -13,6 +13,7 @@ case:
   - JIUWEN-OUTPUT-RULE-002
   - JIUWEN-OUTPUT-RULE-003
   - JIUWEN-OUTPUT-RULE-004
+  - JIUWEN-OUTPUT-RULE-007
   title: Jiuwen output contract and display D4
   type: E2E
   priority: P1
@@ -40,6 +41,9 @@ case:
     action: Reload the chat, then load failed/stopped partial and legacy Code messages.
     expected: Saved and live projections agree; partial/error remains visible with
       failed/stopped status, unknown usage is not zero and legacy messages still render.
+  - order: 3
+    action: Send four chat requests with controlled failures, then reload their conversation.
+    expected: Each failure shows its reason and correlation ID in live and restored chat.
   expected_results: &id001
   - Execution process shows same-level ordered content and tool cards, child/A2A results
     and one final answer outside the process. All Core output uses the existing reasoning,
@@ -49,6 +53,7 @@ case:
     identities and terminal validation are retained.
   - Saved and live projections agree; partial/error remains visible with failed/stopped
     status, unknown usage is not zero and legacy messages still render.
+  - The four failure messages keep their distinct causes and correlation IDs across reload.
   forbidden_side_effects:
   - No inferred success from EOF or text; no duplicate final, lost partial, cross-invocation
     tool pairing, invented reasoning or native HTTP bypass.
@@ -59,6 +64,7 @@ case:
   - Open an old chat, send a Jiuwen request containing intermediate text, reasoning,
     business tools, MCP, Skills, child and A2A groups.
   - Reload the chat, then load failed/stopped partial and legacy Code messages.
+  - Send four chat requests with controlled failures and verify their reasons after reload.
   final_business_result: *id001
   failure_evidence:
   - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
@@ -74,3 +80,8 @@ case:
     forbidden_side_effects:
     - 1
     - 2
+  - id: AC-02
+    description: Failed conversation turns show readable reasons and correlation IDs live and after reload.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1, 2]

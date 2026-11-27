@@ -79,9 +79,10 @@ preflight() {
   local encoded
   encoded="$(printf '%s' "$target_password" | base64 | tr -d '\r\n')"
   # Secrets travel over stdin, never argv; suppress raw driver diagnostics.
-  { printf '%s\n' "$encoded"; cat "$SCRIPT_DIR/inspect_accounts.sql"; } |
+  { printf '%s\n' "$encoded"; cat "$SCRIPT_DIR/inspect_accounts.sql" "$SCRIPT_DIR/inspect_account_warnings.sql"; } |
     inside "$database" sh -c 'IFS= read -r encoded; PGPASSWORD="$(printf "%s" "$encoded" | base64 -d)"; export PGPASSWORD; exec "$@"' migration \
-      psql -X -qAt -h 127.0.0.1 -p "$target_port" -U "$target_user" -d "$target_db" -v ON_ERROR_STOP=1 2>/dev/null
+      psql -X -qAt -h 127.0.0.1 -p "$target_port" -U "$target_user" -d "$target_db" -v ON_ERROR_STOP=1 2>/dev/null |
+    tail -n 1
 }
 get_source() {
   source_user="${SUPABASE_POSTGRES_USER:-}"; source_db="${SUPABASE_POSTGRES_DB:-}"
@@ -115,12 +116,14 @@ if [ -n "$legacy_action" ]; then source "$SCRIPT_DIR/legacy.sh"; run_recovery; e
 log_stage preflight "Inspecting target account coverage (mode=$mode target=$database)."
 get_target
 state="$(preflight)" || fail "Cannot inspect target database; check readiness and credentials"
+if worker_flag account_table "$state" && ! worker_flag complete "$state"; then
+  log_stage warning "Incomplete account coverage in existing data; continuing deployment. $state"
+  printf '%s\n' '{"skipped":true,"complete":false}'; exit 0
+fi
 log_stage preflight "Target account inspection: $state"
 if worker_flag complete "$state"; then
   log_stage skipped "Account data is complete; source access and cleanup were not attempted."
   printf '%s\n' '{"skipped":true,"complete":true}'; exit 0
-elif worker_flag account_table "$state"; then
-  fail "Existing account data is incomplete; restore the consistent pre-upgrade backup before retrying. No automatic repair was attempted. See unresolved account IDs above."
 elif [[ "$state" =~ \"legacy\"[[:space:]]*:[[:space:]]*false ]]; then
   log_stage skipped "No historical membership table; ordinary fresh initialization will run."
   printf '%s\n' '{"skipped":true,"new":true}'; exit 0

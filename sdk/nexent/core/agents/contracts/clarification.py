@@ -6,6 +6,7 @@ import ast
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic_core import PydanticCustomError
 
 
 Identifier = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")]
@@ -40,7 +41,7 @@ class ClarificationQuestion(BaseModel):
         if not isinstance(choices, dict) or set(choices) - {"options", "allow_other"}:
             return value
         if any(key in value and value[key] != item for key, item in choices.items()):
-            raise ValueError("Conflicting choice definitions")
+            raise PydanticCustomError("clarification_conflicting_choices", "Conflicting choice definitions")
         return {**{key: item for key, item in value.items() if key != "choices"}, **choices}
 
     @model_validator(mode="after")
@@ -51,15 +52,17 @@ class ClarificationQuestion(BaseModel):
                     or not self.creation_request or "continue_chat" not in choices
                     or not choices <= {"agent_create", "skill_create", "continue_chat"}
                     or not choices.intersection({"agent_create", "skill_create"})):
-                raise ValueError("Invalid Workbench creation confirmation")
+                raise PydanticCustomError("clarification_creation_confirmation", "Invalid Workbench creation confirmation")
         elif self.creation_request is not None:
-            raise ValueError("Creation context requires a Workbench creation confirmation")
+            raise PydanticCustomError("clarification_creation_context",
+                                      "Creation context requires a Workbench creation confirmation")
         if self.type == "text" and (self.options or self.allow_other):
-            raise ValueError("Text questions cannot contain choices or an other-answer field")
+            raise PydanticCustomError("clarification_text_has_choices",
+                                      "Text questions cannot contain choices or an other-answer field")
         if self.type != "text" and len(self.options) < 2:
-            raise ValueError("Choice questions require at least two options")
+            raise PydanticCustomError("clarification_too_few_choices", "Choice questions require at least two options")
         if len({option.id for option in self.options}) != len(self.options):
-            raise ValueError("Option IDs must be unique within a question")
+            raise PydanticCustomError("clarification_duplicate_option_id", "Option IDs must be unique within a question")
         return self
 
 
@@ -70,11 +73,12 @@ class ClarificationForm(BaseModel):
     @model_validator(mode="after")
     def validate_questions(self):
         if len(self.questions) != 1 and any(q.id == "workbench_creation_mode" for q in self.questions):
-            raise ValueError("Ask the creation-mode confirmation separately")
+            raise PydanticCustomError("clarification_mixed_confirmation", "Ask the creation-mode confirmation separately")
         if len({question.id for question in self.questions}) != len(self.questions):
-            raise ValueError("Question IDs must be unique")
+            raise PydanticCustomError("clarification_duplicate_question_id", "Question IDs must be unique")
         if len({question.title for question in self.questions}) != len(self.questions):
-            raise ValueError("Ask distinct questions about the key missing intent")
+            raise PydanticCustomError("clarification_duplicate_question_title",
+                                      "Ask distinct questions about the key missing intent")
         return self
 
 

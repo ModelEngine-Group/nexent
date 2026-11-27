@@ -6,61 +6,57 @@ case:
   feature_id: V5-PERF-02
   business_rule_ids:
   - V5-PERF-02-RULE-01
-  title: SSE并发与断连恢复
+  title: Gateway sustains 50 independent SSE conversations and recovers after load
   type: PERFORMANCE
   priority: P1
   status: active
   automation: automated
-  objective: 多会话streaming连接稳定性
+  objective: Measure the deployed Gateway and Runtime path with deterministic model streams.
   preconditions:
-  - '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-    - ${NEXENT_TEST_HOME}/config/secrets.env
-
-    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  - A local Daily Docker deployment and the controlled model provider are available.
+  - A dedicated test tenant permits temporary model, Agent and conversation creation.
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/config/performance.yaml'
+    profile: mock
   steps:
   - order: 1
-    action: 从 performance.yaml 读取本用例并发量/数据规模/阈值，启动本地真实测试栈并记录机器资源信息。
-    expected: 无事件重复/串话；资源释放；P95首token/完成时延达标。
+    action: Create the owned mock-backed Agent and 50 conversations. Warm up the authenticated Gateway path.
+    expected: The fixture is reachable and returns the exact request marker in a completed response.
   - order: 2
-    action: 准备“SSE并发与断连恢复”所需固定测试数据和真实模型/向量服务（如涉及）。
-    expected: 无事件重复/串话；资源释放；P95首token/完成时延达标。
+    action: Run 10 and 25 conversations for 30 seconds each, then 50 for 120 seconds.
+    expected: All target concurrency levels are reached with at least 99 percent normal completion and correct conversation markers.
   - order: 3
-    action: 并发N个stream，随机断连/resume/stop，统计重复事件/丢事件/内存。
-    expected: 无事件重复/串话；资源释放；P95首token/完成时延达标。
+    action: Collect client and Runtime in-flight counts, SSE timings and container and database resource samples.
+    expected: Capacity, waiting estimates, first content and completion latency are recorded. There are no repeated readiness failures, restarts or out-of-memory kills.
   - order: 4
-    action: 预热一次后再正式测量；记录 P50/P95/P99、吞吐、错误率和资源占用。
-    expected: 无事件重复/串话；资源释放；P95首token/完成时延达标。
-  - order: 5
-    action: 性能场景仍要验证业务正确性，不能以返回快作为唯一通过条件。
-    expected: 无事件重复/串话；资源释放；P95首token/完成时延达标。
-  - order: 6
-    action: 保存原始测量 JSON/CSV、服务日志和环境快照；P2 大型场景失败默认记录但不掩盖 P0/P1结果。
-    expected: 无事件重复/串话；资源释放；P95首token/完成时延达标。
+    action: Drain the load and verify cursor resume, cancellation and a fresh conversation request through Gateway.
+    expected: Runtime work converges, the resumed stream completes its original answer and the stack handles a fresh request.
   expected_results:
-  - 无事件重复/串话；资源释放；P95首token/完成时延达标。
-  forbidden_side_effects: []
+  - The deployed product reaches the target of 50 independent conversations without resource exhaustion or mismatched responses.
+  - Load and recovery metrics are retained and all test-owned resources are released.
+  forbidden_side_effects:
+  - Never send load to a non-local target or reuse conversations owned by a different actor.
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 04_安全性能可靠性
     legacy_row: 13
   risk_type: PERFORMANCE
-  risk: 多会话streaming连接稳定性
+  risk: Concurrent conversation requests can saturate Gateway, Runtime and database resources.
   condition:
-  - '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-    - ${NEXENT_TEST_HOME}/config/secrets.env
-
-    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  - Run a deterministic streaming fixture and the real deployed chat path.
   metrics:
-  - 无事件重复/串话；资源释放；P95首token/完成时延达标。
+  - Client and server in-flight counts, waiting estimates, failure categories, SSE first content and completion latency, CPU, memory and database connections.
   thresholds:
-  - 无事件重复/串话；资源释放；P95首token/完成时延达标。
+  - Sustain a target of 50 simultaneous conversations for 120 seconds with at least 99 percent normal completion, no wrong marker, duplicate terminal, unexpected restart or OOM.
   recovery_expectations:
-  - 无事件重复/串话；资源释放；P95首token/完成时延达标。
+  - In-flight work drains within 60 seconds, and resume, cancellation and new requests work after the load.
+  acceptance:
+  - id: AC-01
+    description: Sustain the measured 50-conversation load and retain resource and stream evidence.
+    steps: [1, 2, 3]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Resume, cancellation, fresh requests and owned-resource cleanup still work after load.
+    steps: [4]
+    expected_results: [2]
+    forbidden_side_effects: [1]

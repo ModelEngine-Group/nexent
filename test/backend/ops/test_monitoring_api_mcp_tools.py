@@ -2,6 +2,7 @@
 """MCP tool monitoring API: service/tool views and the signed refresh lifecycle."""
 
 from base64 import urlsafe_b64encode
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
 from struct import pack
 from types import SimpleNamespace
@@ -35,8 +36,12 @@ def _tool_status(**overrides):
 
 def test_mcp_tools_list_returns_sorted_searchable_items(monitoring_client, monkeypatch):
     client, _ = monitoring_client
+    inventory = [
+        dict(_tool_rows()[0], tool_names=("search_docs", "list_docs")),
+        dict(_tool_rows()[1], tool_names=("translate",)),
+    ]
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (_tool_rows(), [], [date(2026, 11, 17)], _tool_status()))
+                        lambda *_args, **_kwargs: (_tool_rows(), inventory, [date(2026, 11, 17)], _tool_status()))
 
     response = client.get("/ops/v1/monitoring/mcp-tools",
                           params={"start_date": "2026-11-17", "end_date": "2026-11-17",
@@ -44,8 +49,9 @@ def test_mcp_tools_list_returns_sorted_searchable_items(monitoring_client, monke
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["total"] == 2
-    assert [item["tool_name"] for item in data["items"]] == ["search_docs", "translate"]
+    assert data["total"] == 3
+    assert [item["tool_name"] for item in data["items"]] == ["search_docs", "translate", "list_docs"]
+    assert data["items"][2]["metrics"]["request_count"] is None
     assert data["items"][0]["metrics"]["avg_duration_ms"] == 30
     assert response.json()["coverage_state"] == "partial"
 
@@ -57,28 +63,8 @@ def test_mcp_tools_list_returns_sorted_searchable_items(monitoring_client, monke
     paginated = client.get("/ops/v1/monitoring/mcp-tools",
                            params={"start_date": "2026-11-17", "end_date": "2026-11-17",
                                    "dimension": "tools", "page": 2, "page_size": 1})
-    assert paginated.json()["data"]["total"] == 2
+    assert paginated.json()["data"]["total"] == 3
     assert [item["tool_name"] for item in paginated.json()["data"]["items"]] == ["translate"]
-
-
-def test_mcp_tools_summary_keeps_uncovered_windows_none(monitoring_client, monkeypatch):
-    client, _ = monitoring_client
-    params = {"start_date": "2026-11-17", "end_date": "2026-11-17"}
-    monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: ([], [], [], _tool_status(coverage_state="uncovered")))
-
-    uncovered = client.get("/ops/v1/monitoring/mcp-tools/summary", params=params)
-    assert uncovered.json()["data"] == {"service_count": 0, "active_services": 0, "tool_count": 0,
-                                       "active_tools": 0, "request_count": None, "error_count": None,
-                                       "error_eligible_count": None, "error_rate": None, "avg_duration_ms": None}
-
-    monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (_tool_rows(), [], [date(2026, 11, 17)], _tool_status()))
-    covered = client.get("/ops/v1/monitoring/mcp-tools/summary", params=params)
-    assert covered.json()["data"]["tool_count"] == 2
-    assert covered.json()["data"]["request_count"] == 3
-    assert covered.json()["data"]["error_rate"] == 1 / 3
-    assert covered.json()["data"]["avg_duration_ms"] == 70 / 3
 
 
 def test_mcp_tools_trends_keep_missing_dates_separate_from_zero_days(monitoring_client, monkeypatch):
@@ -179,8 +165,7 @@ def test_mcp_tools_list_defaults_to_service_dimension(monitoring_client, monkeyp
     explicit_tools = client.get("/ops/v1/monitoring/mcp-tools",
                                 params={"start_date": "2026-11-17", "end_date": "2026-11-17",
                                         "dimension": "tools"})
-    assert explicit_tools.json()["data"]["total"] == 3
-    assert "active_tools" not in explicit_tools.json()["data"]["items"][0]
+    assert explicit_tools.json()["data"] == {"total": 0, "items": []}
 
 
 def test_mcp_tools_summary_reports_service_and_tool_activity(monitoring_client, monkeypatch):
@@ -201,9 +186,11 @@ def test_mcp_tools_summary_reports_service_and_tool_activity(monitoring_client, 
     data = response.json()["data"]
     assert data["service_count"] == 1
     assert data["active_services"] == 1
-    assert data["tool_count"] == 2
+    assert data["tool_count"] == 0
     assert data["active_tools"] == 2
     assert data["request_count"] == 3
+    assert data["error_rate"] == 1 / 3
+    assert data["avg_duration_ms"] == 10
 
 
 def test_mcp_tools_list_keeps_registered_never_called_servers(monitoring_client, monkeypatch):
@@ -226,7 +213,7 @@ def test_mcp_tools_list_keeps_registered_never_called_servers(monitoring_client,
     # Partial coverage keeps unknown metrics instead of zeroing them; missing rows sort last.
     assert listed["items"][0]["metrics"]["request_count"] == 2
     assert listed["items"][1]["metrics"]["request_count"] is None
-    assert listed["items"][1]["active_tools"] == 0
+    assert listed["items"][1]["active_tools"] is None
 
     summary = client.get("/ops/v1/monitoring/mcp-tools/summary", params=params).json()["data"]
     assert summary["service_count"] == 2 and summary["active_services"] == 1
@@ -398,10 +385,48 @@ def test_mcp_tool_selection_accepts_builtin_server_type(monitoring_client, monke
     assert monitoring.read_mcp_tools.call_args.kwargs["server_type"] == "builtin"
 
 
+def test_builtin_tools_use_published_calls_when_the_directory_is_missing(monitoring_client, monkeypatch):
+    client, _ = monitoring_client
+    day = date(2026, 11, 17)
+    service = {"tenant_id": "tenant", "mcp_server_id": None, "mcp_server_name": "outer-apis",
+               "mcp_server_type": "builtin"}
+    row = {**_tool_rows()[0], **service, "tool_name": "builtin_search", "request_count": 3}
+    converted = {**row, "mcp_server_type": "api_convert", "tool_name": "converted_search", "request_count": 2}
+    monkeypatch.setattr(monitoring, "read_mcp_tools",
+                        Mock(return_value=([row, converted], [service], [day], _tool_status())))
+    params = {"start_date": day.isoformat(), "end_date": day.isoformat(), "server_type": "builtin"}
+    endpoint = "/ops/v1/monitoring/mcp-tools"
+    response = client.get(endpoint, params={**params, "dimension": "tools"})
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert result["total"] == 2
+    assert [(tool["tool_name"], tool["metrics"]["request_count"]) for tool in result["items"]] == [
+        ("builtin_search", 3), ("converted_search", 2),
+    ]
+    assert result["items"][1]["mcp_server_type"] == "api_convert"
+    ranking = client.get(endpoint + "/rankings", params={**params, "dimension": "tools"})
+    assert ranking.json()["data"] == result["items"]
+    summary = client.get(endpoint + "/summary", params=params).json()["data"]
+    assert summary["service_count"] == 1
+    assert summary["tool_count"] == 2
+    assert summary["request_count"] == 5
+    services = client.get(endpoint, params=params).json()["data"]["items"]
+    assert [row["mcp_server_name"] for row in services] == ["outer-apis"]
+    assert services[0]["metrics"]["request_count"] == 5
+
+
 def test_mcp_tools_require_an_available_monitoring_service(monitoring_client, monkeypatch):
-    monkeypatch.setattr(monitoring, "read_mcp_tools", Mock(side_effect=RuntimeError("store down")))
-    response = monitoring_client[0].get("/ops/v1/monitoring/mcp-tools",
-                                        params={"start_date": "2026-11-17", "end_date": "2026-11-17"})
+    from ops.monitoring import query
+
+    client, store = monitoring_client
+    service = client.app.state.monitoring
+    service.publication_snapshot = Mock(return_value=nullcontext(([], None)))
+    store.has_failed_batches.return_value = False
+    monkeypatch.setattr(query, "mcp_server_inventory",
+                        lambda _: [dict(_tool_rows()[0], tool_names=None)])
+    monkeypatch.setattr(query, "_legacy_mcp_tool_names", Mock(side_effect=RuntimeError("directory down")))
+    response = client.get("/ops/v1/monitoring/mcp-tools",
+                          params={"start_date": "2026-11-17", "end_date": "2026-11-17", "dimension": "tools"})
     assert response.status_code == 503
     assert response.json()["message"] == "MCP tool monitoring is temporarily unavailable"
 

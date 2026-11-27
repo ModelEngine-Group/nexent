@@ -384,3 +384,16 @@ async def test_tenant_memory_switch_rejects_anonymous_before_upstream(method):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             response = await client.request(method, "/api/memory/config/tenant-switch")
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("prefix", ["", "/api"])
+def test_presigned_file_proxy_only_allows_anonymous_get(prefix):
+    from gateway.identity.policy import is_public_request
+
+    path = prefix + "/nb/v1/file/fetch"
+    route = default_registry().match("GET", path)
+    assert route.target == "management"
+    assert "anonymous" in route.credential_kinds
+    assert is_public_request("GET", path)
+    assert not is_public_request("POST", path)
+    assert not is_public_request("GET", prefix + "/nb/v1/file/download")

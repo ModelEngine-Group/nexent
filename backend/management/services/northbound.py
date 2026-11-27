@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 
 
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, NorthboundStopInProgressError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
@@ -301,7 +301,31 @@ async def _release_idempotency_after_delay(key: str, seconds: int = 3) -> None:
     await idempotency_end(key)
 
 
-from backend.http.server.northbound import check_and_consume_rate_limit  # noqa: F401 - re-exported
+# The rate limiter core lives in the shared Web layer (backend/http/server/
+# northbound.py); the ops /nb mirror calls it with the shared defaults. This
+# module keeps a thin call that feeds the core with its own long-standing
+# patchable state — the module-level runtime_state_service and rate
+# constants — so this service's callers and tests keep the exact surface
+# they had before the core moved. The in-memory state objects are the shared
+# singletons: clearing them here resets the shared core too.
+from backend.http.server.northbound import (  # noqa: F401 - shared singletons
+    _RATE_LOCK,
+    _RATE_STATE,
+    _minute_bucket,
+)
+from backend.http.server.northbound import (
+    check_and_consume_rate_limit as _shared_check_and_consume_rate_limit,
+)
+
+
+async def check_and_consume_rate_limit(tenant_id: str) -> None:
+    """Consume one request from the tenant's per-minute budget (shared core)."""
+    await _shared_check_and_consume_rate_limit(
+        tenant_id,
+        runtime_state_service=runtime_state_service,
+        enabled=NORTHBOUND_RATE_LIMIT_ENABLED,
+        limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+    )
 
 
 def _build_idempotency_key(*parts: Any) -> str:

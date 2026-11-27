@@ -28,7 +28,7 @@ case:
   automation: automated
   objective: smolagents Agent Core 保留失败尝试和并行调用，冷读不改变聊天结果
   preconditions:
-  - 后端接口与固定 Agent-IT 脚本/绑定已实现；当前脚本使用真实Core/HTTP/文件与独立进程冷读，PG身份/目录仍为受控边界。用户暂缓集成验收，真实PG与部署配置启动证据待补齐。
+  - 固定脚本使用真实Core、HTTP、归档文件、独立进程冷读及专用PostgreSQL运行时探针。探针检查Runtime配置启动、表和序列复用以及部分已提交的聊天历史；完整服务生命周期和公共聊天流持久化仍待验证。
   - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
   - 读取使用可信OPS/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
   - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有授权关系并保存执行摘要/统计快照，轨迹正文及执行清单由文件保存。
@@ -174,12 +174,11 @@ case:
     - AC-013
     - AC-AGENT-INPUT-01
     - AC-MODEL-BODY-01
-    blocked_reason: The fixed script covers actual smolagents retries, parallel and
-      nested tools, cancellation, real HTTP exporter faults, SDK configuration setup
-      and independent-process cold HTTP reads. Live PG schema/sequence and committed
-      chat reconciliation, plus backend environment bootstrap across processes remain
-      unverified. The user has deferred integration acceptance; controlled PG identities
-      and in-process provider configuration do not prove the remaining obligations.
+    blocked_reason: The fixed script also verifies Runtime trajectory configuration in a
+      fresh process with real PostgreSQL, unchanged table and sequence definitions, and
+      a committed source and final answer. Full Runtime and Ops application lifespans,
+      the public chat stream's persistence of the accepted answer, and an independent
+      Ops reader with deployed database and cache configuration remain unverified.
   execution:
     profiles:
     - name: mock

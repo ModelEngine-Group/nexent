@@ -70,6 +70,8 @@ async def resolve_agent_capabilities(
     user_id: str,
     instruction: str,
     version_no: int = 0,
+    *,
+    model_id: int | None = None,
 ) -> CapabilityResolution:
     """Resolve capabilities from the same assembly path used by normal agent runs."""
     from management.services.agent.preparation.compiler import create_agent_config
@@ -82,6 +84,7 @@ async def resolve_agent_capabilities(
         last_user_query=instruction,
         version_no=version_no,
         allow_memory_search=False,
+        override_model_id=model_id,
     )
 
     tool_bindings = [_tool_binding(tool) for tool in getattr(agent_config, "tools", []) or []]
@@ -178,8 +181,12 @@ async def validate_bindings_available(
     instruction: str,
     bindings: List[Dict[str, Any]],
     version_no: int = 0,
+    *,
+    model_id: int | None = None,
 ) -> Dict[str, Any]:
-    resolution = await resolve_agent_capabilities(agent_id, tenant_id, user_id, instruction, version_no)
+    resolution = await resolve_agent_capabilities(
+        agent_id, tenant_id, user_id, instruction, version_no, model_id=model_id,
+    )
     available = _flatten_bindings(resolution.matched_capabilities)
     unavailable = []
     for binding in bindings or []:

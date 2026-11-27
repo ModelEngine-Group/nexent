@@ -421,9 +421,13 @@ class SkillDerivedLocalToolBinding(LocalToolBinding):
     tool_id: PositiveInt
 
 
+# AgentOS validates signed retrieval options independently of the execution SDK.
+_SCOPED_AIDP_CHANNELS = frozenset({"vector_search", "full_text_search", "graph_search"})
+
+
 class ScopedSharedAidpOptions(RunSpecModel):
     kds_list: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(max_length=10)
-    search_method: Literal["hybrid_search", "vector_search", "full_text_search", "graph_search"] | None = None
+    search_method: str | None = None
     reranking_enable: bool | None = None
     reranking_mode: Literal["performance", "high_accuracy", "jargon_coverage"] | None = None
     rewrite_enable: bool | None = None
@@ -431,6 +435,25 @@ class ScopedSharedAidpOptions(RunSpecModel):
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     top_k: int | None = Field(default=None, ge=1, le=100)
     multi_modal: bool | None = None
+
+    vector_candidates: int | None = Field(default=None, ge=1, le=500)
+    full_text_candidates: int | None = Field(default=None, ge=1, le=500)
+    hybrid_top_k: int | None = Field(default=None, ge=0, le=100)
+    graph_top_k: int | None = Field(default=None, ge=0, le=100)
+    vector_score_threshold: float | None = Field(default=None, ge=0, le=1)
+    full_text_score_threshold: float | None = Field(default=None, ge=0, le=1)
+    graph_score_threshold: float | None = Field(default=None, ge=0, le=1)
+    graph_reranking_enable: bool | None = None
+    query_expansion_enable: bool | None = None
+
+    @field_validator("search_method")
+    @classmethod
+    def validate_search_method(cls, value: str | None) -> str | None:
+        if value not in (None, "hybrid_search") and any(
+            channel not in _SCOPED_AIDP_CHANNELS for channel in value.split("|")
+        ):
+            raise ValueError("Unknown AIDP search method")
+        return value
 
     @model_serializer(mode="wrap")
     def serialize_explicit_options(self, handler):

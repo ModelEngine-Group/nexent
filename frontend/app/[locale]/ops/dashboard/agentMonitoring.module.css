@@ -60,13 +60,6 @@
   margin-top: 2px;
 }
 
-.statusList {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 6px 20px;
-}
-
 .publication {
   display: flex;
   flex-wrap: wrap;
@@ -83,25 +76,6 @@
 
 .stale {
   color: var(--color-warning-bold);
-}
-
-.dataHint {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.card dd > .dataHint {
-  display: flex;
-}
-
-.tokenStatusTooltip {
-  display: grid;
-  gap: 4px;
 }
 
 .tokenCardValue {
@@ -354,9 +328,11 @@
 }
 
 .displayNameHeader {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 8px;
   white-space: nowrap;
 }
 

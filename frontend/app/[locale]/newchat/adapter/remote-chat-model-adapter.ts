@@ -5,6 +5,7 @@
 import i18next from "i18next";
 import { recordNl2AgentState } from "./nl2agent-state-history";
 import { messageExecutionStatus } from "@/lib/messageExecutionState";
+import { describeConversationRunError } from "@/lib/conversationRunError";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 import {
   persistModelDrafts,
@@ -44,6 +45,7 @@ import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
 import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+import { publishAutomationConfirmation } from "@/features/agentAutomation/confirmationEvent";
 import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 import type {
@@ -83,6 +85,8 @@ function getRetrievalHighlightTerms(scoreDetails: unknown): string[] {
 interface SseChunk {
   type: string;
   content: string;
+  error_code?: string;
+  request_id?: string | null;
   replayUnavailable?: boolean;
   unit_index?: number;
   // Unique ID shared by a tool call and its side-channel output.
@@ -2892,6 +2896,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
+          if (chunk.type === "automation_confirmation") {
+            publishAutomationConfirmation(chunk.content);
+            continue;
+          }
+
           if (chunk.type === "automation_proposal") {
             const proposal = parseAutomationProposal(chunk.content);
             if (proposal) {
@@ -3162,10 +3171,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // sub-agent reasoning part running so the merged view stays
             // contiguous.
             const textMeta = resolveSubAgent(chunk.invocation_id);
-
+            const error =
+              chunk.type === "error"
+                ? describeConversationRunError(chunk)
+                : undefined;
             const textPart: any = {
               type: "text",
-              text: chunk.content,
+              text: error?.text ?? chunk.content,
+              ...(error?.reference && { errorReference: error.reference }),
               ...(chunk.type === "warning" && { isWarning: true }),
               ...(chunk.type === "error" && { isError: true }),
             };
@@ -3353,6 +3366,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
+          } else if (chunk.type === "automation_confirmation") {
+            publishAutomationConfirmation(chunk.content);
           } else if (chunk.type === "automation_proposal") {
             const proposal = parseAutomationProposal(chunk.content);
             if (proposal) {
@@ -3496,9 +3511,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               }
               yield buildStreamResult(contentParts);
             } else if (partType === "text") {
+              const error =
+                chunk.type === "error"
+                  ? describeConversationRunError(chunk)
+                  : undefined;
               const textPart: any = {
                 type: "text",
-                text: chunk.content,
+                text: error?.text ?? chunk.content,
+                ...(error?.reference && { errorReference: error.reference }),
                 ...(chunk.type === "warning" && { isWarning: true }),
                 ...(chunk.type === "error" && { isError: true }),
               };

@@ -29,6 +29,47 @@ def monitoring_client(monkeypatch):
         yield client, store
 
 
+@pytest.mark.parametrize(
+    "route,read,build,name_field,id_field,dimension",
+    [
+        ("agents", "_read_agent_views", None, "display_name", "agent_id", None),
+        ("models", "_read", "model_rows", "display_name", "model_id", None),
+        ("skills", "_read_skill", "skill_rows", "skill_name", "skill_id", None),
+        ("mcp-tools", "_read_tools", "mcp_server_rows", "mcp_server_name", "mcp_server_id", "services"),
+        ("mcp-tools", "_read_tools", "mcp_tool_rows", "tool_name", "mcp_server_id", "tools"),
+    ],
+)
+def test_monitoring_list_orders_names_before_pagination(
+    monitoring_client, monkeypatch, route, read, build, name_field, id_field, dimension,
+):
+    client, _ = monitoring_client
+    rows = [
+        {"tenant_id": "tenant", id_field: identity, name_field: name}
+        for identity, name in [(1, "Zulu"), (3, "alpha"), (2, "Alpha"), (4, None)]
+    ]
+    # Tool rows have a distinct name even when a service ID identifies the assertion.
+    status = {"coverage_state": "covered"}
+    result = (rows, 4, [], status) if build is None else ([], [], [], status)
+    monkeypatch.setattr(monitoring, read, Mock(return_value=result))
+    if build:
+        monkeypatch.setattr(monitoring, build, Mock(return_value=rows.copy()))
+    params = {
+        "start_date": "2026-11-19", "end_date": "2026-11-19",
+        "sort_by": "name", "descending": "false", "page_size": 2,
+    }
+    if dimension:
+        params["dimension"] = dimension
+    for page, identities in [(1, [2, 3]), (2, [1, 4])]:
+        result = client.get("/ops/v1/monitoring/" + route, params={**params, "page": page})
+        assert result.status_code == 200
+        assert result.json()["data"]["total"] == 4
+        assert [row[id_field] for row in result.json()["data"]["items"]] == identities
+
+    found = client.get("/ops/v1/monitoring/" + route, params={**params, "search": "ALP"})
+    assert found.status_code == 200
+    assert [row[id_field] for row in found.json()["data"]["items"]] == [2, 3]
+
+
 def test_refresh_conflicts_when_any_requested_day_has_no_source(monitoring_client):
     client, store = monitoring_client
     store.states.return_value = [{"statistic_date": date(2026, 11, 17), "source_revision": 0}]
@@ -235,10 +276,12 @@ def test_skill_refresh_reports_store_failure_and_signed_token_errors(monitoring_
 
 
 @pytest.mark.parametrize("requested, expected", [
-    (0, "timed_out"), (datetime.now(timezone.utc).timestamp(), "running"), (0, "uncovered"),
+    (0, "timed_out"), (None, "running"), (0, "uncovered"),
 ])
 def test_skill_refresh_reports_uncovered_or_pending_publication(monitoring_client, requested, expected):
     client, store = monitoring_client
+    if requested is None:
+        requested = datetime.now(timezone.utc).timestamp()
     day = date(2026, 11, 23)
     store.states.return_value = [] if expected == "uncovered" else [
         {"statistic_date": day, "published_source_revision": 1, "source_snapshot_at": None}

@@ -2,16 +2,20 @@
 """Read published monitoring metrics and resource coverage."""
 
 from collections import defaultdict
+from collections.abc import Collection
 from datetime import date, datetime, time, timedelta
+from typing import Literal
 
 from sqlalchemy import func, select
 
 from contracts.constants.environment import LOCAL_MCP_SERVER
+from infrastructure.monitoring.contracts import LOCAL_MCP_NAME
 from infrastructure.rdb.agent_monitoring import excluded_monitoring_agent_ids, monitored_agent_predicate
 from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.mcp_execution_records import McpRecord, ToolInfo
+from infrastructure.rdb.skill_execution_records import SkillInfo
 from management.db.agent.models import AgentInfo
 from management.db.model.models import ModelRecord
-from infrastructure.rdb.skill_execution_records import SkillInfo
 from management.utils.serialization import convert_string_to_list
 from ops.monitoring.agent import summarize_agent
 from ops.monitoring.mcp_tool import summarize as summarize_mcp_tool
@@ -33,11 +37,49 @@ def model_catalog(tenant: str | None) -> list[dict]:
         return [dict(row) for row in session.execute(statement).mappings()]
 
 
-def _read_published_rows(service, *, tenant, kind, start, end, exclude_system_agents=False, **criteria):
+ResourceGroup = int | Literal["ungrouped"]
+
+
+def matches_resource_group(group_ids: Collection[int] | None, resource_group: ResourceGroup | None) -> bool:
+    if resource_group is None:
+        return True
+    if group_ids is None:
+        return False
+    return not group_ids if resource_group == "ungrouped" else resource_group in group_ids
+
+
+def group_scope_ids(tenant: str | None, kind: str, resource_group: ResourceGroup | None) -> set | None:
+    """Resolve current resource identities for a tenant-scoped group selection."""
+    if resource_group is None:
+        return None
+    if kind == "agent":
+        model, id_column, group_column = AgentInfo, AgentInfo.agent_id, AgentInfo.group_ids
+        conditions = [AgentInfo.delete_flag == "N", AgentInfo.version_no == 0,
+                      AgentInfo.tenant_id.is_not(None), monitored_agent_predicate()]
+        as_string = False
+    elif kind == "skill":
+        model, id_column, group_column = SkillInfo, SkillInfo.skill_id, SkillInfo.group_ids
+        conditions = [SkillInfo.delete_flag != "Y", SkillInfo.source != "official"]
+        as_string = True
+    else:
+        return None
+    statement = select(id_column, group_column).where(model.tenant_id == tenant)
+    for condition in conditions:
+        statement = statement.where(condition)
+    with get_db_session() as session:
+        return {
+            str(resource_id) if as_string else resource_id
+            for resource_id, raw in session.execute(statement)
+            if matches_resource_group(convert_string_to_list(raw), resource_group)
+        }
+
+
+def _read_published_rows(service, *, tenant, kind, start, end, exclude_system_agents=False,
+                         resource_scope=None, **criteria):
     rows = []
     with service.publication_snapshot(tenant, kind, start, end) as (states, point):
         published = [row for row in states if row["publish_id"]]
-        if point is not None:
+        if point is not None and (resource_scope is None or resource_scope[1]):
             for offset in range(0, len(published), 250):
                 selection = {"bool": {"should": [
                     filters(tenant_id=state["tenant_id"], statistic_date=state["statistic_date"].isoformat(),
@@ -45,6 +87,9 @@ def _read_published_rows(service, *, tenant, kind, start, end, exclude_system_ag
                     for state in published[offset:offset + 250]
                 ], "minimum_should_match": 1}}
                 constraints = filters(fact_kind=kind, **{name: value for name, value in criteria.items() if value})
+                if resource_scope is not None:
+                    field, ids = resource_scope
+                    constraints["bool"]["filter"].append({"terms": {field: sorted(ids)}})
                 constraints["bool"]["filter"].append(selection)
                 rows.extend(point.documents(constraints))
     if exclude_system_agents and rows:
@@ -104,11 +149,13 @@ def agent_catalog_tenants(agent_id: int | None) -> set[str]:
         return set(session.scalars(statement))
 
 
-def read_agents(service, *, tenant, start: date, end: date, groups, agent_id):
+def read_agents(service, *, tenant, start: date, end: date, groups, agent_id, resource_group=None):
+    scoped = group_scope_ids(tenant, "agent", resource_group) if resource_group is not None else None
     write_failed = service.store.has_failed_batches(tenant, "agent", start, end)
     rows, states, published = _read_published_rows(
         service, tenant=tenant, kind="agent", start=start, end=end,
         initiator_group_ids=groups, agent_id=agent_id, exclude_system_agents=True,
+        **({"resource_scope": ("agent_id", scoped)} if scoped is not None else {}),
     )
     if tenant is not None:
         tenants = {tenant}
@@ -143,13 +190,17 @@ def agent_catalog(tenant: str | None, agent_id: int | None) -> list[dict]:
     return inventory
 
 
-def read_agent_views(service, *, tenant, start: date, end: date, groups, agent_id):
+def read_agent_views(service, *, tenant, start: date, end: date, groups, agent_id, resource_group=None):
     """Join current inventory to one consistent published Agent snapshot."""
     inventory = agent_catalog(tenant, agent_id)
+    scoped = group_scope_ids(tenant, "agent", resource_group) if resource_group is not None else None
+    if scoped is not None:
+        inventory = [item for item in inventory if item.get("agent_id") in scoped]
     write_failed = service.store.has_failed_batches(tenant, "agent", start, end)
     rows, states, published = _read_published_rows(
         service, tenant=tenant, kind="agent", start=start, end=end,
         initiator_group_ids=groups, agent_id=agent_id, exclude_system_agents=True,
+        **({"resource_scope": ("agent_id", scoped)} if scoped is not None else {}),
     )
     tenants = {item["tenant_id"] for item in inventory} | {state["tenant_id"] for state in states}
     if tenant is not None:
@@ -213,7 +264,7 @@ def metric_value(row, metric):
 
 
 def _parse_mcp_group_ids(raw: str | None) -> tuple[int, ...] | None:
-    """Parse the comma-separated access-group column; None keeps the public marker."""
+    """Parse configured access groups and preserve NULL in the catalog response."""
     if raw is None:
         return None
     groups = []
@@ -227,9 +278,8 @@ def _parse_mcp_group_ids(raw: str | None) -> tuple[int, ...] | None:
 def _mcp_group_allowed(record_groups: tuple[int, ...] | None, requested: list[int]) -> bool:
     """Match a group filter against explicitly configured access groups only.
 
-    Public records (``None``) and empty or unparsable configurations never match,
-    so an active group filter selects MCPs explicitly assigned to it; creator and
-    PRIVATE visibility rules from the management surface stay out of monitoring.
+    NULL and empty configurations have no explicit groups. Creator and PRIVATE
+    visibility rules from the management surface stay out of monitoring.
     """
     return bool(set(record_groups or ()) & set(requested))
 
@@ -242,11 +292,8 @@ def mcp_server_inventory(tenant: str | None) -> list[dict]:
     tenant when configured. Group filtering stays with ``read_mcp_tools``.
     """
     from infrastructure.monitoring.catalog import is_container_record
-    from infrastructure.monitoring.contracts import LOCAL_MCP_NAME
-    from infrastructure.rdb.mcp_execution_records import McpRecord
-
     columns = (McpRecord.tenant_id, McpRecord.mcp_id, McpRecord.mcp_name, McpRecord.container_id,
-               McpRecord.config_json, McpRecord.group_ids)
+               McpRecord.config_json, McpRecord.group_ids, McpRecord.registry_json)
     statement = select(*columns).where(McpRecord.delete_flag == "N")
     if tenant is not None:
         statement = statement.where(McpRecord.tenant_id == tenant)
@@ -258,6 +305,7 @@ def mcp_server_inventory(tenant: str | None) -> list[dict]:
         "mcp_server_name": record["mcp_name"],
         "mcp_server_type": "container" if is_container_record(record) else "remote",
         "group_ids": _parse_mcp_group_ids(record["group_ids"]),
+        "tool_names": _mcp_snapshot_names(record.get("registry_json")),
     } for record in records]
     if LOCAL_MCP_SERVER:
         tenants = {tenant} if tenant is not None else {entry["tenant_id"] for entry in inventory}
@@ -271,10 +319,64 @@ def mcp_server_inventory(tenant: str | None) -> list[dict]:
     return inventory
 
 
-def _filtered_mcp_inventory(tenant, groups, server_id, server_type):
+def _mcp_snapshot_names(snapshot: dict | None) -> tuple[str, ...] | None:
+    """Read the persisted snapshot, distinguishing an empty snapshot from an old record."""
+    if not isinstance(snapshot, dict):
+        return None
+    names = snapshot.get("_toolNames")
+    if not isinstance(names, list):
+        tools = snapshot.get("tools")
+        if not isinstance(tools, list):
+            return None
+        names = [tool.get("name") for tool in tools if isinstance(tool, dict)]
+    return tuple(sorted({name for name in names if isinstance(name, str) and name.strip()}))
+
+
+def _legacy_mcp_tool_names(server_ids: list[int]) -> dict[int, set[str]]:
+    """Read legacy tools for selected registrations using the catalog's tenant/service key."""
+    tool = ToolInfo
+    statement = (
+        select(McpRecord.mcp_id, tool.name)
+        .select_from(McpRecord)
+        .join(tool, (tool.author == McpRecord.tenant_id) & (tool.usage == McpRecord.mcp_name))
+        .where(
+            McpRecord.mcp_id.in_(server_ids), McpRecord.delete_flag == "N",
+            tool.source == "mcp", tool.delete_flag != "Y", tool.is_available.is_not(False),
+            tool.name.is_not(None),
+        )
+    )
+    names = defaultdict(set)
+    with get_db_session() as session:
+        for server_id, name in session.execute(statement):
+            if name.strip():
+                names[server_id].add(name)
+    return names
+
+
+def _mcp_tool_inventory(inventory, tool_name):
+    registered = [entry for entry in inventory if entry["mcp_server_id"] is not None]
+    legacy_ids = [entry["mcp_server_id"] for entry in registered if entry.get("tool_names") is None]
+    legacy = _legacy_mcp_tool_names(legacy_ids) if legacy_ids else {}
+    result = []
+    for entry in inventory:
+        server_id = entry["mcp_server_id"]
+        if server_id is None:
+            result.append(entry)
+            continue
+        names = entry.get("tool_names")
+        if names is None:
+            names = sorted(legacy.get(server_id, ()))
+        result.append({**entry, "tool_names": tuple(name for name in names if not tool_name or name == tool_name)})
+    return result
+
+
+def _filtered_mcp_inventory(tenant, groups, server_id, server_type, resource_group=None):
     """Apply the monitoring selection to the registered server inventory."""
     inventory = mcp_server_inventory(tenant)
-    if groups:
+    if resource_group is not None:
+        inventory = [entry for entry in inventory if entry["mcp_server_id"] is not None
+                     and matches_resource_group(entry["group_ids"] or (), resource_group)]
+    elif groups:
         inventory = [entry for entry in inventory if _mcp_group_allowed(entry["group_ids"], groups)]
     if server_id is not None:
         inventory = [entry for entry in inventory if entry["mcp_server_id"] == server_id]
@@ -287,24 +389,21 @@ def _filtered_mcp_inventory(tenant, groups, server_id, server_type):
     return inventory
 
 
-def read_mcp_tools(service, *, tenant, start: date, end: date, groups, server_id, server_type, tool_name):
-    """Read published MCP tool daily documents joined with the registered server inventory.
+def read_mcp_tools(service, *, tenant, start: date, end: date, groups, server_id, server_type, tool_name,
+                   resource_group=None, include_tool_directory=False):
+    """Read published MCP daily documents and the selected registered inventory.
 
-    The group filter matches MCPs explicitly configured for the requested groups
-    (management ``McpRecord.group_ids``): public records and the tenant-local
-    endpoint are excluded while a filter is active, and the Elasticsearch query
-    is constrained to the matching server IDs. Registered never-called servers
-    stay visible through the inventory; there is no tool-level registry, so the
-    tools dimension remains driven by published daily documents.
+    Group filters restrict the Elasticsearch query to current registered server IDs.
+    Detail and summary reads also resolve the current tool directory for those servers.
     """
     write_failed = service.store.has_failed_batches(tenant, "mcp_tool", start, end)
-    inventory = _filtered_mcp_inventory(tenant, groups, server_id, server_type)
+    inventory = _filtered_mcp_inventory(tenant, groups, server_id, server_type, resource_group)
     allowed_ids = sorted({entry["mcp_server_id"] for entry in inventory
                           if entry["mcp_server_id"] is not None})
     rows = []
     with service.publication_snapshot(tenant, "mcp_tool", start, end) as (states, point):
         published = [row for row in states if row["publish_id"]]
-        if point is not None:
+        if point is not None and (resource_group is None or allowed_ids):
             for offset in range(0, len(published), 250):
                 selection = {"bool": {"should": [
                     filters(tenant_id=state["tenant_id"], statistic_date=state["statistic_date"].isoformat(),
@@ -312,12 +411,21 @@ def read_mcp_tools(service, *, tenant, start: date, end: date, groups, server_id
                     for state in published[offset:offset + 250]
                 ], "minimum_should_match": 1}}
                 constraints = filters(fact_kind="mcp_tool")
-                if groups:
+                if groups or resource_group is not None:
                     constraints["bool"]["filter"].append({"terms": {"mcp_server_id": allowed_ids}})
-                for name, value in (("mcp_server_id", server_id), ("mcp_server_type", server_type),
-                                    ("tool_name", tool_name)):
+                for name, value in (("mcp_server_id", server_id), ("tool_name", tool_name)):
                     if value:
                         constraints["bool"]["filter"].extend(filters(**{name: value})["bool"]["filter"])
+                if server_id is None and server_type == "builtin":
+                    constraints["bool"]["filter"].append({"bool": {"should": [
+                        {"term": {"mcp_server_type": "builtin"}},
+                        {"bool": {"filter": [
+                            {"term": {"mcp_server_type": "api_convert"}},
+                            {"term": {"mcp_server_name": LOCAL_MCP_NAME}},
+                        ], "must_not": [{"exists": {"field": "mcp_server_id"}}]}},
+                    ], "minimum_should_match": 1}})
+                elif server_type:
+                    constraints["bool"]["filter"].append({"term": {"mcp_server_type": server_type}})
                 constraints["bool"]["filter"].append(selection)
                 rows.extend(point.documents(constraints))
     available = sorted({row["statistic_date"] for row in published})
@@ -328,20 +436,50 @@ def read_mcp_tools(service, *, tenant, start: date, end: date, groups, server_id
         service, kind="mcp_tool", start=start, end=end, tenants=tenants,
         states=states, published=published, write_failed=write_failed,
     )
+    if include_tool_directory:
+        inventory = _mcp_tool_inventory(inventory, tool_name)
     return rows, inventory, available, status
 
 
-def mcp_tool_rows(rows):
-    """Group published MCP daily documents per (tenant, server identity, tool) entity."""
+def is_local_mcp_tool(row: dict) -> bool:
+    return (row.get("mcp_server_id") is None
+            and row.get("mcp_server_name") == LOCAL_MCP_NAME
+            and row.get("mcp_server_type") in ("builtin", "api_convert"))
+
+
+def mcp_tool_rows(rows, inventory=None, *, covered=False):
+    """Build directory details or, when no inventory is supplied, published activity rows."""
     by_tool = defaultdict(list)
     identities = {}
+    registered = {}
+    for entry in inventory or ():
+        names = entry.get("tool_names")
+        if entry["mcp_server_id"] is None or names is None:
+            continue
+        server_key = (entry["tenant_id"], entry["mcp_server_id"])
+        registered[server_key] = (entry["mcp_server_name"], entry["mcp_server_type"])
+        for name in names:
+            key = (*server_key, *registered[server_key], name)
+            identities[key] = None
+
     for row in rows:
-        key = (row["tenant_id"], row.get("mcp_server_id"), row.get("mcp_server_name"),
-               row.get("mcp_server_type"), row["tool_name"])
+        server_key = (row["tenant_id"], row.get("mcp_server_id"))
+        name_and_type = registered.get(server_key, (row.get("mcp_server_name"), row.get("mcp_server_type")))
+        key = (*server_key, *name_and_type, row["tool_name"])
+        if inventory is not None and key not in identities and not is_local_mcp_tool(row):
+            continue
         by_tool[key].append(row)
-        identities.setdefault(key, {"tenant_id": key[0], "mcp_server_id": key[1], "mcp_server_name": key[2],
-                                    "mcp_server_type": key[3], "tool_name": key[4]})
-    return [{**identity, "metrics": summarize_mcp_tool(by_tool[key])} for key, identity in identities.items()]
+        identities[key] = None
+
+    empty_metrics = summarize_mcp_tool(()) if covered else dict.fromkeys(summarize_mcp_tool(()))
+    items = []
+    for key in identities:
+        tenant, server, name, kind, tool = key
+        items.append({
+            "tenant_id": tenant, "mcp_server_id": server, "mcp_server_name": name, "mcp_server_type": kind,
+            "tool_name": tool, "metrics": summarize_mcp_tool(by_tool[key]) if key in by_tool else empty_metrics,
+        })
+    return items
 
 
 def mcp_server_rows(rows, inventory, *, covered):
@@ -356,19 +494,23 @@ def mcp_server_rows(rows, inventory, *, covered):
     by_server = defaultdict(list)
     tools = defaultdict(set)
     identities = {}
+    registered = {}
     for entry in inventory or ():
         key = (entry["tenant_id"], entry["mcp_server_id"], entry["mcp_server_name"], entry["mcp_server_type"])
+        if key[1] is not None:
+            registered[key[:2]] = key
         identities.setdefault(key, {"tenant_id": key[0], "mcp_server_id": key[1], "mcp_server_name": key[2],
                                     "mcp_server_type": key[3]})
     for row in rows:
         key = (row["tenant_id"], row.get("mcp_server_id"), row.get("mcp_server_name"),
-               row.get("mcp_server_type"))
+               "builtin" if is_local_mcp_tool(row) else row.get("mcp_server_type"))
+        key = registered.get(key[:2], key)
         by_server[key].append(row)
         tools[key].add(row["tool_name"])
         identities.setdefault(key, {"tenant_id": key[0], "mcp_server_id": key[1], "mcp_server_name": key[2],
                                     "mcp_server_type": key[3]})
     empty_metrics = summarize_mcp_tool(()) if covered else dict.fromkeys(summarize_mcp_tool(()))
-    return [{**identity, "active_tools": len(tools[key]),
+    return [{**identity, "active_tools": len(tools[key]) if covered or key in by_server else None,
              "metrics": summarize_mcp_tool(by_server[key]) if key in by_server else empty_metrics}
             for key, identity in identities.items()]
 
@@ -382,19 +524,25 @@ def mcp_server_catalog(tenant: str | None, groups: list[int] | None = None) -> l
     servers explicitly configured for the requested groups, and the per-tenant
     local endpoint collapses into one selectable entry. This is a
     registered-inventory view: the summary endpoint's ``service_count``
-    (servers with published facts) uses a different scope.
+    (registered services plus published history) uses a different scope.
     """
     servers = []
-    local_listed = False
+    builtin = None
     for entry in mcp_server_inventory(tenant):
         if groups and not _mcp_group_allowed(entry["group_ids"], groups):
             continue
-        if entry["mcp_server_id"] is None:
-            if local_listed:
-                continue
-            local_listed = True
-        servers.append({"service_id": entry["mcp_server_id"], "name": entry["mcp_server_name"],
-                        "type": entry["mcp_server_type"]})
+        server_id = entry["mcp_server_id"]
+        if server_id is None and builtin is not None:
+            builtin["instance_count"] += 1
+            continue
+        group_ids = entry["group_ids"]
+        server = {"service_id": server_id, "name": entry["mcp_server_name"],
+                  "type": entry["mcp_server_type"],
+                  "group_ids": None if group_ids is None else list(group_ids)}
+        if server_id is None:
+            server["instance_count"] = 1
+            builtin = server
+        servers.append(server)
     return servers
 
 
@@ -404,8 +552,6 @@ def mcp_services_by_tenant(tenant: str | None) -> list[dict]:
     Registered inventory only: the tenant-local endpoint is intentionally
     excluded because every tenant carries one.
     """
-    from infrastructure.rdb.mcp_execution_records import McpRecord
-
     statement = (select(McpRecord.tenant_id, func.count().label("service_count"))
                  .where(McpRecord.delete_flag == "N").group_by(McpRecord.tenant_id))
     if tenant is not None:
@@ -422,16 +568,20 @@ def skill_catalog(tenant: str | None) -> list[dict]:
         return [dict(row) for row in session.execute(statement).mappings()]
 
 
-def read_skills(service, *, tenant, start: date, end: date, groups, skill_id, skill_name):
+def read_skills(service, *, tenant, start: date, end: date, groups, skill_id, skill_name, resource_group=None):
+    scoped = group_scope_ids(tenant, "skill", resource_group) if resource_group is not None else None
     write_failed = service.store.has_failed_batches(tenant, "skill", start, end)
     rows, states, published = _read_published_rows(
         service, tenant=tenant, kind="skill", start=start, end=end,
         initiator_group_ids=groups, skill_id=skill_id, skill_name=skill_name,
+        **({"resource_scope": ("skill_id", scoped)} if scoped is not None else {}),
     )
     available = sorted({row["statistic_date"] for row in published})
     inventory = [dict(row, skill_id=str(row["skill_id"])) for row in skill_catalog(tenant)
                  if (skill_id is None or str(row["skill_id"]) == str(skill_id))
                  and (skill_name is None or row["skill_name"] == skill_name)]
+    if scoped is not None:
+        inventory = [row for row in inventory if row.get("skill_id") in scoped]
     tenants = {row["tenant_id"] for row in inventory}
     if tenant is not None:
         tenants.add(tenant)

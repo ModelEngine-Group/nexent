@@ -7,6 +7,7 @@ implementations:
 acceptance_bindings:
   AC-01: [PW-TASK-01]
   AC-02: [PW-TASK-01]
+  AC-03: [PW-TASK-01]
 notes: V5 source binding migrated; runtime parity is not yet certified.
 preparation:
   families: []

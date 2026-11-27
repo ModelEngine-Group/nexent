@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: AUTO-WORKBENCH-RUN-20261127
+  change_type: bugfix
+  bug_id: AUTO-WORKBENCH-RUN-20261127
+  title: Execute scheduled tasks bound to Workbench conversations
+  description: Compile an authorized Workbench snapshot for automation and scope mount lookup to the tracked run.
+  observed_behavior: A confirmed Workbench task fails before Runtime admission with AGENTOS_INVALID_BACKGROUND_SOURCE.
+  expected_behavior: Manual and scheduled triggers run using the owned Workbench configuration and project results into the bound conversation.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: AUTO-RUN-D3-001 covers persisted outcomes with a prepared snapshot double and lacks a Workbench input.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-126]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AUTO-RUN-D5-001]
+    added: []
+    modified: [AUTO-RUN-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_agent_automation_workbench_run.py
+    - test/backend/services/test_agent_automation_facade.py::test_create_task_requires_and_reuses_bound_conversation
+    - test/backend/app/test_agentos_workbench_skill_mounts.py::test_mount_callback_uses_the_scoped_running_automation_only
+    behaviors:
+    - Existing Workbench tasks recover the owned conversation configuration and new tasks retain the confirmed configuration.
+    - Background execution compiles the Workbench plan and scoped Skill callbacks reject an invalid run or version.
+    - Ordinary automation retains its existing execution path.
+    reason: Unit coverage exercises the configuration and security boundaries, while D3 proves run admission and persisted results.
+  notes: Reuses the chat-automation-proposal-routing design and the existing F-126 outcome Case. Its fixture owns an isolated schema and run-scoped Redis journals.

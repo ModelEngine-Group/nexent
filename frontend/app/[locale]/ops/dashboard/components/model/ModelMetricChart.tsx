@@ -16,6 +16,8 @@ import { formatAgentMetric } from "../../agentMonitoringValues";
 import { getModelMetric, type ModelTrendMetric } from "./modelMonitoringValues";
 import styles from "../../agentMonitoring.module.css";
 
+const chartHeight = 250;
+
 export function ModelMetricChart({
   title,
   metric,
@@ -87,12 +89,12 @@ export function ModelMetricChart({
           title={t("ops.monitoring.model.metrics.trendsFailed")}
         />
       ) : loading && !trend ? (
-        <div className={styles.chartState}>
+        <div className={styles.chartState} style={{ minHeight: chartHeight }}>
           <Spin aria-label={t("common.loading")} />
         </div>
       ) : hasValues ? (
         <div className={styles.chart} role="group" aria-label={metricLabel}>
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <AreaChart
               data={points}
               margin={{ top: 12, right: 16, left: 0, bottom: 4 }}
@@ -191,6 +193,7 @@ export function ModelMetricChart({
       ) : (
         <Empty
           className={styles.chartState}
+          style={{ minHeight: chartHeight }}
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={emptyText}
         />

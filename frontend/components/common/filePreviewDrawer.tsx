@@ -238,7 +238,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       return "stream";
     }
 
-    const mime = providedFileType?.toLowerCase() || "";
+    const mime = providedFileType?.split(";")[0]?.trim().toLowerCase() || "";
 
     if (mime === "application/pdf") return "pdf";
 
@@ -250,11 +250,12 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
     if (mime === "text/csv") return "csv";
 
-    if (mime === "text/html") return "html";
+    const extension = getFileExtension(fileName);
+    if (mime === "text/html" || ["html", "htm"].includes(extension)) {
+      return "html";
+    }
 
     if (mime === "text/plain") return "text";
-
-    const extension = getFileExtension(fileName);
 
     if (extension === "pdf") return "pdf";
     if (isOfficeExtension(extension)) return officeDetectedType;
@@ -262,7 +263,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       return "image";
     if (["md", "markdown"].includes(extension)) return "markdown";
     if (extension === "csv") return "csv";
-    if (["html", "htm"].includes(extension)) return "html";
     if (["txt", "log", "json", "xml", "yaml", "yml"].includes(extension))
       return "text";
 
@@ -707,7 +707,25 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           return;
         }
 
-        let localPreviewUrl: string | null = null;
+        if (detectedFileType === "html") {
+          resetTextPreviewState();
+          if (isTooLargeToPreview) {
+            setLoading(false);
+            return;
+          }
+          const file =
+            localFile ??
+            (await fetchPreviewBlob(
+              providedPreviewUrl ||
+                storageService.getPreviewUrl(objectName, fileName),
+              signal
+            ));
+          const html = await decodeLocalTextFile(file);
+          if (cancelled) return;
+          setTextContent(html);
+          setLoading(false);
+          return;
+        }
 
         if (isLocalSource && localFile) {
           resetTextPreviewState();
@@ -719,14 +737,14 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
           if (
             isTooLargeToPreview &&
-            ["text", "markdown", "csv", "html"].includes(detectedFileType)
+            ["text", "markdown", "csv"].includes(detectedFileType)
           ) {
             setLoading(false);
             return;
           }
 
           if (detectedFileType === "image" || detectedFileType === "pdf") {
-            localPreviewUrl = URL.createObjectURL(localFile);
+            const localPreviewUrl = URL.createObjectURL(localFile);
             setPreviewUrl(localPreviewUrl);
             previewUrlRef.current = localPreviewUrl;
             setLoading(false);
@@ -746,13 +764,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
           if (detectedFileType === "markdown") {
             setTextContent(await decodeLocalTextFile(localFile));
-            setLoading(false);
-            return;
-          }
-
-          if (detectedFileType === "html") {
-            const html = await decodeLocalTextFile(localFile);
-            setTextContent(html);
             setLoading(false);
             return;
           }
@@ -777,7 +788,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           providedPreviewUrl ||
           storageService.getPreviewUrl(objectName, fileName);
 
-        if (["markdown", "csv", "text", "html"].includes(detectedFileType)) {
+        if (["markdown", "csv", "text"].includes(detectedFileType)) {
           if (cancelled) return;
           textFetchSessionRef.current += 1;
           const sessionId = textFetchSessionRef.current;
@@ -1220,36 +1231,15 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     </div>
   );
 
-  const renderHtmlViewer = () => {
-    return (
-      <div
-        className="h-full w-full overflow-auto bg-white"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          if (
-            !isLocalSource &&
-            el.scrollTop + el.clientHeight >=
-              el.scrollHeight - el.clientHeight * 0.5 &&
-            !isFetchingRef.current &&
-            (totalBytesRef.current === null ||
-              byteOffsetRef.current < totalBytesRef.current)
-          ) {
-            fetchNextTextChunk();
-          }
-        }}
-      >
-        <div
-          className="html-preview-content px-6 py-4"
-          dangerouslySetInnerHTML={{ __html: textContent }}
-        />
-        {loadingMore && (
-          <div className="flex justify-center py-4">
-            <Spin size="small" />
-          </div>
-        )}
-      </div>
-    );
-  };
+  const renderHtmlViewer = () => (
+    <iframe
+      className="block h-full w-full border-0 bg-white"
+      title={fileName}
+      sandbox=""
+      referrerPolicy="no-referrer"
+      srcDoc={`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"><meta name="referrer" content="no-referrer">${textContent}`}
+    />
+  );
 
   const renderCsvViewer = () => {
     if (csvRows.length === 0) {

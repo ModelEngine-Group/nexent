@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Empty, Spin, Table } from "antd";
+import { Alert, Button, Empty, Pagination, Spin, Table } from "antd";
 import { Activity, Sparkles } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -42,7 +42,8 @@ export function SkillMonitoring({
     page: 1,
     pageSize: 10,
     search: "",
-    descending: true,
+    sortBy: "name" as "name" | "usage_count",
+    descending: false,
   });
   const selection = queryKey[3];
   const summary = useQuery({
@@ -65,6 +66,12 @@ export function SkillMonitoring({
     queryFn: ({ signal }) => getSkillMonitoringList(selection!, list, signal),
     enabled: selection !== null,
   });
+  const detailData = details.isError ? undefined : details.data?.data;
+  const total = detailData?.total;
+  if (total !== undefined) {
+    const lastPage = Math.max(1, Math.ceil(total / list.pageSize));
+    if (list.page > lastPage) setList({ ...list, page: lastPage });
+  }
   const summaryData = summary.isError ? undefined : summary.data;
   const summaryLoading =
     scopeLoading || (selection !== null && summary.isPending);
@@ -86,7 +93,7 @@ export function SkillMonitoring({
     0,
     ...ranked.map((row) => row.metrics?.usage_count ?? 0)
   );
-  const formatUsage = (value: number | null) =>
+  const formatCount = (value: number | null) =>
     formatAgentMetric(value, "execution_count", i18n.language);
   const name = (row: SkillMonitoringRow) =>
     row.skill_name || `#${row.skill_id}`;
@@ -186,7 +193,7 @@ export function SkillMonitoring({
                         />
                       </span>
                       <strong className={styles.rankValue}>
-                        {formatUsage(usage)}
+                        {formatCount(usage)}
                       </strong>
                     </li>
                   );
@@ -236,10 +243,15 @@ export function SkillMonitoring({
                 title: t("ops.monitoring.skill.usageColumn"),
                 key: "usage",
                 sorter: true,
-                sortDirections: ["descend", "ascend", "descend"],
-                sortOrder: list.descending ? "descend" : "ascend",
+                sortDirections: ["ascend", "descend"],
+                sortOrder:
+                  list.sortBy === "usage_count"
+                    ? list.descending
+                      ? "descend"
+                      : "ascend"
+                    : null,
                 render: (_, row) =>
-                  formatUsage(row.metrics?.usage_count ?? null),
+                  formatCount(row.metrics?.usage_count ?? null),
               },
               ...(!singleSkill
                 ? [
@@ -259,38 +271,41 @@ export function SkillMonitoring({
                 : []),
             ]}
             rowKey={rowKey}
-            dataSource={details.isError ? [] : (details.data?.data.items ?? [])}
+            dataSource={detailData?.items ?? []}
             loading={scopeLoading || (selection !== null && details.isFetching)}
             locale={{ emptyText }}
-            pagination={
-              details.data?.data.total
-                ? {
-                    current: list.page,
-                    pageSize: list.pageSize,
-                    total: details.data.data.total,
-                    showSizeChanger: true,
-                    pageSizeOptions: [10, 20, 50, 100],
-                  }
-                : false
-            }
-            onChange={(pagination, _, sorter, { action }) =>
-              setList((current) =>
-                action === "sort"
-                  ? {
-                      ...current,
-                      page: 1,
-                      descending:
-                        !Array.isArray(sorter) && sorter.order !== "ascend",
-                    }
-                  : {
-                      ...current,
-                      page: pagination.current ?? 1,
-                      pageSize: pagination.pageSize ?? current.pageSize,
-                    }
-              )
-            }
+            pagination={false}
+            onChange={(_, __, sorter, { action }) => {
+              if (action !== "sort") return;
+              const order = Array.isArray(sorter) ? null : sorter.order;
+              setList((current) => ({
+                ...current,
+                page: 1,
+                sortBy: order ? "usage_count" : "name",
+                descending: order === "descend",
+              }));
+            }}
             size="small"
           />
+          {total !== undefined && (
+            <Pagination
+              className={styles.detailsPagination}
+              current={list.page}
+              pageSize={list.pageSize}
+              total={total}
+              showSizeChanger
+              pageSizeOptions={[10, 20, 50, 100]}
+              showQuickJumper
+              showTotal={(count) =>
+                t("ops.monitoring.skill.details.total", {
+                  total: formatCount(count),
+                })
+              }
+              onChange={(page, pageSize) =>
+                setList((current) => ({ ...current, page, pageSize }))
+              }
+            />
+          )}
         </section>
       }
     />

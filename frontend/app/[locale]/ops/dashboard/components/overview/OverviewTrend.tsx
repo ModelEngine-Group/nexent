@@ -11,17 +11,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type {
-  MonitoringCoverage,
-  MonitoringPublication,
-} from "@/types/operations";
+import type { MonitoringPublication } from "@/types/operations";
 import { PublicationStatus } from "../../AgentMonitoringStatus";
 import styles from "./overview.module.css";
 
 interface OverviewPoint {
   date: string;
   value: number | null;
-  coverage?: MonitoringCoverage;
 }
 
 export function OverviewTrend({
@@ -144,11 +140,6 @@ export function OverviewTrend({
                           ? "—"
                           : number.format(point.value)}
                       </span>
-                      {point.coverage && (
-                        <span>
-                          {t(`ops.monitoring.agent.coverage.${point.coverage}`)}
-                        </span>
-                      )}
                     </div>
                   );
                 }}

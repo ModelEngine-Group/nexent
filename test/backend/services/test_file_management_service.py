@@ -2740,6 +2740,17 @@ class TestResolvePreviewFile:
             assert total_size == 1024
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("extension", ["html", "htm"])
+    async def test_html_preview_resolves_original_bytes_as_plain_text(self, extension):
+        from management.services.file.service import resolve_preview_file
+
+        object_name = f"attachments/user/report.{extension}"
+        with patch_import_context("management.services.file.service.file_exists", return_value=True), \
+             patch_import_context("management.services.file.service.get_file_size_from_minio", return_value=1024), \
+             patch_import_context("management.services.file.service.get_content_type", return_value="text/html"):
+            assert await resolve_preview_file(object_name) == (object_name, "text/plain", 1024)
+
+    @pytest.mark.asyncio
     async def test_office_cache_hit_returns_pdf_path(self):
         """When a valid cached PDF exists, returns converted PDF path without re-converting."""
         from management.services.file.service import resolve_preview_file

@@ -1,155 +1,61 @@
-"""D2 Northbound, notification, configuration, and service-boundary contracts."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from __future__ import annotations
-from shared.factories.conversation import _create_conversation
+"""Config and Runtime routing, authorization, and readiness failures."""
 
-import asyncio
-import time
-import uuid
+from types import SimpleNamespace
 
 import pytest
 
-from shared.auth import sign_in
-from shared.config import load_yaml
-from shared.asset_registry import AssetDependencyError
-from shared.http import MODEL_TIMEOUT, assert_status, client, config_save_payload
-from shared.factories.tenant import with_isolated_accounts
+from shared.http import assert_status, client
+from shared.split_service_boundary import downstream_client, signed_headers, split_service_apps
 
 
-STAGE = pytest.mark.stage("D2")
-
-
-async def _delete_conversation(identity, conversation_id: int) -> None:
-    async with client("runtime", token=identity.access_token) as api:
-        response = await api.delete(f"/conversation/{conversation_id}")
-    assert_status(response, 200)
-
-
-async def _create_api_user(admin_key: str, admin_identity) -> dict:
-    temporary_group_id = None
-    async with client("config", token=admin_identity.access_token) as config_api:
-        default = await config_api.get(f"/groups/tenants/{admin_identity.tenant_id}/default")
-        assert_status(default, 200)
-        group_id = (default.json().get("data") or {}).get("default_group_id")
-        if not group_id:
-            groups = await config_api.post("/groups/list", json={"tenant_id": admin_identity.tenant_id})
-            assert_status(groups, 200)
-            records = groups.json().get("data") or []
-            group_id = records[0].get("group_id") if records else None
-        if not group_id:
-            created = await config_api.post("/groups", json={
-                "tenant_id": admin_identity.tenant_id,
-                "group_name": f"auto-api-users-{uuid.uuid4().hex[:8]}",
-                "group_description": "temporary group for D2 API users",
-            })
-            assert_status(created, 201)
-            group_id = (created.json().get("data") or {})["group_id"]
-            temporary_group_id = int(group_id)
-    async with client("northbound", token=admin_key) as api:
-        response = await api.post(
-            "/nb/v1/api-users/batch",
-            json={"role": "USER", "group_id": int(group_id), "count": 1},
-        )
-    assert_status(response, 201)
-    data = response.json()["data"]
-    users = data.get("users") if isinstance(data, dict) else data
-    assert len(users) == 1
-    users[0]["_temporary_group_id"] = temporary_group_id
-    return users[0]
-
-
-async def _delete_api_user(admin_identity, user_id: str) -> None:
-    async with client("config", token=admin_identity.access_token) as api:
-        response = await api.delete(f"/users/{user_id}")
-    assert_status(response, 200)
-
-
-async def _cleanup_api_user(admin_identity, user: dict) -> None:
-    await _delete_api_user(admin_identity, str(user["user_id"]))
-    group_id = user.get("_temporary_group_id")
-    if group_id:
-        async with client("config", token=admin_identity.access_token) as api:
-            deleted = await api.delete(f"/groups/{group_id}")
-        assert_status(deleted, (200, 404))
-
-
-async def _put_after_rate_limit_window(api, path: str, **kwargs):
-    response = await api.put(path, **kwargs)
-    if response.status_code == 429:
-        # The implementation uses a fixed wall-clock minute bucket and does
-        # not emit Retry-After. Retry once in the next bucket so this case tests
-        # idempotency rather than inheriting traffic from earlier D2 cases.
-        await asyncio.sleep(max(1.0, 61.0 - (time.time() % 60.0)))
-        response = await api.put(path, **kwargs)
-    return response
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-async def _asset_owner_with_key():
-    if load_yaml("environment.yaml").get("features", {}).get("asset_owner") is not True:
-        pytest.skip("SKIPPED_BY_POLICY: asset-owner feature is disabled in config/environment.yaml")
-    try:
-        identity = await sign_in("asset_owner")
-    except (KeyError, RuntimeError) as exc:
-        raise AssetDependencyError(
-            "identities", "asset_owner",
-            detail="Enabled asset-owner feature requires a configured OAuth-provisioned identity",
-        ) from exc
-    if identity.tenant_id != "asset_owner_tenant_id":
-        raise AssetDependencyError(
-            "identities", "asset_owner",
-            detail="Configured identity is not in the asset-owner tenant",
-        )
-    async with client("config", token=identity.access_token) as api:
-        created = await api.post("/user/tokens")
-    assert_status(created, 200)
-    data = created.json().get("data") or created.json()
-    return identity, data["token_id"], data.get("access_key") or data["token"]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-@STAGE
+@pytest.mark.stage("D2")
 @pytest.mark.case_id("API-163")
-@pytest.mark.asyncio
-async def test_split_services_reject_cross_routed_and_unauthenticated_operations() -> None:
-    async with client("config") as config_api, client("runtime") as runtime_api:
-        wrong_runtime = await config_api.put("/conversation/create", json={"title": "wrong service"})
-        wrong_config = await runtime_api.get("/model/list")
-        protected = await runtime_api.get("/agent/automations")
-    assert_status(wrong_runtime, 404)
-    assert_status(wrong_config, 404)
+@pytest.mark.parametrize(
+    ("audience", "owned_method", "owned_path", "wrong_method", "wrong_path"),
+    [
+        ("management", "GET", "/model/list", "POST", "/voice/connectivity"),
+        ("runtime", "POST", "/voice/connectivity", "GET", "/model/list"),
+    ],
+)
+async def test_split_services_reject_cross_routed_and_unauthenticated_operations(
+    split_service_apps, audience, owned_method, owned_path, wrong_method, wrong_path
+):
+    async with downstream_client(split_service_apps[audience], audience) as api:
+        protected = await api.request(owned_method, owned_path)
+        wrong = await api.request(wrong_method, wrong_path, headers=signed_headers(audience, wrong_method, wrong_path))
+
     assert_status(protected, 401)
+    assert protected.json() == {"message": "Gateway identity required or invalid"}
+    assert_status(wrong, 404)
+
+
+@pytest.mark.stage("D2")
+@pytest.mark.case_id("API-163")
+@pytest.mark.parametrize("audience", ["management", "runtime"])
+@pytest.mark.parametrize(("manager_state", "stuck_count"), [("draining", 0), ("running", 1)])
+async def test_direct_readiness_rejects_draining_and_stuck_manager(
+    split_service_apps, monkeypatch, audience, manager_state, stuck_count
+):
+    app = split_service_apps[audience]
+    snapshot = SimpleNamespace(state=manager_state, stuck_count=stuck_count)
+    monkeypatch.setattr(app.state, "thread_manager", SimpleNamespace(snapshot=lambda: snapshot))
+    async with downstream_client(app, audience) as api:
+        live = await api.get("/health/live")
+        ready = await api.get("/health/ready")
+
+    assert_status(live, 200)
+    assert live.json() == {"status": "alive"}
+    assert_status(ready, 503)
+    assert ready.json() == {"status": "not_ready", "manager_state": manager_state, "stuck_count": stuck_count}
+
+
+@pytest.mark.stage("D2")
+@pytest.mark.case_id("API-163")
+async def test_gateway_rejects_anonymous_and_private_requests():
+    async with client("northbound") as api:
+        assert_status(await api.get("/api/agent/automations"), 401)
+        assert_status(await api.post("/api/voice/connectivity"), 401)
+        assert_status(await api.get("/api/openapi.json"), 404)
+        assert_status(await api.get("/api/internal/thread-capacity"), 404)

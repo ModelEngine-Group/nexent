@@ -187,7 +187,7 @@ async def test_directory_searches_both_names_and_pages_after_stable_sort(view_ap
     ascending = (await get(app, sort_by="avg_duration_ms", descending=False)).json()["data"]["items"]
     assert [row["agent_id"] for row in ascending] == list(range(1, 10))
     assert (await get(app, page=100)).json()["data"]["items"] == []
-    reader.assert_called_with(app.state.monitoring, tenant="a", start=DAY, end=DAY, groups=[], agent_id=None)
+    reader.assert_called_with(app.state.monitoring, tenant="a", start=DAY, end=DAY, groups=[], agent_id=None, resource_group=None)
 
 
 @pytest.mark.asyncio

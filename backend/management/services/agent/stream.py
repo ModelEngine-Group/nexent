@@ -302,7 +302,7 @@ class AssistantMessageProjection:
             attempt = data.get("attempt_id")
             if data.get("phase") == "rollback" and isinstance(attempt, str):
                 rollback_model_attempt_units(self.units, attempt)
-        elif self.persist_units and kind and kind not in {"skill_artifact", "file_artifact"}:
+        elif self.persist_units and kind and kind not in {"skill_artifact", "file_artifact", "automation_confirmation"}:
             if continuation:
                 self.current_unit["_content_fragments"].append(content)
             else:

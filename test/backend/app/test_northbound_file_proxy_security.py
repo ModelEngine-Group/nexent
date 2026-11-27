@@ -15,6 +15,12 @@ with pytest.MonkeyPatch.context() as import_mocks:
     from management.api import northbound
 
 
+SIGNED_QUERY = (
+    "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=fixture%2F20261127%2Fus-east-1%2Fs3%2Faws4_request"
+    "&X-Amz-Date=20261127T000000Z&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature=fixture"
+)
+
+
 @pytest.fixture
 def proxy(monkeypatch):
     monkeypatch.setattr(northbound, "MINIO_ENDPOINT", "http://minio:9000")
@@ -56,7 +62,7 @@ def test_signed_download_pins_authority_and_does_not_follow_redirect(proxy, monk
         return real_client(transport=httpx.MockTransport(storage), **kwargs)
 
     monkeypatch.setattr(northbound.httpx, "AsyncClient", client_factory)
-    url = "http://minio:9000/bucket/a%20b.txt?X-Amz-Signature=abc%2Fdef&x=1&x=2"
+    url = f"http://minio:9000/bucket/a%20b.txt?{SIGNED_QUERY}&x=1&x=2"
     result = proxy.get("/nb/v1/file/fetch", params={"presigned_url": url})
     assert result.status_code == (502 if redirect else 200)
     assert len(seen) == 1
@@ -70,7 +76,7 @@ def test_signed_download_pins_authority_and_does_not_follow_redirect(proxy, monk
 
 def test_transport_error_does_not_expose_signed_url(proxy, monkeypatch):
     real_client = httpx.AsyncClient
-    url = "http://minio:9000/bucket/file?X-Amz-Signature=private-signature"
+    url = f"http://minio:9000/bucket/file?{SIGNED_QUERY.replace('Signature=fixture', 'Signature=private-signature')}"
 
     def storage(request):
         raise httpx.ConnectError(f"Could not connect to {request.url}", request=request)
@@ -83,3 +89,11 @@ def test_transport_error_does_not_expose_signed_url(proxy, monkeypatch):
     assert result.status_code == 502
     assert result.json() == {"detail": "Failed to fetch file from storage"}
     assert "private-signature" not in result.text
+
+
+def test_unsigned_object_never_reaches_public_storage(proxy, monkeypatch):
+    outbound = MagicMock(side_effect=AssertionError("Unsigned request reached storage"))
+    monkeypatch.setattr(northbound.httpx, "AsyncClient", outbound)
+    result = proxy.get("/nb/v1/file/fetch", params={"presigned_url": "http://minio:9000/bucket/file"})
+    assert result.status_code == 400
+    outbound.assert_not_called()

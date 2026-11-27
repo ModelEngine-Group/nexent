@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: WB-AIDP-MIGRATED-20261127
+  change_type: bugfix
+  bug_id: WB-AIDP-MIGRATED-20261127
+  title: Accept migrated Workbench AIDP retrieval options in AgentOS
+  description: Match the scoped binding to the combined search methods and tuning fields already supported by the SDK.
+  observed_behavior: The published shared tool resolves successfully but snapshot compilation returns 500 for eleven migrated parameter values.
+  expected_behavior: Workbench completes a signed run with migrated settings while Runtime preserves caller-specific AIDP access.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: The signed Workbench case used only legacy retrieval options for the platform mount.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AOS-TRANSPORT-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Preserve the exact migrated settings in Management export and Runtime materialization.
+    - Omit the null variadic placeholder and reject invalid or unknown options.
+    test_selectors:
+    - test/backend/app/test_agentos_prepared_shared_aidp.py::test_scoped_shared_aidp_exports_migrated_parameters
+    - test/backend/app/test_agentos_prepared_shared_aidp.py::test_scoped_shared_aidp_rejects_invalid_retrieval_options
+    reason: The typed signed payload needs isolated validation and real transport proof.
+  notes: >-
+    SPEC nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/design.md.
+    Runtime owns AC-32. The existing Case owns and disposes its temporary relational catalog,
+    signed HTTP servers and loopback AIDP provider.

@@ -10,23 +10,42 @@ from infrastructure.local_tool_execution import (
     apply_local_search_overrides, build_local_tool, local_tool_binding_id, local_tool_rerank_name, local_tool_revision,
 )
 from infrastructure.local_tool_overrides import seal_tool_overrides
-from infrastructure.rdb.local_tool_records import read_shared_aidp_catalog_tool
+from infrastructure.rdb.local_tool_records import read_shared_aidp_catalog_tool, read_workbench_scoped_aidp_tool
 from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, scoped_shared_aidp_revision
+from management.db.tool.repository import apply_local_tool_descriptions
 from management.services.agent.preparation.knowledge_search import _rerank_bindings
+from management.services.tool.catalog import get_local_tools_description_zh
 from nexent.core.agents.contracts.config import ToolConfig
 
 
 def export_scoped_shared_aidp(
     tool: ToolConfig, agent_id: int, version_no: int, tenant_id: str, language: str,
+    *, allow_workbench_default_aidp: bool = False,
 ) -> ToolBinding:
     catalog_id = tool.metadata[SCOPED_SHARED_AIDP_CATALOG_ID]
-    row = read_shared_aidp_catalog_tool(catalog_id, tenant_id) if type(catalog_id) is int and catalog_id > 0 else None
+    row = None
+    if type(catalog_id) is int and catalog_id > 0:
+        row = read_shared_aidp_catalog_tool(catalog_id, tenant_id)
+        if row is None and allow_workbench_default_aidp:
+            row = read_workbench_scoped_aidp_tool(catalog_id, agent_id, version_no)
     if row is None:
         raise ValueError("Scoped shared AIDP requires an available tenant catalog tool")
-    options = ScopedSharedAidpOptions.model_validate(tool.params)
+    params = dict(tool.params)
+    # Some catalogs record the variadic constructor argument as an empty default.
+    if params.get("kwargs") is None:
+        params.pop("kwargs", None)
+    options = ScopedSharedAidpOptions.model_validate(params)
     base = build_local_tool(row, language, None, row["inputs"])
-    if base.model_copy(update={"params": options.model_dump(), "metadata": tool.metadata}) != tool:
-        raise ValueError("Scoped shared AIDP differs from its catalog tool")
+    expected = base.model_copy(update={"params": options.model_dump(), "metadata": tool.metadata})
+    actual = tool.model_copy(update={"params": params})
+    if expected != actual:
+        sdk_info = get_local_tools_description_zh().get(row["name"])
+        if sdk_info is not None:
+            localized = {"inputs": row["inputs"]}
+            apply_local_tool_descriptions(localized, sdk_info)
+            expected = expected.model_copy(update=localized)
+        if expected != actual:
+            raise ValueError("Scoped shared AIDP differs from its catalog tool")
     binding = ScopedSharedAidpBinding(
         catalog_tool_id=catalog_id, revision=scoped_shared_aidp_revision(tenant_id, agent_id, version_no, row),
         options=options,

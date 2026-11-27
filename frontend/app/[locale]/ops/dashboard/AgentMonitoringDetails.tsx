@@ -11,7 +11,6 @@ import type {
   AgentMonitoringRow,
 } from "@/types/agentMonitoring";
 import type { OperationsResource } from "@/types/operations";
-import { PublicationStatus, TokenCoverage } from "./AgentMonitoringStatus";
 import {
   formatAgentMetric,
   getAgentSuccessRate,
@@ -25,8 +24,8 @@ const defaultList: AgentListRequest = {
   page: 1,
   pageSize: 10,
   search: "",
-  sortBy: "execution_count",
-  descending: true,
+  sortBy: "name",
+  descending: false,
 };
 
 export function AgentMonitoringDetails({
@@ -65,7 +64,7 @@ export function AgentMonitoringDetails({
     placeholderData: keepPreviousData,
   });
   const response = details.isPlaceholderData ? undefined : details.data;
-  const total = details.data?.data.total;
+  const total = response?.data.total;
   const lastPage = Math.max(1, Math.ceil((total ?? 0) / list.pageSize));
   if (listScope === scope && response && list.page > lastPage) {
     setList({ ...list, page: lastPage });
@@ -87,7 +86,7 @@ export function AgentMonitoringDetails({
     key,
     title,
     sorter: true,
-    sortDirections: ["descend", "ascend", "descend"],
+    sortDirections: ["ascend", "descend"],
     sortOrder:
       list.sortBy === key ? (list.descending ? "descend" : "ascend") : null,
     align: "right" as const,
@@ -156,32 +155,15 @@ export function AgentMonitoringDetails({
     },
     {
       ...sortColumn("total_tokens", t("ops.monitoring.agent.tokenCard")),
-      render: (_, row) => {
-        const usage = row.tokens.total_tokens;
-        return (
-          <Tooltip
-            color="var(--color-bg-3)"
-            title={
-              <>
-                <TokenCoverage usage={usage} />
-                <PublicationStatus
-                  label={t("ops.monitoring.agent.tokens")}
-                  publication={row.token_status}
-                />
-              </>
-            }
-            styles={{ container: { color: "var(--color-text-primary)" } }}
-          >
-            <span className={styles.tokenValue} tabIndex={0}>
-              {formatAgentMetric(
-                usage?.value ?? null,
-                "total_tokens",
-                i18n.language
-              )}
-            </span>
-          </Tooltip>
-        );
-      },
+      render: (_, row) => (
+        <span className={styles.tokenValue}>
+          {formatAgentMetric(
+            row.tokens.total_tokens?.value ?? null,
+            "total_tokens",
+            i18n.language
+          )}
+        </span>
+      ),
     },
     {
       ...sortColumn("avg_duration_ms", label("duration")),
@@ -226,13 +208,12 @@ export function AgentMonitoringDetails({
   const onTableChange: NonNullable<
     TableProps<AgentMonitoringRow>["onChange"]
   > = (_pagination, _filters, sorter, extra) => {
-    if (extra.action !== "sort" || Array.isArray(sorter) || !sorter.columnKey)
-      return;
+    if (extra.action !== "sort" || Array.isArray(sorter)) return;
     setList((current) => ({
       ...current,
       page: 1,
-      sortBy: sorter.columnKey as AgentListSort,
-      descending: sorter.order !== "ascend",
+      sortBy: sorter.order ? (sorter.columnKey as AgentListSort) : "name",
+      descending: sorter.order === "descend",
     }));
   };
 
@@ -247,18 +228,6 @@ export function AgentMonitoringDetails({
       </h2>
       {details.isError && (
         <Alert type="error" showIcon title={label("failed")} />
-      )}
-      {response && (
-        <div className={styles.statusList}>
-          <PublicationStatus
-            label={t("ops.monitoring.agent.executionStatus")}
-            publication={response}
-          />
-          <PublicationStatus
-            label={t("ops.monitoring.agent.tokens")}
-            publication={response.token_status}
-          />
-        </div>
       )}
       <Table<AgentMonitoringRow>
         columns={columns}

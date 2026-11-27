@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: TRAJECTORY-EVIDENCE-RERUN-20261126
+  change_type: test-fix
+  title: Repair trajectory test compatibility with the current runtime
+  description: >-
+    Check the mounted trajectory path and method allowlist through FastAPI's
+    OpenAPI schema. Resolve the repository imports and test interpreter in
+    subprocess fixtures, and supply the current identity fields in the
+    archive browser fixture. Give the TTFT fixture explicit sampling and a
+    fallback-eligible configured temperature, and read OTLP integer values
+    using their JSON wire representation. Check that active snapshots expose
+    typed input while generated output is published with the final span, as
+    specified by CHAT-TRAJECTORY-FINAL-OUTPUT-20261113 and TRJ-RULE-001.
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-RECOVERY-D5-001
+    - CHAT-TRAJECTORY-ARCHIVE-RECOVERY-D5-001
+    - CHAT-TRAJECTORY-ARCHIVE-SECURITY-D5-001
+    - CHAT-TRAJECTORY-TTFT-D3-001
+    retired: []
+  notes: >-
+    These Cases declare self-contained preparation. The query fixture shuts
+    down its TestClient and managed workers, recovery owns its child processes
+    and temporary directories, archive checks own their temporary payloads
+    and browser processes, and TTFT owns its loopback provider and tracer.

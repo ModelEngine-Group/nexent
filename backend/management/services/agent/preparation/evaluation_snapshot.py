@@ -53,7 +53,9 @@ from infrastructure.mcp_execution import (
     MCP_ARGUMENT_OVERRIDES, apply_mcp_argument_overrides, build_mcp_tool, mcp_binding_identity,
     mcp_execution_revision, select_mcp_server,
 )
-from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_skill_derived_local_tools
+from infrastructure.rdb.local_tool_records import (
+    read_bound_local_tools, read_skill_derived_local_tools, read_workbench_default_aidp_tools,
+)
 from infrastructure.rdb.mcp_execution_records import (
     read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
 )
@@ -378,7 +380,7 @@ async def prepare_conversation_snapshot(
     before_message_index: int | None = None, new_conversation: bool = False,
     metadata_from_northbound: bool = False, workbench: "PreparedWorkbench | None" = None,
     native_knowledge: PreparedNativeKnowledge | None = None, owned_conversation: dict | None = None,
-    preserve_shared_reasoning: bool = False,
+    preserve_shared_reasoning: bool = False, automation_confirmation: bool = False,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -408,7 +410,7 @@ async def prepare_conversation_snapshot(
         )
     from infrastructure.memory_io import memory_deadline, optional_memory_io
 
-    automation_proposal_only = request.entrypoint == "automation"
+    automation_proposal_only = request.entrypoint == "automation" or automation_confirmation
     memory_query_deadline = memory_deadline()
     memory_enabled = not automation_proposal_only and bool(await optional_memory_io(
         "snapshot-memory-policy", get_memory_switch, user_id, deadline=memory_query_deadline,
@@ -684,8 +686,9 @@ def _export_memory_search(agent, allow_memory):
 def _export_resource(
     agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
     allow_debug_planning=False, workbench_skills=(), workbench_knowledge_tools=None, allow_sandbox_policy=False,
-    user_id=None,
+    user_id=None, allow_workbench_default_aidp=False,
 ):
+    allow_workbench_default_aidp = allow_workbench_default_aidp and agent.origin == "SYSTEM"
     if agent.sandbox_policy and not allow_sandbox_policy:
         raise ValueError("Unsupported prepared resource")
     memory_search = _export_memory_search(agent, allow_memory)
@@ -751,6 +754,9 @@ def _export_resource(
         and SCOPED_SHARED_AIDP_CATALOG_ID not in (tool.metadata or {})
     ]
     local_candidates = read_bound_local_tools(*local_scope, local_names) if local_names else []
+    if (allow_workbench_default_aidp and "aidp_search" in local_names
+            and not any(row["name"] == "aidp_search" for row in local_candidates)):
+        local_candidates.extend(read_workbench_default_aidp_tools(agent.agent_id, agent.version_no))
     unresolved_local = sorted(set(local_names) - {row["name"] for row in local_candidates})
     if unresolved_local and authorized:
         local_candidates.extend(
@@ -780,7 +786,10 @@ def _export_resource(
             tool_id = tool.name if tool.name == "knowledge_base_search" else KNOWLEDGE_TOOL_BINDING_PREFIX + tool.name
             binding = ToolBinding(tool_id=tool_id, version="1", parameters=descriptor.model_dump(mode="json"))
         elif tool.name == "aidp_search" and SCOPED_SHARED_AIDP_CATALOG_ID in (tool.metadata or {}):
-            binding = export_scoped_shared_aidp(tool, agent.agent_id, agent.version_no, tenant_id, language)
+            binding = export_scoped_shared_aidp(
+                tool, agent.agent_id, agent.version_no, tenant_id, language,
+                allow_workbench_default_aidp=allow_workbench_default_aidp,
+            )
         elif is_catalog_local_tool(tool):
             binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language, user_id=user_id)
         elif EvaluationAnalysisTool.for_class_name(tool.class_name) is not None:
@@ -926,6 +935,9 @@ def compile_snapshot(
             workbench_skills=workbench_skills,
             workbench_knowledge_tools=workbench_knowledge_tools,
             allow_sandbox_policy=True, user_id=user_id,
+            allow_workbench_default_aidp=(
+                prepared_conversation is not None and prepared_conversation.workbench_config_version is not None
+            ),
         )
         stage = "model"
         bindings = [

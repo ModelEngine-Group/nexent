@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: TRAJECTORY-ISOLATION-RETENTION-20261127
+  change_type: test-fix
+  title: Add PostgreSQL and managed-worker proofs for trajectory risks
+  description: >-
+    Exercise trajectory roles, tenant membership and cleanup scope through the
+    Ops HTTP boundary using actual PostgreSQL. Run independent retention
+    subprocesses with the current infrastructure import path. Assert that
+    the maintenance thread wakes at Beijing midnight and retries a confirmed
+    deletion after a competing process releases the archive lock. Verify that
+    single and batch Management deletions commit before notifying the worker.
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-ISOLATION-D5-001, CHAT-TRAJECTORY-RETENTION-D5-001]
+    retired: []
+  notes: >-
+    Observability owns both Cases. Existing D2 and UT continue to cover request
+    and storage branches. The new proofs use UUID-owned scratch databases,
+    temporary signing keys, managed workers and owned POSIX files. Test teardown
+    restores the product connection and joins workers before dropping the scratch
+    database. Complete browser, archive security and HTTP lifecycle obligations
+    remain blocked as documented in each Case.

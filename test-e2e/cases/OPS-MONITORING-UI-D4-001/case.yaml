@@ -19,21 +19,21 @@ case:
   steps:
   - order: 1
     action: Visit the dashboard, inspect its tabs and overview, and change the tenant and dates using presets and a custom interval.
-    expected: The overview presents four cards and four trend positions. Tenant changes update authorized totals and trends. Date changes update only the trends. Loading, error, unavailable, missing and zero values remain distinct.
+    expected: The overview presents four cards and four trend positions. Tenant changes update authorized totals and trends. Date changes update only the trends. The date picker blocks future UTC calendar dates. Loading, error, unavailable, missing and zero values remain distinct.
   - order: 2
     action: Select a tenant, group and Agent, inspect Model cards and trends, page, search, sort and clear Model details, open Model statistics from a row and refresh, then switch tenants and return.
-    expected: Model search and sort submit to the Model endpoint on page one with the selected scope. Pagination keeps the active order. A row action selects its tenant and model ID while the dates stay selected. Escape returns focus to the icon. Tabs share tenant, group and dates, and changing tenants clears group and resource selections.
+    expected: Model search and sort submit to the Model endpoint on page one with the selected scope. Pagination keeps the active order. Clearing the metric sort restores name order and keeps the search. A row action selects its tenant and model ID while the dates stay selected. Escape returns focus to the icon. Model keeps tenant and dates and has no group control or group query parameters. Changing tenants clears group and resource selections.
   - order: 3
     action: Inspect MCP metrics, rankings and details. Search, sort and page the list. Drill to a service and tool using a ranking or row. Change the service, refresh, then change tenants.
     expected: The cards, trend, ranking and detail columns match each selection. Summary and daily call data follow the active scope. The service and tool Top 5 follow server order. Details search, sort and page on the server. Ranking and row navigation select the next resource in its authorized tenant while preserving the interval. Service and tenant changes clear dependent selections and preserve dates. The tool directory stays limited to registered services in the session tenant. Refresh rereads the active directories and metric queries, including the current list and eligible ranking.
   - order: 4
     action: Inspect Agent cards and switch between call count, success rate and Token trend. Change the group and refresh.
-    expected: The inventory count stays stable under group and date filtering. Summary and trend requests use the current scope. Token values preserve large integers and report usage coverage separately from publication status. Refresh repeats both reads.
+    expected: The inventory count stays stable under group and date filtering. Summary and trend requests use the current scope. The Token card uses a compact value and shows the full integer on hover. Missing values stay distinct from zero. Refresh repeats both reads.
   - order: 5
     action: Hold a request, change the Agent scope, release the earlier response, and exercise empty and failed reads.
-    expected: Overview and trend loading resolve independently. Missing samples, no data, failure and true zero remain distinguishable. Earlier responses cannot replace the current Agent view.
+    expected: Overview and trend loading resolve independently. The trend starts on call count and can switch to Token or success rate. Missing samples, no data, failure and true zero remain distinguishable. Earlier responses cannot replace the current Agent view.
   - order: 6
-    action: Inspect Agent rows and publication, page and sort, open search from the display-name header, search each name field, clear the search, and drill into an Agent from the second tenant.
+    action: Inspect Agent rows, page and sort, open search from the display-name header, search each name field, clear the search, and drill into an Agent from the second tenant.
     expected: Display names occupy one line without a tenant subtitle. Search uses the current scope and preserves empty and error responses. Detail rows preserve missing and zero values and exact Tokens. Drilling into a directory Agent changes the dashboard to that Agent and tenant.
   - order: 7
     action: Switch each ranking metric, change the date and group while on a later detail page, refresh, and select a single Agent.
@@ -43,20 +43,20 @@ case:
     expected: The chart and table read the second tenant and model ID for the original dates. The selected model is visible and the operator can return to all models.
   - order: 9
     action: Open Skill monitoring for a tenant, apply a user group, search by name, open a Skill from details, change dates, refresh, then exercise a tenant without published statistics and failed reads.
-    expected: Cards, daily trend, Top 5 and details read the selected scope. The catalog and its source remain visible without published statistics, and missing usage stays distinct from a true zero or failure. Refresh rereads the active statistics and directories. Changing the tenant clears the group and Skill and keeps the dates.
+    expected: Cards, daily trend, Top 5 and details read the selected scope. The catalog and its source remain visible without published statistics, and missing usage stays distinct from a true zero or failure. Refresh rereads the active statistics and directories. Changing to an incompatible resource group clears the Skill selection. Changing the tenant clears the group and Skill and keeps the dates.
   expected_results:
   - The dashboard exposes the intended filters with deterministic calendar dates and explicit unavailable statistics for unconnected resources.
   - Tenant and MCP service transitions clear their dependent selections. MCP refresh rereads its applicable directory, summary, trends, ranking and list queries.
-  - Agent cards and trend match the active scope and preserve value and publication semantics.
+  - Agent cards and trend match the active scope and distinguish missing metric values from zero.
   - Statistics requests refresh within the active range and stale responses never overwrite it.
-  - The Agent table supports server search, metric sorting, paging and tenant-qualified drilldown while preserving the list's own publication and request states.
+  - The Agent table supports server search, metric sorting, paging and tenant-qualified drilldown while preserving missing values and request states.
   - All-Agent ranking and single-Agent outcomes follow the active filters. Date and group changes reset only list pagination.
-  - The overview shows current Agent, Model, registered MCP service and Skill inventory and daily use. Dates change the MCP trend request while keeping its registered inventory count.
+  - The overview shows current Agent, Model, MCP service and Skill inventory and daily use. Dates change the MCP trend request while keeping its current inventory count.
   - Both detail tables use column search, keep separate search state and submit to their own list endpoints.
   - Model cards use inventory and the scoped summary. Both charts share a single scoped trends read. Switching the left metric does not request data. Refresh rereads summary, trends and the current list.
-  - Model metric sorting retains the search, page size, tenant, group and dates. The sorted list follows server order across pages. The primary-name hint matches server search and a row can open its tenant-qualified Model statistics.
+  - Model metric sorting retains the search, page size, tenant and dates. The sorted list follows server order across pages. The primary-name hint matches server search and a row can open its tenant-qualified Model statistics.
   - The Skill view uses tenant-scoped choices and reads published summary and daily trend data. The all-Skill view shows a catalog total and usage. The single-Skill view shows its usage and daily trend. Missing points remain missing and failed reads stay distinct from uncovered data.
-  - All MCP services show the current service count, call count, daily trend, service Top 5 and service details. A selected service shows tool count, call count, daily trend, tool Top 5 and tool details. A selected tool shows call count, a full-width daily trend and tool details without row actions. The connected cards and trend distinguish a covered zero from an unpublished value or a failed read. The current service count uses the registered catalog regardless of date or group. Ranking and details use the same scope. Changing list search or order resets the page and does not request the other statistics. Addressable rows and ranking items drill to the service or tool, including published tools outside the session tenant.
+  - All MCP services show the current service count, call count, daily trend, service Top 5 and service details. A selected service shows tool count, call count, daily trend, tool Top 5 and tool details. A selected tool shows call count, a full-width daily trend and tool details without row actions. The connected cards and trend distinguish a covered zero from an unpublished value or a failed read. The current service count uses the group-filtered current catalog, including eligible built-in service instances, regardless of date. Services without published calls remain visible. Changing to the ungrouped filter clears an incompatible service and tool, includes a registered service with NULL groups, and excludes the built-in service. An uncovered registered service retains its current tool count and tool rows with unavailable counters. Ranking and details use the same scope. Changing list search or order resets the page and does not request the other statistics. Addressable rows and ranking items drill to the service or tool, including published tools outside the session tenant.
   forbidden_side_effects:
   - Statistics use the connected Agent, Model, Skill and MCP GET routes. Table controls do not refresh the cards, trends or ranking. No forced rebuild, single-Agent ranking, cross-tenant MCP tool directory request is sent.
   actor: Authorized super administrator
@@ -123,7 +123,7 @@ case:
     expected_results: [11]
     forbidden_side_effects: [1]
   - id: AC-12
-    description: MCP selection and drilldown switch between the three metric layouts, retain dates under tenant and service changes, read the ranked and paged published results, and distinguish zero, missing and error states.
+    description: MCP selection and drilldown switch between the three metric layouts, retain dates under tenant and service changes, read rankings and paged directory details, and distinguish zero, missing and error states even for tools without published calls.
     steps: [3]
     expected_results: [12]
     forbidden_side_effects: [1]

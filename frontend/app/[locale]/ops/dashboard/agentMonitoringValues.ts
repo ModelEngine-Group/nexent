@@ -25,7 +25,8 @@ export function agentMonitoringSelection(
   return {
     tenantId: agent?.tenant_id ?? tenantId,
     agentId: agent?.id ?? null,
-    groupIds: group ? [Number(group)] : [],
+    groupIds: [],
+    ...(group ? { resourceGroup: group } : {}),
     startDate: range[0],
     endDate: range[1],
   };

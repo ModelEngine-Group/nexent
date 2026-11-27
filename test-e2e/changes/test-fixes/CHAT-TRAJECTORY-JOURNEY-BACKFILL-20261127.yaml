@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-JOURNEY-BACKFILL-20261127
+  change_type: test-fix
+  title: Repair and strengthen the trajectory browser journey
+  description: >-
+    Align the fixture with the current authorization response. Exercise the
+    visible directory options, keyboard row activation, list cancellation,
+    explicit refresh, availability states, locale, and role denial in the
+    real frontend with controlled HTTP responses. Register the intentional
+    schedule-save failure with the D4 runner for that request and status.
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001]
+    retired: []
+  notes: >-
+    The November 23 batch recorded a planning block. A local Chromium probe
+    identified stale authorization fixture fields and a locator that clicked
+    Ant Design's hidden virtual option. Existing trajectory display, hooks,
+    body-loading, and service UT exercise these component boundaries.
+    The existing D4 Case adds browser and HTTP evidence for the implemented
+    scenarios. The observability-owned Case remains blocked while its remaining
+    acceptance assertions are incomplete. The Case owns its browser context and
+    intercepted requests and provisions no shared resources.

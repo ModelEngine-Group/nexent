@@ -45,7 +45,8 @@ describe("Agent monitoring values", () => {
     ).toEqual({
       tenantId: "b",
       agentId: 8,
-      groupIds: [12],
+      groupIds: [],
+      resourceGroup: "12",
       startDate: range[0],
       endDate: range[1],
     });
@@ -147,10 +148,13 @@ describe("Agent monitoring values", () => {
 describe("Agent monitoring requests", () => {
   const fetch = vi.mocked(fetchWithAuth);
   const signal = new AbortController().signal;
-  const selection = agentMonitoringSelection("a&b", range, "12", {
-    id: 8,
-    tenant_id: "a&b",
-  })!;
+  const selection = {
+    ...agentMonitoringSelection("a&b", range, "", {
+      id: 8,
+      tenant_id: "a&b",
+    })!,
+    groupIds: [12],
+  };
   const list = {
     page: 3,
     pageSize: 10,
@@ -160,6 +164,20 @@ describe("Agent monitoring requests", () => {
   } as const;
 
   beforeEach(() => fetch.mockReset());
+
+  it("sends the resource group independently of the caller group filter", async () => {
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({ data: {} })));
+    await getAgentMonitoringSummary(
+      agentMonitoringSelection("a", range, "ungrouped")!,
+      signal
+    );
+    const params = new URL(
+      String(fetch.mock.calls[0]?.[0]),
+      "http://localhost"
+    );
+    expect(params.searchParams.get("resource_group")).toBe("ungrouped");
+    expect(params.searchParams.has("group_ids")).toBe(false);
+  });
 
   it("uses the existing summary and trend paths with the complete scope and cancellation", async () => {
     const payload = { data: [], coverage_state: "partial", is_stale: true };

@@ -29,11 +29,15 @@ class ModelAdapterError(ValueError):
         super().__init__(category)
 
 
+class _DuplicateJSONMember(ValueError):
+    pass
+
+
 def _unique_object(pairs):
     result = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError("Duplicate JSON member")
+            raise _DuplicateJSONMember("Duplicate JSON member")
         result[key] = value
     return result
 
@@ -99,13 +103,16 @@ def _tool_call(raw, index):
     arguments = function.get("arguments")
     if not isinstance(arguments, str):
         raise ModelAdapterError("MODEL_TOOL_CALL_INVALID")
-    parsed, error = None, None
+    parsed, diagnostic = None, None
     try:
         parsed = parse_json(arguments)
-        if not isinstance(parsed, dict):
-            raise ValueError("Tool arguments must be an object")
+    except _DuplicateJSONMember:
+        diagnostic = "arguments_duplicate_key"
     except (ValueError, RecursionError):
-        parsed, error = None, "INVALID_TOOL_ARGUMENTS"
+        diagnostic = "arguments_invalid_json"
+    else:
+        if not isinstance(parsed, dict):
+            parsed, diagnostic = None, "arguments_not_object"
     try:
         return ToolCall(
             provider_call_id=raw.get("id"),
@@ -113,7 +120,8 @@ def _tool_call(raw, index):
             name=function.get("name"),
             raw_arguments=arguments,
             parsed_arguments=parsed,
-            argument_error=error,
+            argument_error="INVALID_TOOL_ARGUMENTS" if diagnostic else None,
+            argument_diagnostic=diagnostic,
         )
     except ValidationError:
         raise ModelAdapterError("MODEL_TOOL_CALL_INVALID") from None

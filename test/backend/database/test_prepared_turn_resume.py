@@ -2,6 +2,8 @@
 
 """Read the current resumable turn without reviving an older assistant message."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import JSON, MetaData, delete
 from sqlalchemy.dialects.postgresql import JSONB
@@ -11,6 +13,7 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationMessageUnit, ConversationRecord
+from management.db.automation.models import AgentAutomationProposal
 from management.db.conversation import prepared_turn as store
 from management.db.conversation.projection_receipt import ConversationProjectionReceipt
 from test.backend.database.test_prepared_saved_user import database, saved, stage
@@ -77,6 +80,52 @@ def test_cursorless_resume_does_not_return_an_assistant_behind_the_head(database
         ))
     assert store.read_cursorless_resume(42, "actor", "tenant") is None
     assert store.read_legacy_resume_index(42, 61, "actor", "tenant") is None
+
+
+@pytest.mark.parametrize("answer", [
+    None, "要创建吗？", "创建吗？\n- 任务：每天提醒喝水", "Here is a draft with a summary.",
+])
+@pytest.mark.parametrize("defect", [None, "no_link", "wrong_unit", "wrong_parent", "non_executable",
+                                    "second_card", "foreign_tenant", "expired", "failed_reply", "foreign_source"])
+def test_confirmation_resolves_only_the_structurally_linked_adjacent_draft(database, answer, defect):
+    with database.sessions() as session:
+        metadata = MetaData()
+        for model in (ConversationMessageUnit, AgentAutomationProposal):
+            table = model.__table__.to_metadata(metadata, schema=None)
+            for column in table.c:
+                if isinstance(column.type, JSONB):
+                    column.type = JSON()
+        metadata.create_all(session.get_bind())
+        add_assistant(session, status="failed" if defect == "failed_reply" else "completed")
+        payload = '{"proposal_id": 7, "executable": %s}' % (
+            "false" if defect == "non_executable" else "true"
+        )
+        units = [(21, "automation_proposal", payload, "actor")]
+        if answer is not None:
+            units.append((22, "final_answer", answer, "actor"))
+        if defect == "second_card":
+            units.append((23, "automation_proposal", '{"proposal_id": 9, "executable": true}', "actor"))
+        for ix, kind, content, owner in units:
+            session.add(ConversationMessageUnit(
+                unit_id=ix, conversation_id=42, message_id=61, unit_index=ix, unit_type=kind,
+                unit_content=content, unit_status="completed", created_by=owner, delete_flag="N",
+            ))
+        link = {
+            "_conversation_message_id": 60 if defect == "wrong_parent" else 61,
+            "_conversation_unit_id": 20 if defect == "wrong_unit" else 21,
+        }
+        session.add(AgentAutomationProposal(
+            proposal_id=7, tenant_id="other" if defect == "foreign_tenant" else "tenant",
+            user_id="actor", conversation_id=42, agent_id=3,
+            source_message_id=99 if defect == "foreign_source" else 23,
+            proposed_task={} if defect == "no_link" else link, capability_resolution={"executable": True},
+            status="PENDING", expires_at=datetime.now(timezone.utc) + timedelta(hours=-1 if defect == "expired" else 1),
+            created_by="actor", updated_by="actor", delete_flag="N",
+        ))
+    expected = 7 if defect is None else None
+    assert store.previous_automation_invitation(42, "tenant", "actor", 2) == expected
+    assert store.previous_automation_invitation(42, "tenant", "other", 2) is None
+    assert store.previous_automation_invitation(42, "tenant", "actor", 4) is None
 
 
 def test_cursorless_resume_enforces_ownership_and_workbench_feature(database, monkeypatch):
@@ -155,7 +204,8 @@ def test_admission_recovery_reads_the_same_staged_turn(database, consumer):
 
 
 @pytest.mark.parametrize("version,owner", [(2, "actor"), (3, "actor"), (3, "other")])
-def test_image_mounts_are_visible_only_at_admitted_conversation_revision(database, version, owner):
+def test_image_mounts_are_visible_only_at_admitted_conversation_revision(database, mocker, version, owner):
+    mocker.patch.object(store, "read_running_workbench_execution", return_value=None)
     config = {"mode": "generic_chat", "skill_mounts": [{"skill_id": 45, "config_values": {"size": "large"}}]}
     with database.sessions() as session:
         conversation = session.get(ConversationRecord, 42)

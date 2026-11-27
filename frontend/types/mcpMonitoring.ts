@@ -2,8 +2,19 @@
 import type { MonitoringDateScope, MonitoringPublication } from "./operations";
 
 export type McpCatalogService =
-  | { service_id: number; name: string; type: "container" | "remote" }
-  | { service_id: null; name: string; type: "builtin" };
+  | {
+      service_id: number;
+      name: string;
+      type: "container" | "remote";
+      group_ids: number[] | null;
+    }
+  | {
+      service_id: null;
+      name: string;
+      type: "builtin";
+      instance_count?: number;
+      group_ids: number[] | null;
+    };
 
 export type McpServerType =
   "container" | "remote" | "api_convert" | "builtin" | "unknown";
@@ -12,10 +23,12 @@ export interface McpServiceFilter {
   service_id: number | null;
   name: string;
   type: McpServerType | null;
+  group_ids?: number[] | null;
 }
 
 export interface McpMonitoringSelection extends MonitoringDateScope {
   groupIds: number[];
+  resourceGroup?: string;
   serviceId: number | null;
   serverType: McpServerType | null;
   toolName: string | null;
@@ -39,7 +52,7 @@ export interface McpMonitoringOverview extends MonitoringPublication {
 }
 
 export type McpMonitoringDimension = "services" | "tools";
-export type McpMonitoringSort = "request_count" | "avg_duration_ms";
+export type McpMonitoringSort = "name" | "request_count" | "avg_duration_ms";
 
 export interface McpMonitoringRow {
   tenant_id: string;
@@ -47,7 +60,7 @@ export interface McpMonitoringRow {
   mcp_server_name: string | null;
   mcp_server_type: McpServerType | null;
   tool_name?: string;
-  active_tools?: number;
+  active_tools?: number | null;
   metrics: {
     request_count: number | null;
     avg_duration_ms: number | null;

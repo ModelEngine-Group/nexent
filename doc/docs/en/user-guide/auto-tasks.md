@@ -111,7 +111,7 @@ Cron is evaluated in the time zone shown in the proposal. A one-time execution t
 
 ### 5. Confirm Creation
 
-After verifying the proposal, click **Create task**. The proposal card displays the task ID after creation succeeds. Return to **Automation Tasks** to find the new task in the list; click its name to open the linked conversation.
+After reviewing the draft, click **Create task**. When the preceding message shows the only pending draft and asks whether to create it, you can also reply “yes” or “confirm creation.” If the conversation moves to another topic or several drafts are pending, use the button on the draft you want. The card shows the task ID after creation. Find the task in **Automation Tasks** and click its name to open the linked conversation.
 
 If the proposal reports missing capabilities, click **Configure agent**, add the required capabilities, then return to the conversation and create the task again. One conversation can have only one active automation task. Start a new conversation when you need another task.
 

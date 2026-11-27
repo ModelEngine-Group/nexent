@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: DB-MIGRATION-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: DB-MIGRATION-D5-001
+timeout_seconds: 1500
+acceptance_bindings:
+  AC-01: [test_complete_million_row_upgrade]
+  AC-02: [test_complete_million_row_upgrade]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Creates and removes its own PostgreSQL and migration-worker containers, volume and internal network.

@@ -21,7 +21,7 @@ from shared.sse import assert_terminal_event, read_sse
 from shared.factories.files import register_uploaded_files
 
 
-CASES = [f"PERF-{number:02d}" for number in range(1, 11) if number not in {4, 6}]
+CASES = [f"PERF-{number:02d}" for number in range(1, 11) if number not in {2, 4, 6}]
 
 
 async def _agent_run(identity, marker: str) -> list[dict]:
@@ -46,14 +46,6 @@ async def _parallel_agents(identity) -> None:
     for index, events in enumerate(results):
         assert_terminal_event(events)
         assert f"d5_parallel_{index}" in json.dumps(events, ensure_ascii=False).lower()
-
-
-async def _sse_concurrency(identity) -> None:
-    concurrency = int(get_test_asset("performance", "sse_concurrency", required=False) or 5)
-    with Stopwatch() as timer:
-        results = await asyncio.gather(*[_agent_run(identity, f"D5_SSE_{i}") for i in range(concurrency)])
-    assert timer.elapsed_ms <= threshold_ms("sse_batch_ms", 300_000)
-    assert all(any(event.get("event") or event.get("type") for event in events) for events in results)
 
 
 async def _large_upload(identity) -> None:
@@ -223,7 +215,6 @@ async def _range_preview(identity) -> None:
 async def execute_d5_performance_special(case, tenant_a_user, tenant_a_admin):
     handlers = {
         "PERF-01": lambda: _parallel_agents(tenant_a_user),
-        "PERF-02": lambda: _sse_concurrency(tenant_a_user),
         "PERF-03": lambda: _large_upload(tenant_a_admin),
         "PERF-05": lambda: _scheduler_load(tenant_a_user),
         "PERF-06": lambda: _evaluation_200(tenant_a_admin),

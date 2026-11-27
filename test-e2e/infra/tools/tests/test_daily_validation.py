@@ -38,7 +38,7 @@ def test_known_case_failures_block_only_the_owner_without_changing_contract(tmp_
 
 @pytest.mark.parametrize("issue", [
     ("UNCLASSIFIED", None), ("NEW_UNKNOWN_ERROR", "CASE-A"), ("CASE_SCRIPT_MISSING", "UNKNOWN"),
-    ("CASE_SCRIPT_MISSING", None), ("UT_REFERENCE_MISSING", "CASE-A"),
+    ("CASE_SCRIPT_MISSING", None), ("UT_REFERENCE_MISSING", "CASE-A"), ("UT_SELECTORS_MISSING", "CASE-A"),
 ])
 def test_unknown_global_or_unscoped_problems_fail_closed(tmp_path, issue):
     result = report(tmp_path, [ValidationIssue(tmp_path, "", "missing", *issue)], records())
@@ -106,7 +106,9 @@ def test_worker_keeps_unrelated_cases_executable_but_targeted_selection_stays_st
 
 def test_offline_batch_records_blocked_case_then_runs_unrelated_worker(tmp_path):
     repo, home = tmp_path / "repo", tmp_path / "home"
-    validation = report(repo, [ValidationIssue(repo, "", "missing", "CASE_SCRIPT_MISSING", "CASE-A")], records())
+    findings = [ValidationIssue(repo, "", "missing", "CASE_SCRIPT_MISSING", "CASE-A"),
+                ValidationIssue(repo, "DESIGN", "UT selectors pending", "UT_SELECTORS_MISSING")]
+    validation = report(repo, findings, records())
     selected = apply_blocks(records(), validation)
     workers = []
 
@@ -204,9 +206,16 @@ def test_fatal_validation_cannot_start_build_or_worker(tmp_path):
     commands.assert_not_called()
 
 
-def test_real_ut_reference_is_warning_only_in_daily_validator(tmp_path):
-    change = {"traditional_ut": {"decision": "reuse", "reason": "regression", "behaviors": ["resume"],
-                                 "test_selectors": ["frontend/tests/missing.test.tsx"]}}
+@pytest.mark.parametrize("selectors,code", [
+    (None, "UT_SELECTORS_MISSING"),
+    ([], "UT_SELECTORS_MISSING"),
+    (["frontend/tests/missing.test.tsx"], "UT_REFERENCE_MISSING"),
+])
+def test_ut_metadata_is_warning_only_during_daily_validation(tmp_path, selectors, code):
+    plan = {"decision": "reuse", "reason": "regression", "behaviors": ["resume"]}
+    if selectors is not None:
+        plan["test_selectors"] = selectors
+    change = {"traditional_ut": plan}
     with patch.object(validate_test_assets.validate_features, "validate", return_value=[]), \
             patch.object(validate_test_assets.validate_cases, "validate", return_value=[]), \
             patch.object(validate_test_assets.validate_changes, "validate", return_value=[]), \
@@ -217,11 +226,25 @@ def test_real_ut_reference_is_warning_only_in_daily_validator(tmp_path):
             patch.object(validate_test_assets.validate_execution, "inspect", return_value=([], {"cases": records()})), \
             patch.object(validate_test_assets.generate_feature_links, "expected_pages", return_value={}), \
             patch.object(validate_test_assets.generate_excel, "write_workbook", side_effect=lambda _root, path: path.touch()):
-        strict = validate_test_assets.validate(tmp_path, "implementation", False)
+        strict = validate_test_assets.validate(tmp_path, "implementation", False, require_ut_changes=["CHANGE"])
         daily = validate_test_assets.validate(tmp_path, "implementation", False, daily=True)
     assert len(strict) == len(daily) == 1
-    assert strict[0].code == daily[0].code == "UT_REFERENCE_MISSING"
-    assert report(tmp_path, daily, records())["ready"]
+    assert strict[0].code == daily[0].code == code
+    validation = report(tmp_path, daily, records())
+    assert validation["ready"] and validation["issues"][0]["severity"] == "WARNING"
+    assert validation["issues"][0]["location"] == "CHANGE"
+    assert apply_blocks(records(), validation) == records()
+
+
+@pytest.mark.parametrize("result,expected", [("PASS", "PASSED"), ("FAIL", "FAILED")])
+def test_missing_ut_selectors_do_not_determine_the_batch_result(tmp_path, result, expected):
+    planned = records()
+    finding = ValidationIssue(tmp_path, "DESIGN", "UT selectors pending", "UT_SELECTORS_MISSING")
+    save(tmp_path / "asset-validation.json", report(tmp_path, [finding], planned))
+    summary = finalize(tmp_path, planned, [{**r, "result": result} for r in planned])
+    assert summary["execution_complete"] and summary["status"] == expected
+    assert summary["coverage_integrity"] == "INCOMPLETE"
+    assert summary["asset_validation"]["issue_count"] == 1
 
 
 def test_validation_receipt_is_kept_in_publication_allowlist(tmp_path):

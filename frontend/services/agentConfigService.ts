@@ -8,6 +8,7 @@ import {
 } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import { normalizeAidpCapParams } from "@/lib/aidpRetrievalConfig";
 import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
@@ -492,13 +493,16 @@ export const updateToolConfig = async (
   error?: ApiError;
 }> => {
   try {
+    // Legacy AIDP instances stored hybrid_top_k/graph_top_k as 0; resolve
+    // them to the positive default before the strict backend range check.
+    const normalizedParams = normalizeAidpCapParams(params);
     const response = await fetchWithErrorHandling(API_ENDPOINTS.tool.update, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
         tool_id: toolId,
         agent_id: agentId,
-        params: params,
+        params: normalizedParams,
         enabled: enable,
       }),
     });

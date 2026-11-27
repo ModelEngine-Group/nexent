@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: WB-AIDP-PATCH-COVERAGE-20261127
+  change_type: test-fix
+  title: Backfill Workbench AIDP binding branch coverage
+  description: Exercise the platform fallbacks, tenant binding precedence, and rejection of untrusted scoped catalog input.
+  affected_features:
+    existing: [AOS-TRANSPORT]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: AOS-TRANSPORT-D3-001 AC-32 already covers signed Workbench execution. The gaps are isolated lookup precedence and validation branches.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Management and Runtime use authorized Workbench platform bindings when a tenant binding is absent.
+    - Existing tenant bindings take precedence and ordinary Agents cannot use the platform fallback.
+    - Scoped export rejects invalid IDs, unknown kwargs, and description changes without an SDK catalog match.
+    test_selectors:
+    - test/backend/app/test_agentos_prepared_shared_aidp.py::test_stored_platform_aidp_requires_workbench_run
+    - test/backend/app/test_agentos_prepared_shared_aidp.py::test_scoped_shared_aidp_exports_migrated_parameters
+    - test/backend/app/test_agentos_prepared_shared_aidp.py::test_scoped_aidp_rejects_untrusted_catalog_options
+    reason: The previous unit tests covered stored Runtime fallback and tenant-scoped bindings, but missed the Management and scoped Runtime fallback branches.
+  notes: >-
+    PR 4471 reported 89.17 percent patch coverage at 2e9086ebf against base 23757e9e5.
+    With branch tracking enabled, 82 targeted unit tests passed. The local report
+    fully covers 35 of 35 changed executable lines in the three selected files,
+    up from 26 of 35 with the same test files and production code.

@@ -93,8 +93,10 @@ async def test_resolve_agent_capabilities_collects_all_configured_sources(monkey
         "user",
         "联网搜索项目资料",
         version_no=3,
+        model_id=102,
     )
 
+    assert captured["override_model_id"] == 102
     assert resolution.executable is True
     assert resolution.missing_capabilities == []
     assert {binding.type for binding in resolution.matched_capabilities} == {

@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MONITORING-UI-FILTERS-20261126
+  change_type: bugfix
+  bug_id: OPS-MONITORING-UI-FILTERS-20261126
+  title: Fix monitoring filters, list order and stale pagination
+  description: Validate custom dates, restore name ordering after metric sorting, and use only the current list response for pagination.
+  observed_behavior: The calendar accepts future dates, metric sorting cannot be cleared, and a pending list request can show an earlier result count.
+  expected_behavior: The calendar ends at UTC today, each list defaults to name order, and a metric sort can be cleared while retaining the active scope and search.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Existing tests exercise regular dates and both metric sort directions but omit future dates, cancelling sort, and pending pagination.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/monitoringFilters.test.tsx
+    - frontend/tests/component/skillMonitoring.test.tsx
+    - test/backend/ops/test_monitoring_api.py
+    behaviors:
+    - Accept UTC today and reject future custom date endpoints across a local date boundary.
+    - Send explicit name ordering and order filtered rows before slicing pages.
+    reason: Unit regressions cover date validation and server order. The existing browser case covers controls and scoped requests.

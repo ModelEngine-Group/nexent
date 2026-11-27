@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: AUTO-CURRENT-MODEL-20261127
+  change_type: bugfix
+  bug_id: AUTO-CURRENT-MODEL-20261127
+  title: Run automation with the current conversation model
+  description: Resolve the source conversation's current model for ordinary and Workbench automation.
+  observed_behavior: A deleted model saved in the task snapshot still overrides the conversation selection and blocks both triggers.
+  expected_behavior: Manual and scheduled runs use the current saved selection. Missing and deleted selections give a model-specific failure before a prompt is written.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: AUTO-RUN-D3-001 exercises both triggers but does not change or delete a model between task creation and execution.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-126]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AUTO-RUN-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_agent_automation_prepared.py
+    - test/backend/services/test_agent_automation_workbench_run.py
+    - test/backend/services/test_agent_automation_capability_resolver.py
+    - frontend/tests/workbench/AutomationResultExpansion.test.tsx
+    behaviors:
+    - The runner uses the current model for capability checks and execution.
+    - An unavailable selection fails before writing the run prompt.
+    - Workbench keeps the existing frozen config, and UI shows actionable localized failure text.
+    reason: UT proves dispatch and presentation, while the existing D3 case proves persisted model selection, scheduler claims and result projection.
+  notes: Reuses the Workbench execution design in chat-automation-proposal-routing and the D3 case-owned PostgreSQL schema and Redis journals.

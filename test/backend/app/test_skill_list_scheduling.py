@@ -87,6 +87,25 @@ async def test_tenant_auth_inventory_and_payload_remain_compatible(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group_ids", [None, [7]])
+async def test_inventory_mount_includes_group_assignments_without_content(runtime, mocker, group_ids):
+    _, client = runtime
+    mocker.patch.object(module, "get_current_user_id", return_value=("operator", "current"))
+    mocker.patch.object(module, "resource_read_tenant", return_value="current")
+    service = mocker.patch.object(module, "SkillService").return_value
+    metadata = {"skill_id": 1, "name": "skill", "description": "description", "source": "custom", "tags": [],
+                "update_time": None, "group_ids": group_ids}
+    service.list_skills.return_value = [{**metadata, "content": "full", "tool_ids": [3]}]
+
+    response = await client.get("/skills", params={"view": "mount", "include_content": "true"})
+
+    assert response.status_code == 200
+    assert response.json() == {"skills": [metadata]}
+    service.list_skills.assert_called_once_with(include_content=False, for_mount=True)
+    service.list_visible_skills.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_invalid_content_flag_is_rejected_before_handler(runtime, mocker):
     _, client = runtime
     auth = mocker.patch.object(module, "get_current_user_id")

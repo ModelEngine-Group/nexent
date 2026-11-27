@@ -282,22 +282,23 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
         )
 
 
+def resolve_automation_model_id(model_id: int | None, tenant_id: str) -> int | None:
+    if model_id is not None:
+        selected = get_model_by_model_id(model_id, tenant_id)
+        if selected and selected.get("model_type") == "llm":
+            return model_id
+
+    from management.services.configuration.tenant.settings import tenant_config_manager
+
+    model_config = tenant_config_manager.get_model_config(key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    return (model_config or {}).get("model_id")
+
+
 class AutomationIntentStrategyFactory:
     def create(self, context: AutomationIntentContext) -> AutomationIntentAnalysisStrategy:
         fallback = RuleBasedAutomationIntentStrategy()
         try:
-            if context.model_id is not None:
-                selected = get_model_by_model_id(context.model_id, context.tenant_id)
-                if selected and selected.get("model_type") == "llm":
-                    return LLMAutomationIntentStrategy(context.model_id, fallback)
-
-            from management.services.configuration.tenant.settings import tenant_config_manager
-
-            model_config = tenant_config_manager.get_model_config(
-                key=MODEL_CONFIG_MAPPING["llm"],
-                tenant_id=context.tenant_id,
-            )
-            model_id = (model_config or {}).get("model_id")
+            model_id = resolve_automation_model_id(context.model_id, context.tenant_id)
             if model_id:
                 return LLMAutomationIntentStrategy(model_id, fallback)
         except Exception as exc:

@@ -61,30 +61,46 @@ def _minute_bucket(ts: float | None = None) -> str:
     return str(t)
 
 
-async def check_and_consume_rate_limit(tenant_id: str) -> None:
+async def check_and_consume_rate_limit(
+    tenant_id: str,
+    *,
+    runtime_state_service=None,
+    enabled: bool | None = None,
+    limit_per_minute: int | None = None,
+) -> None:
     """Consume one request from the tenant's per-minute northbound budget.
 
     Redis-backed when the shared runtime state adapter is available and
     enabled; an in-memory minute bucket otherwise. Raises
     ``LimitExceededError`` (mapped to HTTP 429) when the budget is exhausted
     or the accounting backend fails.
+
+    The keyword arguments let a service call with its own module-level
+    (patchable) state adapter and rate constants while sharing this core;
+    omitted arguments fall back to this module's defaults, with the adapter
+    imported lazily so a deployment without the Redis infrastructure degrades
+    to the per-process bucket.
     """
-    if not NORTHBOUND_RATE_LIMIT_ENABLED:
+    if enabled is None:
+        enabled = NORTHBOUND_RATE_LIMIT_ENABLED
+    if limit_per_minute is None:
+        limit_per_minute = NORTHBOUND_RATE_LIMIT_PER_MINUTE
+    if not enabled:
         return
 
-    runtime_state_service = None
-    try:
-        from infrastructure.redis.run_state import (
-            runtime_state_service,  # lazy: optional adapter
-        )
-    except ImportError:
-        logger.warning("Redis state adapter unavailable; northbound rate limit is per process")
+    if runtime_state_service is None:
+        try:
+            from infrastructure.redis.run_state import (
+                runtime_state_service,  # lazy: optional adapter
+            )
+        except ImportError:
+            logger.warning("Redis state adapter unavailable; northbound rate limit is per process")
 
     if runtime_state_service is not None and runtime_state_service.enabled:
         try:
             await runtime_state_service.consume_rate_limit_async(
                 tenant_id=tenant_id,
-                limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+                limit_per_minute=limit_per_minute,
             )
             return
         except ValueError:
@@ -97,7 +113,7 @@ async def check_and_consume_rate_limit(tenant_id: str) -> None:
     async with _RATE_LOCK:
         state = _RATE_STATE.setdefault(tenant_id, {})
         count = state.get(bucket, 0)
-        if count >= NORTHBOUND_RATE_LIMIT_PER_MINUTE:
+        if count >= limit_per_minute:
             raise LimitExceededError("Query rate exceeded limit. Please try again later")
         state[bucket] = count + 1
         # cleanup old buckets, keep only current

@@ -1,0 +1,30 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-TRACE-LOOKUP-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_trace_lookup
+timeout_seconds: 150
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Requires a configured PostgreSQL service that permits creation and removal
+  of a UUID-owned scratch database. The test creates the relevant product
+  tables, uses an owned temporary root, closes its HTTP client, and drains the
+  managed read workers. The scratch database factory verifies ownership before
+  dropping it. These selectors provide partial evidence for the blocked Case;
+  see its source.blocked_reason for the remaining obligations.
+acceptance_bindings:
+  AC-01:
+  - test_trace_lookup_keeps_pg_identity_and_first_archive_directory
+  - test_trace_lookup_missing_archive_is_distinct_from_exhausted_lookup
+  AC-02:
+  - test_trace_lookup_pg_message_cursor_and_content_version
+  AC-03:
+  - test_trace_lookup_retention_reports_separate_archive_and_chat_coverage
+  - test_trace_lookup_pg_history_keeps_incomplete_capture_visible
+  AC-04:
+  - test_trace_lookup_rechecks_committed_owner_and_preserves_other_conversations

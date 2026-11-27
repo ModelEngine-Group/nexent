@@ -1567,6 +1567,7 @@ const AssistantMessage: FC<{
   onSkillFileSelect,
   showAgentCreationResult = true,
 }) => {
+  const { t } = useTranslation();
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
   // use `-mb-[n + 6]` and `min-h-[n + 6]` to preserve the compensation.
@@ -1826,6 +1827,7 @@ const AssistantMessage: FC<{
                 const textPart = part as typeof part & {
                   isError?: boolean;
                   isWarning?: boolean;
+                  errorReference?: string;
                   text?: string;
                   isSearchImage?: boolean;
                   imageSource?: SourcePartLike;
@@ -1833,11 +1835,21 @@ const AssistantMessage: FC<{
                 if (textPart.isSearchImage && textPart.imageSource) {
                   return <GlobalSearchImage source={textPart.imageSource} />;
                 }
+                const reference = textPart.errorReference && (
+                  <div className="mt-1 break-all text-xs opacity-80">
+                    {t("chat.runError.reference", {
+                      id: textPart.errorReference,
+                    })}
+                  </div>
+                );
                 if (textPart.isError) {
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                       <XCircleIcon className="mt-0.5 size-4 shrink-0 text-red-500 dark:text-red-400" />
-                      <span className="break-all">{textPart.text}</span>
+                      <div className="min-w-0 break-words">
+                        <span>{textPart.text}</span>
+                        {reference}
+                      </div>
                     </div>
                   );
                 }
@@ -1846,9 +1858,12 @@ const AssistantMessage: FC<{
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
                       <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
-                      <span className="line-clamp-3 min-w-0 break-all">
-                        {warningText}
-                      </span>
+                      <div className="min-w-0">
+                        <span className="line-clamp-3 break-words">
+                          {warningText}
+                        </span>
+                        {reference}
+                      </div>
                     </div>
                   );
                 }

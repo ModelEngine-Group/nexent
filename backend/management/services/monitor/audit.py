@@ -7,6 +7,7 @@ keeps the historical import path working for the existing management call
 sites. See the shared module for the entry format and guarantees.
 """
 
+from backend.http.server.request_context import get_client_ip  # noqa: F401 - re-exported
 from backend.http.server.security_audit import (  # noqa: F401 - re-exported
     AUDIT_DETAIL_LIST_LIMIT,
     AUDIT_LOG_PREFIX,
@@ -22,5 +23,6 @@ __all__ = [
     "AUDIT_RESULT_SUCCESS",
     "USER_AGENT_MAX_LENGTH",
     "format_audit_entry",
+    "get_client_ip",
     "record_security_event",
 ]

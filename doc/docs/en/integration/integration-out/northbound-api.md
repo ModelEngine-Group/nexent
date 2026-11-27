@@ -11,6 +11,9 @@ The conversation and chat API provides complete conversation lifecycle managemen
 | **Start conversation** | Initiate conversation with specified Agent, supports streaming response and attachment upload |
 | **Session management** | List conversations, query history, generate and update titles |
 | **Stop conversation** | Interrupt ongoing streaming response |
+| **Session cleanup** | Delete a single conversation or delete conversations in batch (cascades to messages and bound automation tasks) |
+| **Automation task query** | List scheduled automation tasks of the current user and query task details |
+| **File download** | Download conversation attachments or knowledge base files, in presigned-URL or byte-stream mode |
 
 > For other capabilities (such as API Key management, Agent discovery, knowledge base management, A2A protocol, etc.), see subsequent chapters or [API Overview](./overview).
 
@@ -57,13 +60,29 @@ Success response:
 }
 ```
 
-Error response:
+Error response. Failure bodies of northbound APIs are **not uniform**; they come in three forms depending on the source, and clients must handle all of them:
 
 ```json
+// ① Business error (resource not found, no permission, value out of range, etc.): three-field envelope + requestId
 {
-  "detail": "Error description"
+  "code": "NOT_FOUND",
+  "message": "Resource not found",
+  "status": 404,
+  "requestId": "req-uuid-here"
 }
+
+// ② Framework-level parameter validation failure (type mismatch, value out of range, value outside the allowed set): FastAPI native format
+{
+  "detail": [
+    { "loc": ["query", "page_size"], "msg": "Input should be less than or equal to 100", "type": "less_than_equal" }
+  ]
+}
+
+// ③ Gateway rejection (missing / invalid API Key, path not exposed)
+{ "message": "Invalid or missing credentials" }
 ```
+
+See [Error Codes](#error-codes) below for the full `code` mapping.
 
 ## API List
 
@@ -74,9 +93,15 @@ Error response:
 | `/nb/v1/chat/stop/{conversation_id}` | GET | Stop conversation |
 | `/nb/v1/conversations` | GET | List all conversations for current user |
 | `/nb/v1/conversations/{conversation_id}` | GET | Get conversation history |
+| `/nb/v1/conversations/{conversation_id}` | DELETE | Delete a conversation |
+| `/nb/v1/conversations/batch-delete` | POST | Delete conversations in batch |
 | `/nb/v1/generate_title` | POST | Generate conversation title |
 | `/nb/v1/conversations/{conversation_id}/title` | PUT | Update conversation title |
-| `/nb/ops/v1/monitoring/*` | GET/POST | Monitoring dashboard data and refresh (24 endpoints, see [Monitoring Dashboard APIs](#monitoring-dashboard-apis)) |
+| `/nb/v1/automations` | GET | List automation tasks of the current user |
+| `/nb/v1/automations/{task_id}` | GET | Get automation task details |
+| `/nb/v1/file/download/{object_name}` | GET | Download a file (presigned URL or byte stream) |
+
+> Sections whose title is prefixed with 🆕 are recently added APIs: session cleanup (2), automation task query (2), and file download (1).
 
 ## Start Conversation
 
@@ -472,6 +497,446 @@ curl -X PUT "https://your-nexent-domain.com/nb/v1/conversations/123/title?title=
   -H "Authorization: Bearer your-access-key-here"
 ```
 
+## 🆕 Delete Conversation
+
+Delete one conversation owned by the current user. This is a **soft delete**: the conversation record, messages, message units, search sources, image sources and trajectory summaries are all flagged as deleted rather than physically removed. Automation tasks bound to the conversation are cancelled and soft-deleted on a best-effort basis (a cleanup failure does not block the deletion). Every call, including rejected ones, writes a security audit record.
+
+```http
+DELETE /nb/v1/conversations/{conversation_id}
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Constraint | Description |
+|-----------|------|----------|------------|-------------|
+| `conversation_id` | integer | Yes | ≥ 1 | Conversation ID |
+
+### Request Example
+
+```bash
+curl -X DELETE "https://your-nexent-domain.com/nb/v1/conversations/123" \
+  -H "Authorization: Bearer your-access-key-here"
+```
+
+### Response Parameters
+
+On success `data` is always `true`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `message` | string | Always `success` |
+| `data` | boolean | Always `true` on successful deletion |
+| `requestId` | string | Request tracing ID; provide it to operations when troubleshooting |
+
+### Response Example
+
+```json
+{
+  "message": "success",
+  "data": true,
+  "requestId": "req-uuid-here"
+}
+```
+
+### Errors
+
+| HTTP | `code` | Scenario |
+|------|--------|----------|
+| `404` | `NOT_FOUND` | The conversation does not exist, has already been deleted, or **does not belong to the user of the current API Key** (all three return the same response, so the existence of other users' conversations is not disclosed) |
+| `401` | — | Missing or invalid API Key |
+| `500` | `INTERNAL_ERROR` | Server-side exception |
+
+> Calling delete repeatedly on the same conversation returns `404` from the second call onwards. This is idempotent behavior, not a failure.
+
+## 🆕 Batch Delete Conversations
+
+Delete multiple conversations in one request, with the same semantics as [Delete Conversation](#🆕-delete-conversation). **The request as a whole does not fail because individual conversations fail**: IDs that cannot be accessed or were already deleted are skipped and returned in `failed_ids`, while the rest are deleted normally.
+
+```http
+POST /nb/v1/conversations/batch-delete
+Content-Type: application/json
+```
+
+### Request Body
+
+| Parameter | Type | Required | Constraint | Description |
+|-----------|------|----------|------------|-------------|
+| `conversation_ids` | array\<integer\> | Yes | 1 to 100 elements | List of conversation IDs to delete |
+
+Constraint details:
+
+- More than **100** IDs returns `400 VALIDATION_ERROR`; call in batches
+- An empty list `[]` returns `{"deleted_count": 0, "failed_ids": []}` without an error
+- Duplicate IDs in the list are deduplicated; `deleted_count` reflects the actual number deleted
+
+### Request Example
+
+```bash
+curl -X POST "https://your-nexent-domain.com/nb/v1/conversations/batch-delete" \
+  -H "Authorization: Bearer your-access-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{"conversation_ids": [123, 124, 125]}'
+```
+
+### Response Parameters
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.deleted_count` | integer | Number of conversations actually deleted |
+| `data.failed_ids` | array\<integer\> | Conversation IDs that could not be deleted (nonexistent, already deleted, or not owned by the current user) |
+
+### Response Example
+
+```json
+{
+  "message": "success",
+  "data": {
+    "deleted_count": 2,
+    "failed_ids": [125]
+  },
+  "requestId": "req-uuid-here"
+}
+```
+
+### Errors
+
+| HTTP | `code` | Scenario |
+|------|--------|----------|
+| `400` | `VALIDATION_ERROR` | More than 100 IDs |
+| `422` | — | The request body is not valid JSON, `conversation_ids` is missing, or an element is not an integer (returns the FastAPI native `detail` array) |
+| `401` | — | Missing or invalid API Key |
+
+> Deleting a conversation is **irreversible** through the northbound API (it is a soft delete internally, but no restore capability is exposed). Verify the IDs with `GET /nb/v1/conversations` before calling.
+
+## 🆕 List Automation Tasks
+
+List the automation tasks (scheduled tasks) owned by the current user. Only tasks created by and not deleted by the current user are returned, sorted by update time descending.
+
+```http
+GET /nb/v1/automations
+```
+
+### Query Parameters
+
+| Parameter | Type | Required | Constraint | Description |
+|-----------|------|----------|------------|-------------|
+| `status` | string | No | See table below | Filter by task status |
+| `search` | string | No | ≤ 200 characters | Fuzzy match on the **task title** (case-insensitive) |
+| `agent_name` | string | No | ≤ 200 characters | Fuzzy match on the Agent name (case-insensitive, **filtered before pagination**) |
+| `page` | integer | No | ≥ 1, default `1` | Page number |
+| `page_size` | integer | No | 1 to 100, default `20` | Items per page |
+
+`status` values. For compatibility with frontend semantics, `ENABLED` and `RUNNING` are two **virtual statuses** that the server translates before querying:
+
+| Value | Actual meaning |
+|-------|----------------|
+| `ENABLED` | Enabled and currently **not** executing a run |
+| `RUNNING` | Currently **has** a run in progress |
+| `ACTIVE` | Task status is active (may be executing) |
+| `PAUSED` / `PAUSED_BY_SYSTEM` | Paused / paused by the system |
+| `COMPLETED` | Completed |
+| omitted | No filtering (`DELETED` is never returned) |
+
+> Passing a value outside this set (such as lowercase `enabled`) does not raise an error; it simply returns an empty list.
+
+### Request Example
+
+```bash
+# Page 1, 10 items per page, only enabled tasks
+curl "https://your-nexent-domain.com/nb/v1/automations?page=1&page_size=10&status=ENABLED" \
+  -H "Authorization: Bearer your-access-key-here"
+
+# Search by title keyword
+curl "https://your-nexent-domain.com/nb/v1/automations?search=daily%20report" \
+  -H "Authorization: Bearer your-access-key-here"
+```
+
+### Response Parameters
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.items` | array\<object\> | Task list of the current page; element structure see [Automation Task Object](#automation-task-object) |
+| `data.total` | integer | Total number of tasks after filtering |
+| `data.page` | integer | Current page number |
+| `data.page_size` | integer | Items per page |
+
+### Response Example
+
+```json
+{
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "task_id": 5,
+        "conversation_id": 123,
+        "agent_id": 7,
+        "agent_version_no": 3,
+        "agent_name": "daily-report",
+        "title": "Daily Morning Report",
+        "instruction": "Summarize yesterday's sales data and generate a brief",
+        "status": "ACTIVE",
+        "is_running": false,
+        "schedule_mode": "RECURRING",
+        "schedule_rule_type": "CRON",
+        "schedule_expr": "0 9 * * 1-5",
+        "timezone": "Asia/Shanghai",
+        "next_fire_at": "2026-11-30T09:00:00Z",
+        "last_fire_at": "2026-11-27T09:00:00Z",
+        "fire_count": 42,
+        "last_run_status": "SUCCEEDED",
+        "last_error": null,
+        "consecutive_failures": 0,
+        "timeout_seconds": 600,
+        "overlap_policy": "SKIP",
+        "misfire_policy": "SKIP",
+        "source": "CHAT_INTENT"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 10
+  },
+  "requestId": "req-uuid-here"
+}
+```
+
+### Errors
+
+| HTTP | `code` | Scenario |
+|------|--------|----------|
+| `422` | — | `page` / `page_size` out of range, or `search` / `agent_name` longer than 200 characters (FastAPI native `detail` array) |
+| `401` | — | Missing or invalid API Key |
+
+> When `status=ENABLED`, `status=RUNNING` or `agent_name` is passed, the server first fetches all matching tasks of the user, filters them in memory, and then paginates. With a large number of tasks (thousands), such queries are noticeably slower than ordinary pagination.
+
+### Automation Task Object
+
+Each element in `items` contains the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_id` | integer | Task ID, used to query details |
+| `conversation_id` | integer | ID of the conversation the task is bound to |
+| `agent_id` | integer | Bound Agent ID |
+| `agent_version_no` | integer \| null | Agent version number locked when the task was created |
+| `agent_name` | string | Agent display name (falls back to `Agent #<agent_id>` when resolution fails) |
+| `title` | string | Task title |
+| `instruction` | string | Instruction sent to the Agent on each run |
+| `status` | string | Task lifecycle status: `DRAFT` / `ACTIVE` / `PAUSED` / `PAUSED_BY_SYSTEM` / `COMPLETED` |
+| `is_running` | boolean | Whether a run is currently in progress |
+| `source` | string | Creation source; currently only `CHAT_INTENT` (created from a user intent in a conversation) |
+| `schedule_mode` | string | `ONCE` (one-shot) or `RECURRING` (periodic) |
+| `schedule_rule_type` | string | `AT` (at a specific time) / `INTERVAL` (fixed interval) / `CRON` |
+| `schedule_expr` | string \| null | Human-readable schedule expression (such as a cron expression) |
+| `schedule_config` | object | Normalized schedule configuration; structure below |
+| `timezone` | string | IANA time zone, default `Asia/Shanghai` |
+| `next_fire_at` | string \| null | Next trigger time (ISO 8601, UTC) |
+| `last_fire_at` | string \| null | Last trigger time |
+| `fire_count` | integer | Cumulative number of triggers |
+| `last_run_status` | string \| null | Status of the most recent run, same values as automation run status: `QUEUED` / `RUNNING` / `SUCCEEDED` / `FAILED` / `SKIPPED` / `CANCELED` / `TIMEOUT` |
+| `last_error` | string \| null | Error message of the most recent run |
+| `consecutive_failures` | integer | Number of consecutive failures |
+| `timeout_seconds` | integer | Timeout of a single run (seconds) |
+| `overlap_policy` | string | Policy when the previous run has not finished at the next trigger point; the current implementation is always `SKIP` (skip this trigger) |
+| `misfire_policy` | string | Compensation policy for a missed trigger: `SKIP` for recurring tasks, `RUN_ONCE` (run once immediately) for one-shot tasks |
+| `capability_requirements` | object \| null | Capability requirements parsed from the user intent |
+| `capability_bindings` | object \| null | Confirmed matched capability bindings |
+| `runtime_snapshot` | object \| null | Agent / runtime capability snapshot taken when the task was created |
+| `create_time` | string | Creation time (ISO 8601, UTC) |
+| `update_time` | string | Last update time |
+
+`schedule_config` structure:
+
+```json
+{
+  "mode": "RECURRING",
+  "rule_type": "CRON",
+  "timezone": "Asia/Shanghai",
+  "start_at": "2026-11-01T00:00:00Z",
+  "end_at": null,
+  "cron_expr": "0 9 * * 1-5",
+  "interval_seconds": null,
+  "max_fire_count": null
+}
+```
+
+> Task objects also carry audit and scheduling-internal fields such as `tenant_id`, `user_id`, `created_by`, `updated_by`, `delete_flag`, `lock_owner` and `lock_until`. They are all read-only and callers should not depend on them.
+
+## 🆕 Get Automation Task Details
+
+Get one automation task owned by the current user by ID. The returned fields are identical to the task object in the list endpoint.
+
+```http
+GET /nb/v1/automations/{task_id}
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Constraint | Description |
+|-----------|------|----------|------------|-------------|
+| `task_id` | integer | Yes | ≥ 1 | Task ID |
+
+### Request Example
+
+```bash
+curl "https://your-nexent-domain.com/nb/v1/automations/5" \
+  -H "Authorization: Bearer your-access-key-here"
+```
+
+### Response Example
+
+```json
+{
+  "message": "success",
+  "data": {
+    "task_id": 5,
+    "conversation_id": 123,
+    "agent_id": 7,
+    "agent_version_no": 3,
+    "agent_name": "daily-report",
+    "title": "Daily Morning Report",
+    "instruction": "Summarize yesterday's sales data and generate a brief",
+    "status": "PAUSED",
+    "is_running": false,
+    "schedule_mode": "RECURRING",
+    "schedule_rule_type": "CRON",
+    "schedule_expr": "0 9 * * 1-5",
+    "timezone": "Asia/Shanghai",
+    "next_fire_at": null,
+    "last_fire_at": "2026-11-27T09:00:00Z",
+    "fire_count": 42,
+    "last_run_status": "SUCCEEDED",
+    "consecutive_failures": 0,
+    "timeout_seconds": 600,
+    "overlap_policy": "SKIP",
+    "misfire_policy": "SKIP",
+    "source": "CHAT_INTENT",
+    "create_time": "2026-10-01T08:00:00Z",
+    "update_time": "2026-11-27T09:00:05Z"
+  },
+  "requestId": "req-uuid-here"
+}
+```
+
+### Errors
+
+| HTTP | `code` | Scenario |
+|------|--------|----------|
+| `404` | `AUTOMATION_TASK_NOT_FOUND` | The task does not exist, has been deleted, or does not belong to the current user |
+| `422` | — | `task_id` is not an integer ≥ 1 (such as `abc` or `0`) |
+| `401` | — | Missing or invalid API Key |
+
+## 🆕 Download File
+
+Download a file the current user is permitted to access, such as conversation attachments, knowledge base source files, or artifacts generated by an Agent. Two modes are supported:
+
+- **`ignore` (default)**: does not transfer the file content; returns a **presigned URL** that the client uses to fetch directly from object storage. Suitable for handing the file to a browser or a third-party system.
+- **`stream`**: the server returns the **byte stream** directly. Suitable for server-to-server transfer, or when object storage is not exposed externally.
+
+```http
+GET /nb/v1/file/download/{object_name}
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `object_name` | string | Yes | Object name in object storage; **multi-level paths are supported**, e.g. `attachments/user123/20261127_report.pdf` |
+
+`object_name` is appended directly to the path, so **do not** URL-encode `/`. When the object name contains spaces or non-ASCII characters such as Chinese, URL-encode each path segment separately.
+
+### Query Parameters
+
+| Parameter | Type | Required | Constraint | Description |
+|-----------|------|----------|------------|-------------|
+| `download` | string | No | Only `ignore` or `stream`, default `ignore` | Download mode |
+| `expires` | integer | No | 1 to 604800, default `86400` | Validity of the presigned URL in seconds, up to 7 days. **Only effective in `ignore` mode** |
+| `filename` | string | No | — | File name used for the download. **Only effective in `stream` mode**; defaults to the last segment of the object name |
+
+> The `redirect` and `base64` modes are **not exposed to northbound callers**: `redirect` would disclose the internal object storage address, and `base64` would inline the entire file into the response. Passing either returns `422`.
+
+### Access Control
+
+Permissions are decided per category based on the object name prefix; **cross-tenant access is always denied**:
+
+| Object name prefix | Rule |
+|--------------------|------|
+| `knowledge_base/...` | The object must resolve to a valid knowledge base ledger record of the **current tenant** |
+| `attachments/{user_id}/...` | Accessible only when `user_id` is the user of the current API Key |
+| `attachments/<no sub-directory>` | Legacy bare attachment key with no ownership information; **always denied** |
+| `images_in_attachments/...` | Legacy shared rendered images with no ownership information; **always denied** |
+| `skill-files/{user_id}/...` | Accessible only when `user_id` is the current user |
+| `workspace/{user_id}/{run_id}/outputs/...` | Accessible only when `user_id` is the current user |
+
+No permission returns `403`; a nonexistent object returns `404`. Note that this **does** disclose whether the object exists: for prefixes the caller is allowed to access (such as their own `attachments/{user_id}/`), a `404` means the object really does not exist; for prefixes the caller has no access to, the response is always `403` regardless of whether the object exists.
+
+### Request Example
+
+```bash
+# Mode 1: get a presigned URL (valid for 1 hour)
+curl "https://your-nexent-domain.com/nb/v1/file/download/attachments/user123/20261127_report.pdf?expires=3600" \
+  -H "Authorization: Bearer your-access-key-here"
+
+# Mode 2: fetch the byte stream directly and save it
+curl -o report.pdf \
+  "https://your-nexent-domain.com/nb/v1/file/download/attachments/user123/20261127_report.pdf?download=stream" \
+  -H "Authorization: Bearer your-access-key-here"
+
+# Specify the download file name
+curl -o report.pdf \
+  "https://your-nexent-domain.com/nb/v1/file/download/attachments/user123/20261127_report.pdf?download=stream&filename=Q3%20Sales%20Report.pdf" \
+  -H "Authorization: Bearer your-access-key-here"
+
+# Knowledge base file (multi-level path)
+curl "https://your-nexent-domain.com/nb/v1/file/download/knowledge_base/42/abc123/source.pdf?download=stream" \
+  -H "Authorization: Bearer your-access-key-here"
+```
+
+### Response Parameters
+
+**`ignore` mode** returns the standard envelope:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.success` | boolean | Always `true` (failures go through the error response, so `success: false` never appears) |
+| `data.object_name` | string | Echoed object name |
+| `data.expires_in` | integer | Validity of the presigned URL in seconds |
+| `data.url` | string | Presigned download URL; the signed address is generated from the **external access endpoint** and can be handed to clients directly |
+
+```json
+{
+  "message": "success",
+  "data": {
+    "success": true,
+    "object_name": "attachments/user123/20261127_report.pdf",
+    "expires_in": 3600,
+    "url": "https://minio.example.com/nexent/attachments/user123/20261127_report.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Expires=3600&X-Amz-Signature=..."
+  },
+  "requestId": "req-uuid-here"
+}
+```
+
+**`stream` mode** returns the byte stream directly **without an envelope**:
+
+| Response header | Description |
+|-----------------|-------------|
+| `Content-Type` | MIME type inferred from the object name extension |
+| `Content-Disposition` | `attachment; filename="..."`; non-ASCII file names are RFC 5987 encoded |
+| `Cache-Control` | Always `private, no-store`; the byte stream is never stored by any shared cache |
+| `ETag` | Quoted string generated from the object name |
+
+### Errors
+
+| HTTP | `code` | Scenario |
+|------|--------|----------|
+| `403` | `FORBIDDEN` | The object does not belong to the current user / tenant, or is under a prefix that is not exposed |
+| `404` | `NOT_FOUND` | The object does not exist in storage (both modes probe existence first) |
+| `422` | — | `download` is neither `ignore` nor `stream`, or `expires` is outside 1 to 604800 (FastAPI native `detail` array) |
+| `401` | — | Missing or invalid API Key |
+
+> The presigned URL returned in `ignore` mode allows **anyone** holding the URL to download within its validity period. Treat it like a password: do not write it to logs or anywhere visible to the frontend.
+
 ## Monitoring Dashboard APIs
 
 The northbound monitoring surface reuses the platform monitoring dashboard's
@@ -557,17 +1022,26 @@ curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh
 
 ## Error Codes
 
-| HTTP Status Code | Description |
-|------------------|-------------|
-| `200 OK` | Request successful |
-| `400 Bad Request` | Request parameter error (e.g., unknown tool parameter) |
-| `401 Unauthorized` | Authentication failed or missing API Key |
-| `403 Forbidden` | No permission to access the conversation or resource |
-| `404 Not Found` | Conversation does not exist |
-| `429 Too Many Requests` | Request rate limit exceeded |
-| `500 Internal Server Error` | Server internal error |
-| `502 Bad Gateway` | Upstream service unavailable |
-| `504 Gateway Timeout` | Upstream service timeout |
+Business errors use the three-field envelope `{code, message, status, requestId}`. `code` is a stable string; clients should branch on `code` first and use the HTTP status code only as a fallback.
+
+| HTTP Status Code | `code` | Description |
+|------------------|--------|-------------|
+| `400 Bad Request` | `VALIDATION_ERROR` | Business parameter validation failed (e.g., batch delete with more than 100 conversations, unknown tool parameter) |
+| `400 Bad Request` | `AUTOMATION_ERROR` | Automation task operation failed |
+| `401 Unauthorized` | — | Authentication failed or missing API Key (gateway returns `{"message": "Invalid or missing credentials"}`) |
+| `403 Forbidden` | `FORBIDDEN` | No permission to access the conversation, task, or file |
+| `404 Not Found` | `NOT_FOUND` | The conversation / file does not exist, or does not belong to the current user |
+| `404 Not Found` | `AUTOMATION_TASK_NOT_FOUND` | The automation task does not exist, or does not belong to the current user |
+| `404 Not Found` | — | Path not exposed or nonexistent (gateway returns `{"detail": "Not found"}`) |
+| `409 Conflict` | `CHAT_METADATA_VERSION_CONFLICT` | Runtime metadata version conflict |
+| `422 Unprocessable Entity` | — | Framework-level parameter validation failed: type mismatch, value out of range, or value outside the allowed set. Body is the FastAPI native `{"detail": [...]}` |
+| `429 Too Many Requests` | `RATE_LIMIT_EXCEEDED` | Request rate limit exceeded |
+| `429 Too Many Requests` | `TENANT_RESOURCE_EXCEEDED` | Tenant resource quota exceeded |
+| `500 Internal Server Error` | `INTERNAL_ERROR` | Server internal error; the body contains no internal details |
+| `502 Bad Gateway` | — | Upstream service unavailable |
+| `504 Gateway Timeout` | — | Upstream service timeout |
+
+> Recommended client-side decision order: ① check whether the HTTP status is `2xx`; ② check whether the body has a `code` field (business error); ③ check whether the body has a `detail` field (parameter validation error); ④ treat everything else as a gateway error. Always provide `requestId` to operations when troubleshooting.
 
 ## Complete Usage Examples
 
@@ -687,7 +1161,7 @@ In `multipart/form-data` requests, use multiple fields with the same name `files
 
 ### Q: How long are conversation histories retained?
 
-Conversation histories are retained by default indefinitely unless users actively delete them or the tenant has configured an expiration policy.
+Conversation histories are retained by default indefinitely unless users actively delete them or the tenant has configured an expiration policy. Callers can actively clean up conversations they no longer need via `DELETE /nb/v1/conversations/{conversation_id}` or `POST /nb/v1/conversations/batch-delete`; see [Delete Conversation](#🆕-delete-conversation).
 
 ## Related Resources
 

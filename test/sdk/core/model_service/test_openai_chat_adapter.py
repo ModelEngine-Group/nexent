@@ -157,17 +157,17 @@ def test_unknown_finish_and_missing_usage_stay_unknown(profile):
 
 
 @pytest.mark.parametrize(
-    "arguments,parsed,error",
+    "arguments,parsed,diagnostic",
     [
         ("{}", {}, None),
         ('{"value":0,"flag":false}', {"value": 0, "flag": False}, None),
-        ("[1]", None, "INVALID_TOOL_ARGUMENTS"),
-        ("{broken", None, "INVALID_TOOL_ARGUMENTS"),
-        ('{"x":1,"x":2}', None, "INVALID_TOOL_ARGUMENTS"),
+        ("[1]", None, "arguments_not_object"),
+        ("{broken", None, "arguments_invalid_json"),
+        ('{"x":1,"x":2}', None, "arguments_duplicate_key"),
     ],
 )
 def test_complete_tools_preserve_raw_provider_ids_and_invalid_arguments(
-    profile, arguments, parsed, error
+    profile, arguments, parsed, diagnostic
 ):
     raw = response(
         {
@@ -190,8 +190,9 @@ def test_complete_tools_preserve_raw_provider_ids_and_invalid_arguments(
     assert (
         call.raw_arguments == arguments
         and call.parsed_arguments == parsed
-        and call.argument_error == error
+        and call.argument_error == ("INVALID_TOOL_ARGUMENTS" if diagnostic else None)
     )
+    assert call.argument_diagnostic == diagnostic and "argument_diagnostic" not in call.model_dump()
     assert result.content_parts == []
 
 

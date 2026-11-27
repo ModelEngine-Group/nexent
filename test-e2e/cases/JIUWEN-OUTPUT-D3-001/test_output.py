@@ -85,6 +85,36 @@ def test_failure_diagnostics_roundtrip(monkeypatch, tmp_path, protocol, lang, sc
         else:
             assert not any(item["type"] == "error" for item in public)
 
+@pytest.mark.parametrize("protocol,scenario,code,reason,text", [
+    ("native", "bad_args", "INVALID_TOOL_ARGUMENTS", "arguments_invalid_json", "不是有效的 JSON"),
+    ("text", "clarify_bad", "JIUWEN_INVALID_CLARIFICATION", "clarification_question_count", "1 到 5 个问题"),
+])
+def test_model_action_rejection_diagnostics_roundtrip(monkeypatch, caplog, protocol, scenario, code, reason, text):
+    from management.services.conversation.service import get_conversation_history_service
+
+    with context_database(monkeypatch):
+        info, state, output = asyncio.run(run_worker(monkeypatch, protocol, scenario,
+            configure_run=lambda run: setattr(run.observer, "lang", "zh")))
+        assert info.run_result.status == "failed" and not state["tool_calls"]
+        assert not any(event["type"] in {"tool", "human_interaction", "final_answer"} for event in output)
+        error = info.run_result.error
+        assert error.category == code and error.diagnostic_code == reason and text in error.safe_message
+        reject_logs = [record.getMessage() for record in caplog.records
+                       if "event=jiuwen_model_action_rejected" in record.getMessage()]
+        assert any(f"request_id={error.request_id}" in line and f"reason={reason}" in line for line in reject_logs)
+        assistant, _, wire = asyncio.run(persist_output(monkeypatch, info, output))
+        assert assistant["status"] == "failed"
+        public = [json.loads(line[5:]) for frame in wire for line in frame.splitlines() if line.startswith("data:")]
+        restored = get_conversation_history_service(info.conversation_id, "owner")[0]
+        history = next(item for item in restored["message"] if item["role"] == "assistant")["message"]
+        for events in (public, history):
+            errors = [event for event in events if event["type"] == "error"]
+            assert len(errors) == 1 and not any(event["type"] == "final_answer" for event in events)
+            assert (errors[0]["error_code"], errors[0]["content"], errors[0]["request_id"]) == (
+                code, error.safe_message, error.request_id,
+            )
+
+
 @pytest.fixture(scope="module",autouse=True)
 def cleanup():
     yield

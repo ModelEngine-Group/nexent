@@ -57,8 +57,12 @@ class ResourceAccess:
         return cls()
 
     @classmethod
-    def read_only(cls) -> "ResourceAccess":
-        return cls(can_read=True, permission_label="READ_ONLY")
+    def read_only(cls, matched_groups: Optional[List[object]] = None) -> "ResourceAccess":
+        return cls(
+            can_read=True,
+            matched_groups=list(matched_groups or []),
+            permission_label="READ_ONLY",
+        )
 
     @classmethod
     def edit(cls) -> "ResourceAccess":
