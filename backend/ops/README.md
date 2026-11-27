@@ -373,8 +373,14 @@ exclude null values and preserve valid zero. Success-rate ranking items add
 `metrics.success_sample_count`, the merged succeeded plus failed count.
 Only Token ranking reads and returns Token data and publication status;
 default count and success-rate ranking remain independent of that dependency.
-Count, total-Token and success-rate Top 5 are implemented. Northbound interfaces
-remain deferred.
+Count, total-Token and success-rate Top 5 are implemented. Northbound
+interfaces are live: the same monitoring router is mounted a second time under
+`/nb/ops/v1/monitoring` (API-key identity, tenant locked to the key's owner,
+responses wrapped in the partner envelope by
+`ops/api/northbound_envelope.py`, refresh actions audited and rate limited);
+the gateway exposure snapshot registers the 24 mirror rows with
+`credential_kinds=["api_key"]` and `monitoring.*` capability ids. See
+[docs/handoffs/2026-11-27-northbound-monitoring-reuse-design.md](../../docs/handoffs/2026-11-27-northbound-monitoring-reuse-design.md).
 
 Each resource includes `tenant_id`, `agent_id`, `is_current` and `metrics`.
 Current metadata includes `name`, `display_name`, `model_ids`,

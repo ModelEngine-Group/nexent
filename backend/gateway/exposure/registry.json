@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "generated-619-rows",
+  "revision": "generated-643-rows",
   "routes": [
     {
       "method": "GET",
@@ -6183,6 +6183,294 @@
       "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-7b0756239bad92b1",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/agents",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-f05cddc2a2fc925e",
+      "capability_id": "monitoring.agents.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/agents/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-722649e75133c7f9",
+      "capability_id": "monitoring.agents.rankings",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/agents/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-1550aed503955f1f",
+      "capability_id": "monitoring.agents.summary",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/agents/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-f62e665d9df38d54",
+      "capability_id": "monitoring.agents.trends",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/mcp-tools",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-76406e9b2c44b43d",
+      "capability_id": "monitoring.mcp_tools.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/mcp-tools/catalog",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-c2a10335c7d3337a",
+      "capability_id": "monitoring.mcp_tools.catalog",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/mcp-tools/overview",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-43b1d23edf92b5de",
+      "capability_id": "monitoring.mcp_tools.overview",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/mcp-tools/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-57561b27a172a608",
+      "capability_id": "monitoring.mcp_tools.rankings",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/ops/v1/monitoring/mcp-tools/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-441e674331a66b3a",
+      "capability_id": "monitoring.mcp_tools.refresh",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/mcp-tools/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-68b14e6433ceed45",
+      "capability_id": "monitoring.mcp_tools.refresh_status",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/mcp-tools/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-e4f38f18ad0c8a20",
+      "capability_id": "monitoring.mcp_tools.summary",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/mcp-tools/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-95b3449ff1126ff6",
+      "capability_id": "monitoring.mcp_tools.trends",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/models",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-93746a2094f9a808",
+      "capability_id": "monitoring.models.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/models/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-7d92f6a45520b1eb",
+      "capability_id": "monitoring.models.rankings",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/ops/v1/monitoring/models/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-0052e43e52ba9586",
+      "capability_id": "monitoring.models.refresh",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/models/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-e82477f20f67b94a",
+      "capability_id": "monitoring.models.refresh_status",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/models/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-4bc0b97242932dbe",
+      "capability_id": "monitoring.models.summary",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/models/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-a2a16ab045d3c360",
+      "capability_id": "monitoring.models.trends",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/skills",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-0d274b378eaf7c3a",
+      "capability_id": "monitoring.skills.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/skills/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-58bf3596d8ab94ea",
+      "capability_id": "monitoring.skills.rankings",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/ops/v1/monitoring/skills/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-3d9cb0a7f45e2d73",
+      "capability_id": "monitoring.skills.refresh",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/skills/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-eec8ecc118e2485f",
+      "capability_id": "monitoring.skills.refresh_status",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/skills/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-841334d05b4c3135",
+      "capability_id": "monitoring.skills.summary",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/ops/v1/monitoring/skills/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "route-22801ff0e2f6a0c8",
+      "capability_id": "monitoring.skills.trends",
       "credential_kinds": [
         "api_key"
       ]

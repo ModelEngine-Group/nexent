@@ -76,6 +76,7 @@ Error response:
 | `/nb/v1/conversations/{conversation_id}` | GET | Get conversation history |
 | `/nb/v1/generate_title` | POST | Generate conversation title |
 | `/nb/v1/conversations/{conversation_id}/title` | PUT | Update conversation title |
+| `/nb/ops/v1/monitoring/*` | GET/POST | Monitoring dashboard data and refresh (24 endpoints, see [Monitoring Dashboard APIs](#monitoring-dashboard-apis)) |
 
 ## Start Conversation
 
@@ -469,6 +470,89 @@ PUT /nb/v1/conversations/{conversation_id}/title
 ```bash
 curl -X PUT "https://your-nexent-domain.com/nb/v1/conversations/123/title?title=Q3 Sales Analysis" \
   -H "Authorization: Bearer your-access-key-here"
+```
+
+## Monitoring Dashboard APIs
+
+The northbound monitoring surface reuses the platform monitoring dashboard's
+24 data endpoints under the `/nb/ops/v1/monitoring` prefix. A caller may only
+read monitoring data for the tenant that owns the API key: passing a
+`tenant_id` that does not match returns `403`.
+
+### Endpoint List
+
+| API | Method | Description |
+|-----|--------|-------------|
+| `/nb/ops/v1/monitoring/models` | GET | Model monitoring list (paginated, searchable, sortable) |
+| `/nb/ops/v1/monitoring/models/summary` | GET | Model monitoring summary |
+| `/nb/ops/v1/monitoring/models/rankings` | GET | Top 5 models |
+| `/nb/ops/v1/monitoring/models/trends` | GET | Model usage trends |
+| `/nb/ops/v1/monitoring/models/refresh` | POST | Trigger model recompute (async, 202) |
+| `/nb/ops/v1/monitoring/models/refreshes/{refresh_id}` | GET | Query recompute status |
+| `/nb/ops/v1/monitoring/skills` | GET | Skill monitoring list |
+| `/nb/ops/v1/monitoring/skills/summary` | GET | Skill monitoring summary |
+| `/nb/ops/v1/monitoring/skills/rankings` | GET | Top 5 skills |
+| `/nb/ops/v1/monitoring/skills/trends` | GET | Skill usage trends |
+| `/nb/ops/v1/monitoring/skills/refresh` | POST | Trigger skill recompute (async, 202) |
+| `/nb/ops/v1/monitoring/skills/refreshes/{refresh_id}` | GET | Query recompute status |
+| `/nb/ops/v1/monitoring/agents` | GET | Agent monitoring list |
+| `/nb/ops/v1/monitoring/agents/summary` | GET | Agent monitoring summary (incl. token usage) |
+| `/nb/ops/v1/monitoring/agents/trends` | GET | Agent execution trends |
+| `/nb/ops/v1/monitoring/agents/rankings` | GET | Top 5 agents |
+| `/nb/ops/v1/monitoring/mcp-tools` | GET | MCP tool monitoring list (tools/services dimension) |
+| `/nb/ops/v1/monitoring/mcp-tools/summary` | GET | MCP monitoring summary |
+| `/nb/ops/v1/monitoring/mcp-tools/rankings` | GET | Top 5 MCP tools |
+| `/nb/ops/v1/monitoring/mcp-tools/trends` | GET | MCP call trends |
+| `/nb/ops/v1/monitoring/mcp-tools/catalog` | GET | MCP service catalog (filter options) |
+| `/nb/ops/v1/monitoring/mcp-tools/overview` | GET | Platform overview (per-tenant inventory and call trend) |
+| `/nb/ops/v1/monitoring/mcp-tools/refresh` | POST | Trigger MCP recompute (async, 202) |
+| `/nb/ops/v1/monitoring/mcp-tools/refreshes/{refresh_id}` | GET | Query recompute status |
+
+### Common Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `start_date` / `end_date` | date | Yes | Statistics window (span must be under 366 days) |
+| `group_ids` | int[] | No | User-group filter (at most 100) |
+| `model_id` / `model_type` / `agent_id` / `skill_id` / `skill_name` / `server_id` / `server_type` / `tool_name` | — | No | Dimension-specific filters |
+| `page` / `page_size` / `search` / `sort_by` / `descending` | — | No | List pagination and sorting (`page_size` ≤ 100) |
+
+### Response Format
+
+A successful response uses the unified envelope; `data` carries the
+dashboard-native body (its `data` result field plus the `data_as_of` /
+`coverage_state` / `is_stale` coverage fields):
+
+```json
+{
+  "message": "success",
+  "requestId": "req-uuid-here",
+  "data": {
+    "data": { "...": "dashboard-native result" },
+    "data_as_of": "2026-11-27T00:00:00Z",
+    "coverage_state": "covered",
+    "is_stale": false
+  }
+}
+```
+
+Error responses use the three-field shape `{code, message, status, requestId}`.
+Common errors: `403 HTTP_403` (tenant mismatch), `404 HTTP_404` (recompute job
+missing or owned by another tenant), `409 MONITORING_DATES_UNCOVERED`
+(recompute window has no source data), `422 HTTP_422` (validation failure),
+`429 RATE_LIMIT_EXCEEDED` (recompute actions exceed the per-tenant limit,
+default 120/min), `503 HTTP_503` (monitoring temporarily unavailable).
+
+### Example
+
+```bash
+curl -X GET "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/summary?start_date=2026-11-20&end_date=2026-11-27" \
+  -H "Authorization: Bearer your-access-key-here"
+
+curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh" \
+  -H "Authorization: Bearer your-access-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{"start_date": "2026-11-20", "end_date": "2026-11-27"}'
 ```
 
 ## Error Codes

@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 
 
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, NorthboundStopInProgressError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
@@ -248,22 +248,17 @@ def _normalize_northbound_attachments(
 
 
 # -----------------------------
-# In-memory idempotency and rate limit placeholders
+# In-memory idempotency placeholders
 # -----------------------------
+# The per-tenant rate limiter moved to the shared Web layer
+# (``backend/http/server/northbound.py``) so the ops ``/nb`` mirror consumes
+# the same budget; re-exported below for the existing call sites.
 _IDEMPOTENCY_RUNNING: Dict[str, float] = {}
 _IDEMPOTENCY_LOCK = asyncio.Lock()
-
-_RATE_STATE: Dict[str, Dict[str, int]] = {}
-_RATE_LOCK = asyncio.Lock()
 
 
 def _now_seconds() -> float:
     return time.time()
-
-
-def _minute_bucket(ts: Optional[float] = None) -> str:
-    t = int((ts or _now_seconds()) // 60)
-    return str(t)
 
 
 async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None:
@@ -306,34 +301,7 @@ async def _release_idempotency_after_delay(key: str, seconds: int = 3) -> None:
     await idempotency_end(key)
 
 
-async def check_and_consume_rate_limit(tenant_id: str) -> None:
-    if not NORTHBOUND_RATE_LIMIT_ENABLED:
-        return
-
-    if runtime_state_service.enabled:
-        try:
-            await runtime_state_service.consume_rate_limit_async(
-                tenant_id=tenant_id,
-                limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
-            )
-            return
-        except ValueError:
-            raise LimitExceededError("Query rate exceeded limit. Please try again later")
-        except Exception:
-            logger.exception("Northbound rate limit Redis operation failed")
-            raise LimitExceededError("Rate limit service is unavailable. Please try again later.")
-
-    bucket = _minute_bucket()
-    async with _RATE_LOCK:
-        state = _RATE_STATE.setdefault(tenant_id, {})
-        count = state.get(bucket, 0)
-        if count >= NORTHBOUND_RATE_LIMIT_PER_MINUTE:
-            raise LimitExceededError("Query rate exceeded limit. Please try again later")
-        state[bucket] = count + 1
-        # cleanup old buckets, keep only current
-        for b in list(state.keys()):
-            if b != bucket:
-                state.pop(b, None)
+from backend.http.server.northbound import check_and_consume_rate_limit  # noqa: F401 - re-exported
 
 
 def _build_idempotency_key(*parts: Any) -> str:
