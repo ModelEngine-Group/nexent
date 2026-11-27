@@ -123,6 +123,7 @@ COPY \
     infrastructure/rdb/orm.py \
     infrastructure/rdb/skill_execution_records.py \
     infrastructure/rdb/tenant_config_record.py \
+    infrastructure/rdb/token_usage.py \
     /opt/infrastructure/rdb/
 COPY infrastructure/rdb/trajectory /opt/infrastructure/rdb/trajectory
 COPY infrastructure/trace /opt/infrastructure/trace

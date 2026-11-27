@@ -21,10 +21,8 @@ from backend.http.server.request_context import get_request_id
 from contracts.authentication import AuthenticatedIdentity, CredentialKind
 from contracts.constants.environment import JWT_SECRET
 from contracts.errors.exceptions import UnauthorizedError
-from management.services.permission.identity.session import (
-    authenticate,
-    authenticate_identity,
-)
+from gateway.identity.context import trusted_identity
+from management.services.permission.identity.session import authenticate
 from ops.monitoring.agent_tokens import read_agent_tokens
 from ops.monitoring.mcp_tool import summarize as summarize_mcp_tool
 from ops.monitoring.model import summarize
@@ -110,10 +108,12 @@ def _submit_api_key_usage(principal: AuthenticatedIdentity, request: Request) ->
 
     The ops process owns its own thread manager, so the accounting lands on
     ``app.state.thread_manager`` instead of the management config manager.
+    The writer itself is the shared Web-layer function, so the ledger stays
+    identical to the management gates' without importing management source.
     """
     from nexent.core.concurrency import ManagedTaskSpec
 
-    from management.services.permission.identity.northbound import record_api_key_usage
+    from backend.http.server.northbound import record_api_key_usage
 
     manager = getattr(request.app.state, "thread_manager", None)
     if manager is None:
@@ -142,14 +142,24 @@ def _resolve_session_user(request: Request, authorization: str | None) -> Curren
 def ops_principal(request: Request, authorization: str | None = Header(None)) -> OpsPrincipal:
     """Single identity dependency for both mounts of the monitoring router.
 
-    ``/nb`` requests are northbound API-key callers: the principal is resolved
-    with the API-key policy and usage-accounted here, so business code never
-    participates in accounting. Every other path keeps the browser session.
+    ``/nb`` requests are northbound API-key callers. The gateway is the only
+    path to that surface (its credential policy verifies the API key at the
+    edge and never lets /nb traffic bypass authentication), so the principal
+    is the gateway-signed identity verified by this app's identity middleware
+    — the same ``trusted_identity`` read the runtime voice routes use. Usage
+    is accounted here, so business code never participates in accounting.
+    Every other path keeps the browser session.
     """
     if is_northbound_path(_request_path(request)):
-        principal = authenticate_identity(authorization, kind=CredentialKind.API_KEY, request=request)
-        if not principal.user_id or not principal.tenant_id:
+        record = trusted_identity()
+        if record is None or record.get("kind") != CredentialKind.API_KEY.value:
+            raise UnauthorizedError("Northbound monitoring requires a gateway-verified API key")
+        if not record.get("user_id") or not record.get("tenant_id"):
             raise UnauthorizedError("Authenticated principal is incomplete")
+        principal = AuthenticatedIdentity(
+            user_id=record["user_id"], tenant_id=record["tenant_id"],
+            token_id=record.get("token_id"), kind=CredentialKind.API_KEY,
+        )
         request.state.authenticated_identity = principal
         request.state.request_id = get_request_id(request)
         _submit_api_key_usage(principal, request)

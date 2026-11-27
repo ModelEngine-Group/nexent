@@ -330,3 +330,154 @@ def test_registry_rows_match_nb_mounted_routes_and_capabilities(monkeypatch):
     monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
     with TestClient(application.create_app(), raise_server_exceptions=False) as probe:
         assert probe.get("/nb/ops/v1/monitoring/models").status_code != 404
+
+
+# ---------------------------------------------------------------------------
+# API-key usage accounting: same ledger, same writer, fail-open.
+# ---------------------------------------------------------------------------
+
+def test_accounting_shims_keep_one_definition():
+    """Management re-exports point at the shared implementations, not copies."""
+    from backend.http.server.northbound import record_api_key_usage as shared_record
+    from infrastructure.rdb import token_usage as shared_module
+    from management.db.identity import models as management_models
+    from management.db.identity import token as management_token
+    from management.services.permission.identity import northbound as management_northbound
+
+    assert management_models.UserTokenUsageLog is shared_module.UserTokenUsageLog
+    assert management_token.log_token_usage is shared_module.log_token_usage
+    assert management_northbound.record_api_key_usage is shared_record
+    # One table, registered once, on the shared base.
+    assert shared_module.UserTokenUsageLog.__tablename__ == "user_token_usage_log_t"
+
+
+def test_record_api_key_usage_writes_the_same_ledger_fields(monkeypatch):
+    """The moved accounting keeps the exact ledger call, route template and fail-open."""
+    from backend.http.server import northbound as shared
+
+    captured = {}
+
+    def fake_log(token_id, call_function_name, related_id, created_by, metadata):
+        captured.update(token_id=token_id, call_function_name=call_function_name,
+                        related_id=related_id, created_by=created_by, metadata=metadata)
+        return 4242
+
+    monkeypatch.setattr(shared, "log_token_usage", fake_log)
+    request = SimpleNamespace(
+        url=SimpleNamespace(path="/nb/ops/v1/monitoring/models/summary"),
+        method="GET", headers={"X-Request-Id": "req-42"},
+        scope={"route": SimpleNamespace(path="/nb/ops/v1/monitoring/models/summary")},
+    )
+    principal = AuthenticatedIdentity(user_id="partner-user", tenant_id="tenantA",
+                                      token_id=7, kind=CredentialKind.API_KEY)
+    shared.record_api_key_usage(principal, request)
+    assert captured == {
+        "token_id": 7,
+        "call_function_name": "/nb/ops/v1/monitoring/models/summary",
+        "related_id": None,
+        "created_by": "partner-user",
+        "metadata": {"method": "GET", "request_id": "req-42",
+                     "path": "/nb/ops/v1/monitoring/models/summary"},
+    }
+
+    # No token id: nothing is written.
+    captured.clear()
+    shared.record_api_key_usage(
+        AuthenticatedIdentity(user_id="u", tenant_id="t", kind=CredentialKind.API_KEY), request)
+    assert captured == {}
+
+    # Ledger failure never propagates (fail-open).
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("ledger down")
+
+    monkeypatch.setattr(shared, "log_token_usage", broken)
+    shared.record_api_key_usage(principal, request)  # no raise
+
+
+def test_record_api_key_usage_skips_legacy_self_accounting_routes(monkeypatch):
+    from backend.http.server import northbound as shared
+
+    calls = []
+    monkeypatch.setattr(shared, "log_token_usage", lambda **kwargs: calls.append(kwargs))
+    principal = AuthenticatedIdentity(user_id="u", tenant_id="t", token_id=7,
+                                      kind=CredentialKind.API_KEY)
+    request = SimpleNamespace(url=SimpleNamespace(path="/nb/v1/chat/run"), method="POST",
+                              headers={}, scope={})
+    shared.record_api_key_usage(principal, request)
+    assert calls == []
+
+
+def test_nb_lane_accounts_usage_through_the_ops_lane(nb_client, monkeypatch):
+    """A real /nb request resolves the trusted identity and queues the ledger write."""
+    client, _, _ = nb_client
+    submitted = []
+
+    class Manager:
+        def submit(self, lane, spec, fn, *args):
+            submitted.append((lane, fn, args))
+
+    client.app.state.thread_manager = Manager()
+    record = {"kind": "api_key", "user_id": "partner-user", "tenant_id": "tenantA",
+              "token_id": 7, "roles": []}
+    monkeypatch.setattr(monitoring, "trusted_identity", lambda: record)
+    client.app.dependency_overrides.pop(ops_principal, None)
+    try:
+        monkeypatch.setattr(monitoring, "read_models", lambda *_a, **_k: (
+            [], [], [DAY], {"coverage_state": "covered", "is_stale": False, "data_as_of": None}))
+        response = client.get("/nb/ops/v1/monitoring/models/summary",
+                              params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+        assert response.status_code == 200
+        assert response.json()["message"] == "success"
+    finally:
+        client.app.dependency_overrides[ops_principal] = None
+        client.app.dependency_overrides.pop(ops_principal, None)
+    assert len(submitted) == 1
+    lane, fn, args = submitted[0]
+    assert lane == "control-io"
+    from backend.http.server.northbound import record_api_key_usage
+    assert fn is record_api_key_usage
+    principal, request = args
+    assert (principal.user_id, principal.tenant_id, principal.token_id) == ("partner-user", "tenantA", 7)
+    assert request.url.path == "/nb/ops/v1/monitoring/models/summary"
+
+    # Lane admission failure drops the accounting, never the request.
+    class BrokenManager:
+        def submit(self, *_args, **_kwargs):
+            raise RuntimeError("lane full")
+
+    client.app.state.thread_manager = BrokenManager()
+    response = client.get("/nb/ops/v1/monitoring/models/summary",
+                          params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+    assert response.status_code == 200
+
+
+def test_nb_lane_without_gateway_identity_is_rejected(nb_client, monkeypatch):
+    """No gateway-verified principal on /nb: 401, indistinguishable from unauthenticated."""
+    client, _, _ = nb_client
+    monkeypatch.setattr(monitoring, "trusted_identity", lambda: None)
+    client.app.dependency_overrides.pop(ops_principal, None)
+    try:
+        # The domain 401 travels the shared catch-all handler; the probe only
+        # inspects the delivered response, as the real client receives it.
+        probe = TestClient(client.app, raise_server_exceptions=False)
+        response = probe.get("/nb/ops/v1/monitoring/models/summary",
+                             params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+        assert response.status_code == 401
+        body = response.json()
+        assert body["status"] == 401
+    finally:
+        client.app.dependency_overrides.pop(ops_principal, None)
+
+
+def test_nb_lane_rejects_a_session_kind_gateway_identity(nb_client, monkeypatch):
+    client, _, _ = nb_client
+    monkeypatch.setattr(monitoring, "trusted_identity",
+                        lambda: {"kind": "session", "user_id": "u", "tenant_id": "t"})
+    client.app.dependency_overrides.pop(ops_principal, None)
+    try:
+        probe = TestClient(client.app, raise_server_exceptions=False)
+        response = probe.get("/nb/ops/v1/monitoring/models/summary",
+                             params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+        assert response.status_code == 401
+    finally:
+        client.app.dependency_overrides.pop(ops_principal, None)

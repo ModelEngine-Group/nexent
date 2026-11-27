@@ -32,7 +32,7 @@ PR #4347 建立了北向能力门体系（`nb_exposed` 声明 → `scripts/gener
 | 响应信封 | 仅对 `/nb` 路径生效的响应包装中间件（`ops/api/northbound_envelope.py`），handler 返回语句零改动 |
 | 门控隔离哲学 | `ops_principal` 路径感知依赖在 handler 内分流；session 分支行为保持由全部既有监控测试回归保障 |
 
-### 1.2 容器解耦：共享 Web 层下沉
+### 1.2 容器解耦：共享层下沉（Web 层 + 存储适配层）
 
 Ops 容器以 Dockerfile COPY 白名单实现模块解耦（`deploy/images/dockerfiles/ops/Dockerfile`
 逐文件挑选，不含完整 `backend/management`）。初版实现从 management 导入了 4 个未列入
@@ -41,23 +41,43 @@ PR #4347 确立的原则（"the shared layer must not import business source"，
 `management/utils/request_context.py` 的迁移注释），将 Ops 需要的传输层原语下沉到共享
 Web 层 `backend/http/server/`，management 原位置改为重导出（既有调用方与测试零改动）：
 
-| 原位置（management） | 新位置（共享 Web 层） | 内容 |
+| 原位置（management） | 新位置（共享层） | 内容 |
 | --- | --- | --- |
 | `services/permission/identity/dependency.py` | `http/server/northbound.py` | `is_northbound_path`、`credential_kind_for_path`（纯路径策略） |
 | `services/northbound.py` | `http/server/northbound.py` | `check_and_consume_rate_limit`（限流核心，`runtime_state_service` 惰性导入 + ImportError 时退化为进程内限流） |
 | `services/monitor/audit.py` | `http/server/security_audit.py` | `record_security_event`（纯日志审计 `[SEC_AUDIT]`，无 DB 依赖） |
 | `utils/envelope.py` | `http/server/northbound.py` | `northbound_envelope`（统一信封构造） |
 | `utils/request_context.py` | `http/server/request_context.py` | `get_client_ip`（供共享审计层使用） |
+| `services/permission/identity/northbound.py` | `http/server/northbound.py` | `record_api_key_usage`（API Key 用量记账编排，fail-open） |
+| `db/identity/models.py` + `db/identity/token.py` | `infrastructure/rdb/token_usage.py` | `UserTokenUsageLog` 模型 + `log_token_usage` 写入器（账本表，与 `account_record.py` 同层的共享存储适配器） |
 
 配套变更：Ops 镜像白名单扩展（`http/server/northbound.py`、`security_audit.py`、
-`infrastructure/redis`）；新增 `test/backend/deploy/test_ops_image_whitelist.py` 以
-子进程运行 Ops 入口导入图，逐一核对落在 COPY 白名单内——该防护使此类"本地可导入、
-容器崩溃"的耦合在 CI 即被拦截。
+`infrastructure/redis`、`infrastructure/rdb/token_usage.py`）；两道防护——
+`test/backend/deploy/test_ops_image_whitelist.py` 以子进程运行 Ops 入口导入图逐一核对 COPY
+白名单；`test/backend/ops/test_ops_management_import_surface.py` 冻结 **Ops→management 导入
+面不得超出 develop 基线**（11 个既有模块），新增导入必须在解耦评审后走共享层。
 
-保留的既存耦合（显式记录）：`ops_principal` 的身份解析仍使用
-`management/services/permission/identity/session.py`（`authenticate`/`authenticate_identity`，
-白名单内，develop 既有依赖，身份解析与用户库属 management 数据所有权）。彻底消除需要
-把身份解析下沉为共享 adapter 或走服务间协议，应单独立项。
+### 1.3 /nb 通道身份与记账：零新增 management 依赖
+
+`ops_principal` 的 `/nb` 分支**直接读取网关签名身份**：`gateway.identity.context.trusted_identity()`
+（共享包，runtime voice 路由的同一先例）。网关凭据策略（`gateway/security/credentials.py`）
+明确把 `/nb/` 排除在 speed 旁路之外——`/nb` 流量必须在边缘完成真实 API Key 校验并由网关签名，
+Ops 侧的 `GatewayIdentityMiddleware` 验签后上下文即含已校验的 `kind=api_key` 记录（`verify_identity`
+再强制一次 kind 匹配）。因此"绕过网关鉴权直连 Ops 的 `/nb`"本就不是合法路径：改为只认签名身份与
+既有设计一致（网关鉴权关闭时边缘即拒，直连端口从来不是发布入口）。无签名身份或 kind 不匹配 → 401。
+
+API Key 用量记账照常写入**同一张账本表（`user_token_usage_log_t`）**：模型与写入器下沉为
+`infrastructure/rdb/token_usage.py` 的唯一定义（TableBase 本就来自 `infrastructure/rdb/base`，
+同一 declarative 元数据，management 三处原位置重导出）；编排函数 `record_api_key_usage`
+下沉到共享 Web 层，Ops 提交到本进程线程管理器的 `control-io` lane（fail-open）。测试以
+`is` 同一性断言单一定义，并钉死字段（token_id/路由模板/created_by/metadata）、fail-open
+与提交链路。
+
+**仍在的 management 依赖 = develop 基线**（`test_ops_management_import_surface.py` 冻结）：
+session 通道的 `authenticate`（`services/permission/identity/session`）、监控目录查询的
+`db.agent/configuration/model/conversation(.identity)` 模型、`db.identity.conversation_agent_history_db`
+（延迟）、`services/configuration/resource_denylist`、`utils/serialization`、
+`api.permission.ops_access`。均为 develop 既有依赖，`/nb` 通道不新增任何一项。
 
 ## 2. 架构设计
 
@@ -96,8 +116,8 @@ sequenceDiagram
     P->>GW: GET /nb/ops/v1/monitoring/models (Bearer API Key)
     GW->>GW: 注册表行匹配(credential_kinds=[api_key])→API Key 校验
     GW->>OPS: 原路径转发 + x-nexent-identity(aud=ops, 签名绑定 method/path/query)
-    OPS->>OPS: GatewayIdentityMiddleware 验签
-    OPS->>OPS: ops_principal 判定 /nb 通道→API Key 身份+用量记账
+    OPS->>OPS: GatewayIdentityMiddleware 验签(强制 kind=api_key)
+    OPS->>OPS: ops_principal 读 trusted_identity<br/>→API Key 身份+用量记账(control-io lane)
     OPS->>OPS: ops_scoped_tenant: tenant=身份租户<br/>(tenant_id 不匹配→403)
     OPS->>OPS: 同一 handler→共享内核查询→内部体
     OPS->>OPS: /nb 包装中间件→统一信封
@@ -111,14 +131,16 @@ sequenceDiagram
   `target=ops` 原路径转发（`gateway/routing.py` 的 `exposure_target` 直返 `match.target`，
   northbound 逻辑别名已废弃）。
 - **路径感知身份**：`ops_principal`（`ops/api/monitoring.py`）按 `is_northbound_path`
-  分流：`/nb` 通道用 `authenticate_identity(kind=API_KEY)` 解析网关签名身份并做 API Key
-  用量记账（提交到 ops 进程自有线程管理器的 `control-io` lane，fail-open）；session 通道
-  保持原 `authenticate`（并镜像 FastAPI 的 `dependency_overrides` 查找，既有测试夹具不动）。
+  分流：`/nb` 通道直接读 `gateway.identity.context.trusted_identity()`（网关签名、中间件
+  已验签并强制 kind=api_key 的记录；runtime voice 路由同款先例，见 §1.3）并做 API Key
+  用量记账（共享层 `record_api_key_usage` 提交到 ops 进程自有线程管理器的 `control-io`
+  lane，写入同一账本表，fail-open）；session 通道保持原 `authenticate`（并镜像 FastAPI 的
+  `dependency_overrides` 查找，既有测试夹具不动）。
 - **租户锁定**：`ops_scoped_tenant` 在 `/nb` 通道返回身份租户；`tenant_id` 参数传入且不等于
   身份租户时返回 403。refresh 令牌签发时 `tenant` 恒为身份租户；refresh status 校验令牌内
   租户等于身份租户，不匹配按 404 处理（与"不存在"不可区分，防跨租户探测）。
 - **动作防护**：3 个 refresh POST 在 `/nb` 通道附加每租户限流
-  （复用 `management/services/northbound.py` 的 `check_and_consume_rate_limit`，超限 429
+  （共享层 `check_and_consume_rate_limit`，超限 429
   三段式错误体）与审计（`record_security_event`，事件名
   `northbound_monitoring_*_refresh`，失败/拒绝也留痕，fail-open）。查询门控不限流
   （与 `automations.list` 门控惯例一致）。
@@ -219,21 +241,24 @@ curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh
 
 | 文件 | 变更 |
 | --- | --- |
-| `backend/ops/api/monitoring.py` | `OpsPrincipal`/`ops_principal`/`ops_scoped_tenant`/`nb_action_guard`/`_nb_audit`；11 个 handler 与 `_read_agent_views` 换用路径感知身份；响应体与校验零改动 |
+| `backend/ops/api/monitoring.py` | `OpsPrincipal`/`ops_principal`/`ops_scoped_tenant`/`nb_action_guard`/`_nb_audit`；11 个 handler 与 `_read_agent_views` 换用路径感知身份；响应体与校验零改动；`/nb` 通道读 `trusted_identity`，对 management 的导入保持 develop 原样（仅 `authenticate`，服务 session 通道） |
 | `backend/ops/api/northbound_envelope.py` | 新增：`/nb` 响应包装中间件 |
-| `backend/http/server/northbound.py` | 新增（共享 Web 层）：路径策略、统一信封、每租户限流 |
+| `backend/http/server/northbound.py` | 新增（共享 Web 层）：路径策略、统一信封、每租户限流、`record_api_key_usage` 记账编排 |
 | `backend/http/server/security_audit.py` | 新增（共享 Web 层）：`[SEC_AUDIT]` 安全审计（自 management 下沉） |
 | `backend/http/server/request_context.py` | `get_client_ip` 下沉至此（自 management utils） |
-| `backend/management/services/permission/identity/dependency.py` 等 4 处 | 原实现改为重导出（见 §1.2），既有调用方零改动 |
+| `infrastructure/rdb/token_usage.py` | 新增（共享存储适配层）：`UserTokenUsageLog` 模型 + `log_token_usage`（自 management 下沉，唯一定义） |
+| `backend/management` 5 处（`identity/dependency`、`identity/northbound`、`services/northbound`、`services/monitor/audit`、`db/identity/{models,token}` 等） | 原实现改为重导出（见 §1.2），既有调用方零改动 |
 | `backend/ops/api/application.py` | 注册中间件；`ops_router` 以 `/nb` 前缀二次挂载 |
-| `deploy/images/dockerfiles/ops/Dockerfile` | 白名单扩展：共享 Web 层两个新模块 + `infrastructure/redis` |
+| `deploy/images/dockerfiles/ops/Dockerfile` | 白名单扩展：共享 Web 层两个新模块 + `infrastructure/redis` + `infrastructure/rdb/token_usage.py` |
 | `backend/gateway/exposure/registry.json` | 手工新增 24 行（`capability_id`、`target=ops`、`credential_kinds=["api_key"]`），`--check` 通过 |
-| `test/backend/ops/test_northbound_monitoring_reuse.py` | 新增 12 个 UT：信封、租户锁、令牌绑定、审计、限流、错误翻译、session 对照、防漂移 |
+| `test/backend/ops/test_northbound_monitoring_reuse.py` | UT：信封、租户锁、令牌绑定、审计、限流、错误翻译、session 对照、防漂移、接口契约扫描（24 路由）、记账同一性与提交链路、无签名身份 401 |
+| `test/backend/ops/test_ops_management_import_surface.py` | 新增：Ops→management 导入面 ⊆ develop 基线防护 |
 | `test/backend/gateway/test_exposure.py` | 新增 `/nb/ops` 行断言与能力急停测试 |
-| `test/backend/gateway/test_model_monitoring.py` | 新增网关↔Ops 北向集成测试（D3 级证据） |
+| `test/backend/gateway/test_model_monitoring.py` | 新增网关↔Ops 北向集成测试（D3 级证据，24 路由全扫） |
 | `test/backend/deploy/test_ops_image_whitelist.py` | 新增：Ops 导入图 ↔ 镜像白名单一致性防护（子进程隔离） |
+| `test/backend/management/test_unified_identity_dependency.py`、`test/backend/database/test_token_db.py` | 记账测试的拦截目标随实现迁移到共享模块（断言不变，仍经 management 入口调用，兼证重导出） |
 
-验证：`pytest test/backend/ops/ test/backend/gateway/ ... -q`（1076 通过；10 个失败为本机
+验证：`pytest test/backend/ops/ test/backend/gateway/ test/backend/deploy/ test/backend/management/ test/backend/database/ test/backend/app/ -q`（1111 通过；10 个失败为本机
 存量环境问题，与干净 develop 逐项一致）；`python scripts/generate_exposure_registry.py
 --check`；`python scripts/check_copyright.py`。
 
