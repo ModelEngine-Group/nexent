@@ -620,3 +620,97 @@ def test_token_usage_resolves_the_session_factory_lazily(monkeypatch):
     from infrastructure.rdb.client import get_db_session
     assert factory is get_db_session
     assert token_usage.get_db_session is get_db_session
+
+
+# ---------------------------------------------------------------------------
+# Remaining codecov patch lines: identity, audit fail-open, refresh guards,
+# per-domain foreign-token 404s, and error-body extras.
+# ---------------------------------------------------------------------------
+
+def test_nb_lane_rejects_an_incomplete_gateway_identity(nb_client, monkeypatch):
+    client, _, _ = nb_client
+    monkeypatch.setattr(monitoring, "trusted_identity", lambda: {"kind": "api_key"})
+    client.app.dependency_overrides.pop(ops_principal, None)
+    try:
+        probe = TestClient(client.app, raise_server_exceptions=False)
+        response = probe.get("/nb/ops/v1/monitoring/models/summary",
+                             params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+        assert response.status_code == 401
+    finally:
+        client.app.dependency_overrides.pop(ops_principal, None)
+
+
+def test_nb_refresh_survives_an_audit_writer_failure(nb_client, monkeypatch):
+    """The audit hook is fail-open: a broken writer never fails the action."""
+    client, store, _ = nb_client
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("audit store down")
+
+    monkeypatch.setattr("backend.http.server.security_audit.record_security_event", broken)
+    response = _nb_refresh_token(client)
+    assert response.status_code == 202
+    assert response.json()["data"]["data"]["status"] == "queued"
+
+
+def test_nb_refresh_rejects_an_invalid_date_range(nb_client):
+    client, _, _ = nb_client
+    far = DAY + timedelta(days=400)
+    response = client.post("/nb/ops/v1/monitoring/models/refresh",
+                           json={"start_date": DAY.isoformat(), "end_date": far.isoformat()})
+    assert response.status_code == 422
+    assert response.json()["status"] == 422
+
+
+def test_nb_refresh_reports_unavailable_without_the_service(nb_client):
+    client, _, _ = nb_client
+    del client.app.state.monitoring
+    response = client.post("/nb/ops/v1/monitoring/models/refresh",
+                           json={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+    assert response.status_code == 503
+    assert response.json()["status"] == 503
+
+
+@pytest.mark.parametrize("domain", ["skills", "mcp-tools"])
+def test_nb_refresh_status_hides_foreign_tokens_in_every_domain(nb_client, domain):
+    client, _, _ = nb_client
+    now = datetime.now(timezone.utc)
+    if domain == "skills":
+        key, audience = monitoring._refresh_key("skill"), "ops-skill-monitoring-refresh"
+    else:
+        key, audience = monitoring._tool_refresh_key(), "ops-mcp-tool-monitoring-refresh"
+    foreign = jwt.encode({"aud": audience, "tenant": "tenantB", "revisions": {},
+                          "start": DAY.isoformat(), "end": DAY.isoformat(),
+                          "requested": now.timestamp(), "exp": now + timedelta(minutes=10)},
+                         key, algorithm="HS256")
+    response = client.get(f"/nb/ops/v1/monitoring/{domain}/refreshes/{foreign}")
+    assert response.status_code == 404
+    assert response.json()["code"] == "HTTP_404"
+
+
+def test_error_body_preserves_top_level_code_and_extras():
+    from backend.ops.api.northbound_envelope import _error_body
+
+    body = _error_body({"code": "RATE_LIMIT_EXCEEDED", "message": "slow down",
+                        "retryable": True}, 429, "req-x")
+    assert body["code"] == "RATE_LIMIT_EXCEEDED"
+    assert body["retryable"] is True
+    assert body["status"] == 429 and body["requestId"] == "req-x"
+
+
+def test_audit_record_survives_a_broken_logger(monkeypatch):
+    from backend.http.server import security_audit
+
+    class BrokenLogger:
+        def error(self, *_args, **_kwargs):
+            raise RuntimeError("logging pipeline down")
+
+    monkeypatch.setattr(security_audit, "logger", BrokenLogger())
+
+    class BrokenRequest:
+        @property
+        def headers(self):
+            raise RuntimeError("boom")
+
+    security_audit.record_security_event("evt", request=BrokenRequest(),
+                                         user_id="u", tenant_id="t")
