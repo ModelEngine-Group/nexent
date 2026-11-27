@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { FixtureUnavailableError, journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
@@ -28,6 +28,9 @@ async function fixture(operation: string, args: string[] = []) {
         detail += `: ${diagnostic.check}`;
       }
     } catch { /* Unknown child output must not expose auth request bodies. */ }
+    if (detail === "AgentCoreUnavailableError") {
+      throw new FixtureUnavailableError("CMSR needs a deployment with NEXENT_AGENT_CORE=smolagents.");
+    }
     throw new Error(`CMSR fixture operation failed: ${operation}${detail ? ` (${detail})` : ""}; see runtime/cmsr-history.json`);
   }
 }

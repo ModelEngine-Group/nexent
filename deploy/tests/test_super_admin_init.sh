@@ -87,6 +87,7 @@ for script in "$TEST_ROOT/deploy/docker/create-su.sh" "$TEST_ROOT/deploy/k8s/cre
   [ "$(cat "$EVENT_LOG")" = check ]
 done
 # Exercise the actual deployment precheck without running deployment main().
+source "$TEST_ROOT/deploy/common/common.sh"
 eval "$(sed -n '/^check_super_admin_user_exists() {/,/^}/p' "$TEST_ROOT/deploy/docker/deploy.sh")"
 for MOCK_CHECK_STATUS in 0 3 1; do
   export MOCK_CHECK_STATUS

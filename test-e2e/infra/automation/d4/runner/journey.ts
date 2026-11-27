@@ -35,6 +35,56 @@ function safeUrl(value: string): string {
   }
 }
 
+export class FixtureUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FixtureUnavailableError";
+  }
+}
+
+export function readFixtureConfig(name: string) {
+  const path = process.env[name];
+  if (!path || !existsSync(path)) {
+    throw new FixtureUnavailableError("Machine-local fixture file is missing. Set " + name + " to an existing file.");
+  }
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error("Cannot read a valid JSON fixture from " + name);
+  }
+}
+
+export async function observeAgentRunBodies(page: Page): Promise<(discard?: boolean) => Promise<string>> {
+  // Chromium can discard a streamed body after the app updates the thread route.
+  await page.addInitScript(() => {
+    const bodies: Array<Promise<string>> = [];
+    Object.assign(window, { __nexentAgentRunBodies: bodies });
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch.apply(window, args);
+      const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : "GET");
+      if (method.toUpperCase() === "POST" && new URL(response.url).pathname === "/api/agent/run") {
+        bodies.push(response.clone().text().catch(() => ""));
+      }
+      return response;
+    };
+  });
+  return async (discard = false) => {
+    await page.waitForFunction(() => {
+      const current = window as Window & { __nexentAgentRunBodies?: unknown[] };
+      return Boolean(current.__nexentAgentRunBodies?.length);
+    }, undefined, { timeout: 30_000 });
+    const body = await page.evaluate(async skip => {
+      const current = window as Window & { __nexentAgentRunBodies?: Array<Promise<string>> };
+      const next = current.__nexentAgentRunBodies?.shift();
+      return skip ? "" : next ?? "";
+    }, discard);
+    if (discard) return body;
+    expect(body, "Browser must observe the authenticated run stream").not.toBe("");
+    return body;
+  };
+}
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`missing required environment variable ${name}`);
@@ -164,6 +214,7 @@ export class ContractExecution {
   }
 
   failKind(error: unknown): FinalResult {
+    if (error instanceof FixtureUnavailableError) return "BLOCKED";
     const name = error instanceof Error ? error.name : "";
     if (/Cleanup/i.test(name)) return "AUTOMATION_ERROR";
     if (/DependencyFailure/i.test(name)) return "BLOCKED_BY_DEPENDENCY";

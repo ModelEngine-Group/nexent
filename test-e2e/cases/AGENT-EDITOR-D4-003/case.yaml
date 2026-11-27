@@ -8,13 +8,13 @@ case:
   - AGENT-EDITOR-REQ-003
   business_rule_ids:
   - AGENT-EDITOR-RULE-003
-  title: Persist edited guidance and description across reload
+  title: Autosave description, greeting and expanded prompt across reload
   type: E2E
   priority: P1
   status: active
   automation: automated
-  objective: Description and greeting persist through the real editor/autosave chain
-    and reload, while Agent identity and resource associations are retained.
+  objective: Description, greeting and expanded prompt edits persist across reload
+    while Agent identity and resource associations are retained.
   preconditions:
   - A running frontend is reachable; deterministic existing HTTP fixtures isolate
     Agent data, authorization and model/resource boundaries.
@@ -27,35 +27,35 @@ case:
   steps:
   - order: 1
     action: Open an editable existing draft and inspect persisted fields.
-    expected: Stored description and greeting render without writes.
+    expected: Stored description, greeting and prompt render without writes.
   - order: 2
-    action: Edit description and greeting and wait for autosave.
-    expected: Existing update requests carry the edited fields and preserve Agent
-      identity/model/tools.
+    action: Edit description and greeting, then edit the prompt in the expanded editor.
+    expected: Autosave persists the prompt while the dialog is still open. Closing the
+      dialog shows the updated prompt in the inline editor and preserves Agent identity/model/tools.
   - order: 3
     action: Reload and inspect the saved fields.
     expected: The edited values reappear from persisted HTTP data, without another
       edit being required.
   expected_results:
-  - Description and greeting persist through the real editor/autosave chain and reload,
-    while Agent identity and resource associations are retained.
+  - Description, greeting and expanded prompt edits persist across reload while Agent
+    identity and resource associations are retained.
   forbidden_side_effects:
   - No unrelated writes, publication or Agent/model execution; only explicitly requested
     creation/autosave writes are allowed.
   actor: Authorized Agent development user
   journey:
   - Open an editable existing draft and inspect persisted fields.
-  - Edit description and greeting and wait for autosave.
+  - Edit description, greeting and expanded prompt and wait for autosave.
   - Reload and inspect the saved fields.
   final_business_result:
-  - Description and greeting persist through the real editor/autosave chain and reload,
-    while Agent identity and resource associations are retained.
+  - Description, greeting and expanded prompt edits persist across reload while Agent
+    identity and resource associations are retained.
   failure_evidence:
   - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
   acceptance:
   - id: AC-01
-    description: Description and greeting persist through the real editor/autosave
-      chain and reload, while Agent identity and resource associations are retained.
+    description: Description, greeting and expanded prompt edits autosave and persist
+      across reload, while Agent identity and resource associations are retained.
     steps:
     - 1
     - 2

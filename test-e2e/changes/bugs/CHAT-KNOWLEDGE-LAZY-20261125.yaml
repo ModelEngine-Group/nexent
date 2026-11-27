@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-KNOWLEDGE-LAZY-20261125
+  change_type: bugfix
+  bug_id: CHAT-KNOWLEDGE-LAZY-20261125
+  title: Gate Agent chat knowledge entry before lazy catalog loading
+  description: Use published configuration source flags for initial visibility and defer knowledge queries until opening.
+  observed_behavior: Unknown capability initially exposes the button and an unsupported response removes it after opening.
+  expected_behavior: Only configured active-source retrieval tools expose the entry; opening alone loads capabilities and catalogs.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Lazy Composer tests expected unknown Agents to expose the entry; no initial configuration gate assertion existed.
+  feature_contract_changed: false
+  affected_features:
+    existing: [WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Published source flags reflect versioned effective root, worker and Skill tools without knowledge catalog reads.
+    - Missing or disabled source flags hide the initial entry without requests; configured tools with empty defaults retain it.
+    - Capability loading errors, retries, source and Agent changes remain isolated; Workbench behavior is preserved.
+    test_selectors:
+    - frontend/tests/workbench/Composer.test.tsx
+    - frontend/tests/workbench/KnowledgePicker.test.tsx
+    - frontend/tests/component/publishedKnowledgeSources.test.tsx
+    - frontend/tests/component/agentChatRefreshRestore.test.tsx
+    - test/backend/services/test_agent_knowledge_sources.py
+    - test/backend/services/test_knowledge_scope_service.py
+    - test/backend/services/test_agent_version_service.py::test_list_published_agents_impl_success
+    reason: Focused service and rendered component regressions prove the configuration projection and lazy UI boundary; no runtime, persistence or provider behavior changes.
+  notes: 'Baseline: ../nexent-doc-new/docs/Developing/chat-shared-resource-selectors/design.md. WB-CONTROLS RULE-005/007; ownership runtime. Existing PW-CHAT-05 and WB-CONTROLS-D4-004 scripts cover scope persistence and Workbench, not this initial Agent-chat gate; unchanged and outside current execution selection. No duplicate formal D1 for isolated service/UI assertions. D2/D3/D5 runtime and authorization remain unchanged; browser smoke is supplemental.'

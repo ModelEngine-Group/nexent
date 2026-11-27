@@ -3,9 +3,11 @@
 import os
 import uuid
 
+import httpx
 import pytest
 
-from shared.http import assert_status, client
+from shared.ext_knowledge import runner_url
+from shared.http import assert_status, client, response_message
 from shared.factories.ownership import register_owned_http
 from shared.asset_registry import mark_asset_state
 from shared.aidp import create_payload
@@ -143,6 +145,34 @@ async def test_aidp_kb_list_count_intersection_pagination(tenant_a_admin, tenant
         assert_status(far, 200)
         assert far.json()['value'] == []
         assert far.json()['has_more'] is False
+
+        # Upstream outage and recovery: inject failures on the next AIDP calls,
+        # prove the proxy reports an error (never a false success), then reset
+        # the injection and prove the same call succeeds again.
+        async with httpx.AsyncClient(timeout=15) as mock:
+            scheduled = await mock.post(
+                runner_url('_mock/fail-next'), params={'n': 3, 'status': 503}
+            )
+        assert_status(scheduled, 200)
+        async with client('config', token=admin.access_token) as api:
+            failed = await api.get(
+                f'{_AIDP}/knowledge-bases', params={'page': 1, 'page_size': 10}
+            )
+        assert failed.status_code in (500, 502, 503), failed.text
+        assert response_message(failed).strip(), (
+            'an AIDP outage must surface a readable message'
+        )
+        failed_body = failed.json()
+        assert 'value' not in failed_body, 'an outage must not be reported as a listing'
+        async with httpx.AsyncClient(timeout=15) as mock:
+            reset = await mock.post(runner_url('_mock/fail-reset'))
+        assert_status(reset, 200)
+        async with client('config', token=admin.access_token) as api:
+            recovered = await api.get(
+                f'{_AIDP}/knowledge-bases', params={'page': 1, 'page_size': 10}
+            )
+        assert_status(recovered, 200)
+        assert isinstance(recovered.json().get('value'), list)
     finally:
         await _delete_kb(admin, admin_kb)
         await _delete_kb(user, user_kb)

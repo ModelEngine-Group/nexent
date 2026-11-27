@@ -192,7 +192,7 @@ journey("WB-CONTROLS-D4-001", async ({ page, contract }) => {
       await page.getByRole("button", { name: "智能体", exact: true }).click();
       await drawer.getByRole("option", { name: "Internal Analyst", exact: true }).click();
       await drawer.getByRole("button", { name: "取消", exact: true }).click();
-      await expect(page.getByRole("button", { name: "Agent · Internal Analyst", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "智能体", exact: true })).toHaveText("智能体");
       await page.getByRole("button", { name: "智能体", exact: true }).click();
       await expect(drawer.getByRole("button",{name:"编辑",exact:true})).toHaveCount(0);
       const [first,second]=await drawer.getByRole("option").evaluateAll(elements=>elements.slice(0,2).map(el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,height:r.height}}));
@@ -217,8 +217,8 @@ journey("WB-CONTROLS-D4-001", async ({ page, contract }) => {
       await drawer.getByRole("tab", { name: "我的", exact: true }).click();
       await drawer.getByRole("button", { name: "确认选择", exact: true }).click();
       await expect(drawer).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "智能体", exact: true })).toHaveText("智能体");
-      await expect(page.getByRole("button", { name: "Agent · Internal Analyst", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "智能体", exact: true })).toHaveText("智能体1");
+
       await page.getByRole("button", { name: "技能", exact: true }).click();
       await expect(drawer.getByRole("option", { name: "Invoice Skill", exact: true })).toBeVisible();
       await drawer.getByRole("tab", { name: "仓库", exact: true }).click();

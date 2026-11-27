@@ -5,8 +5,8 @@ Operations documentation covers the dashboard and system configuration. Availabl
 | Module | Content | Documentation status |
 | --- | --- | --- |
 | [Operations Dashboard](./operations/dashboard) | Monitoring targets, metrics, and statistics | Pending |
-| [System Configuration](./operations/configuration) | Viewing, editing, and applying settings | Pending |
+| [System Configuration](./operations/configuration) | Viewing and editing branding, platform quota, and runtime parameters, including effective timing | Updated |
 
-::: warning Documentation Pending
-The former Monitoring & Operations page contained only a feature preview. The pages above need instructions, permissions, and screenshots verified against the 3.0 release. Earlier previews such as alerting do not establish released functionality.
+::: warning Operations Dashboard Documentation Pending
+The Operations Dashboard still needs monitoring targets, instructions, and screenshots verified against the actual release. Earlier previews such as alerting do not establish released functionality.
 :::

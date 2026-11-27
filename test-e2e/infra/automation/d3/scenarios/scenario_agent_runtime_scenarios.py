@@ -97,9 +97,15 @@ async def _basic_stream(identity, mode: str) -> None:
         assert_terminal_event(events)
         assert "d3_basic_ok" in _event_text(events)
     elif mode == "boundary":
-        events = await _run(identity, absent_numeric_id(__name__), "test")
-        text = _event_text(events)
-        assert "error" in text or "failed" in text or "not_found" in text or "not found" in text
+        missing_agent_id = absent_numeric_id(__name__)
+        async with client("runtime", token=identity.access_token) as api:
+            for _ in range(2):
+                response = await api.post("/agent/run", json={
+                    "query": "test", "agent_id": missing_agent_id, "history": [], "is_debug": True,
+                })
+                assert_status(response, 404)
+                assert response.json()["code"] == "NOT_FOUND"
+                assert "conversation_id" not in response.headers
     else:
         owner = await sign_in('tenant_a_admin')
         assert owner.tenant_id == identity.tenant_id, 'Fault model owner and runtime user must share the declared tenant'

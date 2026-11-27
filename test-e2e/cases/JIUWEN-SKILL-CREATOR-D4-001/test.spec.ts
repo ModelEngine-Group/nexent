@@ -1,16 +1,14 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { journey, readFixtureConfig } from "../../infra/automation/d4/runner/journey";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 journey("JIUWEN-SKILL-CREATOR-D4-001", async ({ page, expect, contract }) => {
-  const config = JSON.parse(
-    readFileSync(process.env.NEXENT_REAL_SKILL_CREATOR_CONFIG!, "utf8"),
-  );
-  const container = config.container || "nexent-runtime";
+  const config = readFixtureConfig("NEXENT_REAL_SKILL_CREATOR_CONFIG");
+  const container = config.container || "nexent-config";
   const target =
     "/tmp/skill_history_" + randomUUID().replaceAll("-", "").slice(0, 12);
   const privateState = join(contract.caseDir, "private-state.json");
@@ -22,7 +20,7 @@ journey("JIUWEN-SKILL-CREATOR-D4-001", async ({ page, expect, contract }) => {
       docker(
         "exec",
         "-e",
-        "PYTHONPATH=/opt/backend",
+        "PYTHONPATH=/opt:/opt/backend",
         container,
         "/opt/backend/.venv/bin/python",
         target + ".py",
@@ -80,15 +78,6 @@ journey("JIUWEN-SKILL-CREATOR-D4-001", async ({ page, expect, contract }) => {
   await contract.precondition(
     contract.expectedIds("preconditions")[0],
     async () => {
-      expect(
-        (
-          await (
-            await page.request.get(
-              base + "/api/tenant_config/deployment_version",
-            )
-          ).json()
-        ).agent_core,
-      ).toBe("jiuwen");
       setup = true;
       fixture("setup", config.auth_source_agent_id);
       docker("cp", container + ":" + target + ".json", privateState);
@@ -110,6 +99,9 @@ journey("JIUWEN-SKILL-CREATOR-D4-001", async ({ page, expect, contract }) => {
           expires: state.expires_at,
         },
       ]);
+      const deployment = await page.request.get(base + "/api/tenant_config/deployment_version");
+      expect(deployment.ok()).toBe(true);
+      expect((await deployment.json()).agent_core).toBe("jiuwen");
     },
   );
   const steps = contract.expectedIds("steps");

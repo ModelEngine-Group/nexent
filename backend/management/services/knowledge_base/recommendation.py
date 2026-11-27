@@ -9,7 +9,9 @@ from typing import Any
 
 from rapidfuzz import fuzz
 
-MANAGED_KNOWLEDGE_NAMES = {"knowledge_base_search", "aidp_search"}
+from contracts.constants.constants import MANAGED_KNOWLEDGE_TOOL_NAMES as MANAGED_KNOWLEDGE_NAMES
+
+
 _GENERIC_TERMS = {
     "知识库",
     "知识",

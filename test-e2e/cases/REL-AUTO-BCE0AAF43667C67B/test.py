@@ -66,7 +66,12 @@ async def test_northbound_lifespan_start_snapshot_and_graceful_shutdown(monkeypa
             response = await client.get('/internal/thread-capacity')
 
         assert response.status_code == 200
-        assert response.json() == jsonable_encoder(expected_snapshot)
+        actual = response.json()
+        expected = jsonable_encoder(expected_snapshot)
+        # The live execution ages continue advancing between the two snapshots.
+        for actual_run, expected_run in zip(actual["executions"], expected["executions"], strict=True):
+            assert actual_run.pop("age_seconds") >= expected_run.pop("age_seconds") >= 0
+        assert actual == expected
 
     assert config_thread_manager.state is not ManagerState.RUNNING
     assert get_default_thread_manager() is not config_thread_manager

@@ -12,8 +12,8 @@ title: create-docx 官方技能
 
 ### 1. 在资源管理中安装技能
 
-1. 打开 **资源管理**，进入 **资源仓库** 的 **Skill 仓库**。
-2. 在官方技能列表中找到 `create-docx`。
+1. 超级管理员或租户管理员进入 **资源管理** 页面，打开「Skills」页签。
+2. 点击 **安装官方技能**，在弹窗中找到 `create-docx`。
 3. 选择该技能并完成安装。
 
 ![在资源管理中安装 create-docx](../assets/resource-repository/install-create-docx-skills.png)

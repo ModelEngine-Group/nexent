@@ -79,6 +79,20 @@ describe("monitoring filter dependencies", () => {
     });
   });
 
+  it("clears the MCP service and tool on a different group selection", () => {
+    expect(
+      updateMonitoringFilters(selected, { type: "group", value: "8" })
+    ).toBe(selected);
+    expect(
+      updateMonitoringFilters(selected, { type: "group", value: "9" })
+    ).toEqual({
+      ...selected,
+      group: "9",
+      resources: { ...selected.resources, mcp: "" },
+      tool: "",
+    });
+  });
+
   it("only clears the tool on a different MCP service selection", () => {
     expect(
       updateMonitoringFilters(selected, {

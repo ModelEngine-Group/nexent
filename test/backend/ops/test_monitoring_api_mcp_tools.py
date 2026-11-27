@@ -36,7 +36,7 @@ def _tool_status(**overrides):
 def test_mcp_tools_list_returns_sorted_searchable_items(monitoring_client, monkeypatch):
     client, _ = monitoring_client
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (_tool_rows(), [date(2026, 11, 17)], _tool_status()))
+                        lambda *_args, **_kwargs: (_tool_rows(), [], [date(2026, 11, 17)], _tool_status()))
 
     response = client.get("/ops/v1/monitoring/mcp-tools",
                           params={"start_date": "2026-11-17", "end_date": "2026-11-17",
@@ -65,7 +65,7 @@ def test_mcp_tools_summary_keeps_uncovered_windows_none(monitoring_client, monke
     client, _ = monitoring_client
     params = {"start_date": "2026-11-17", "end_date": "2026-11-17"}
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: ([], [], _tool_status(coverage_state="uncovered")))
+                        lambda *_args, **_kwargs: ([], [], [], _tool_status(coverage_state="uncovered")))
 
     uncovered = client.get("/ops/v1/monitoring/mcp-tools/summary", params=params)
     assert uncovered.json()["data"] == {"service_count": 0, "active_services": 0, "tool_count": 0,
@@ -73,7 +73,7 @@ def test_mcp_tools_summary_keeps_uncovered_windows_none(monitoring_client, monke
                                        "error_eligible_count": None, "error_rate": None, "avg_duration_ms": None}
 
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (_tool_rows(), [date(2026, 11, 17)], _tool_status()))
+                        lambda *_args, **_kwargs: (_tool_rows(), [], [date(2026, 11, 17)], _tool_status()))
     covered = client.get("/ops/v1/monitoring/mcp-tools/summary", params=params)
     assert covered.json()["data"]["tool_count"] == 2
     assert covered.json()["data"]["request_count"] == 3
@@ -84,7 +84,7 @@ def test_mcp_tools_summary_keeps_uncovered_windows_none(monitoring_client, monke
 def test_mcp_tools_trends_keep_missing_dates_separate_from_zero_days(monitoring_client, monkeypatch):
     client, _ = monitoring_client
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (_tool_rows()[:1], [date(2026, 11, 17)], _tool_status()))
+                        lambda *_args, **_kwargs: (_tool_rows()[:1], [], [date(2026, 11, 17)], _tool_status()))
 
     response = client.get("/ops/v1/monitoring/mcp-tools/trends",
                           params={"start_date": "2026-11-16", "end_date": "2026-11-17"})
@@ -105,7 +105,7 @@ def test_mcp_tools_rankings_top_items_by_metric(monitoring_client, monkeypatch):
          "error_eligible_count": 7, "duration_ms_sum": 70, "duration_ms_sample_count": 7},
     ]
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (rows, [date(2026, 11, 17)], _tool_status()))
+                        lambda *_args, **_kwargs: (rows, [], [date(2026, 11, 17)], _tool_status()))
 
     response = client.get("/ops/v1/monitoring/mcp-tools/rankings",
                           params={"start_date": "2026-11-17", "end_date": "2026-11-17",
@@ -164,7 +164,7 @@ def test_mcp_tools_list_defaults_to_service_dimension(monitoring_client, monkeyp
          "duration_ms_sum": 60, "duration_ms_sample_count": 3},
     ]
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (rows, [date(2026, 11, 17)], _tool_status()))
+                        lambda *_args, **_kwargs: (rows, [], [date(2026, 11, 17)], _tool_status()))
 
     response = client.get("/ops/v1/monitoring/mcp-tools",
                           params={"start_date": "2026-11-17", "end_date": "2026-11-17"})
@@ -194,7 +194,7 @@ def test_mcp_tools_summary_reports_service_and_tool_activity(monitoring_client, 
          "duration_ms_sum": 10, "duration_ms_sample_count": 1},
     ]
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (rows, [date(2026, 11, 17)], _tool_status()))
+                        lambda *_args, **_kwargs: (rows, [], [date(2026, 11, 17)], _tool_status()))
 
     response = client.get("/ops/v1/monitoring/mcp-tools/summary",
                           params={"start_date": "2026-11-17", "end_date": "2026-11-17"})
@@ -204,6 +204,44 @@ def test_mcp_tools_summary_reports_service_and_tool_activity(monitoring_client, 
     assert data["tool_count"] == 2
     assert data["active_tools"] == 2
     assert data["request_count"] == 3
+
+
+def test_mcp_tools_list_keeps_registered_never_called_servers(monitoring_client, monkeypatch):
+    client, _ = monitoring_client
+    rows = [
+        {"tenant_id": "tenant", "mcp_server_id": 3, "mcp_server_name": "docs", "mcp_server_type": "container",
+         "tool_name": "search_docs", "statistic_date": "2026-11-17", "request_count": 2, "error_count": 0,
+         "error_eligible_count": 2, "duration_ms_sum": 20, "duration_ms_sample_count": 2},
+    ]
+    inventory = [
+        {"tenant_id": "tenant", "mcp_server_id": 3, "mcp_server_name": "docs", "mcp_server_type": "container"},
+        {"tenant_id": "tenant", "mcp_server_id": 9, "mcp_server_name": "idle", "mcp_server_type": "remote"},
+    ]
+    monkeypatch.setattr(monitoring, "read_mcp_tools",
+                        lambda *_args, **_kwargs: (rows, inventory, [date(2026, 11, 17)], _tool_status()))
+    params = {"start_date": "2026-11-17", "end_date": "2026-11-17"}
+
+    listed = client.get("/ops/v1/monitoring/mcp-tools", params=params).json()["data"]
+    assert [item["mcp_server_name"] for item in listed["items"]] == ["docs", "idle"]
+    # Partial coverage keeps unknown metrics instead of zeroing them; missing rows sort last.
+    assert listed["items"][0]["metrics"]["request_count"] == 2
+    assert listed["items"][1]["metrics"]["request_count"] is None
+    assert listed["items"][1]["active_tools"] == 0
+
+    summary = client.get("/ops/v1/monitoring/mcp-tools/summary", params=params).json()["data"]
+    assert summary["service_count"] == 2 and summary["active_services"] == 1
+    assert summary["request_count"] == 2
+
+    rankings = client.get("/ops/v1/monitoring/mcp-tools/rankings", params=params).json()["data"]
+    assert [item["mcp_server_name"] for item in rankings] == ["docs"]
+
+    covered_status = {"data_as_of": None, "coverage_state": "covered", "is_stale": False}
+    monkeypatch.setattr(monitoring, "read_mcp_tools",
+                        lambda *_args, **_kwargs: (rows, inventory, [date(2026, 11, 17)], covered_status))
+    items = client.get("/ops/v1/monitoring/mcp-tools", params=params).json()["data"]["items"]
+    # Covered windows report definitive zero counters for never-called servers.
+    assert items[1]["metrics"]["request_count"] == 0
+    assert items[1]["metrics"]["error_rate"] is None
 
 
 def test_mcp_tools_rankings_service_dimension_top5(monitoring_client, monkeypatch):
@@ -219,7 +257,7 @@ def test_mcp_tools_rankings_service_dimension_top5(monitoring_client, monkeypatc
                  "tool_name": "extra_tool", "request_count": 2, "error_count": 0, "error_eligible_count": 2,
                  "duration_ms_sum": 2, "duration_ms_sample_count": 2})
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        lambda *_args, **_kwargs: (rows, [date(2026, 11, 17)], _tool_status()))
+                        lambda *_args, **_kwargs: (rows, [], [date(2026, 11, 17)], _tool_status()))
 
     response = client.get("/ops/v1/monitoring/mcp-tools/rankings",
                           params={"start_date": "2026-11-17", "end_date": "2026-11-17"})
@@ -236,7 +274,7 @@ def test_mcp_tools_pass_tool_name_filter_to_the_reader(monitoring_client, monkey
 
     def fake_read(*args, **kwargs):
         captured.update(kwargs)
-        return ([], [], _tool_status())
+        return ([], [], [], _tool_status())
 
     monkeypatch.setattr(monitoring, "read_mcp_tools", fake_read)
     client.get("/ops/v1/monitoring/mcp-tools",
@@ -247,16 +285,30 @@ def test_mcp_tools_pass_tool_name_filter_to_the_reader(monitoring_client, monkey
 
 def test_mcp_tools_catalog_scopes_to_the_requested_tenant(monitoring_client, monkeypatch):
     client, _ = monitoring_client
-    monkeypatch.setattr(monitoring, "mcp_server_catalog",
-                        lambda tenant: [{"service_id": 3, "name": "docs", "type": "container"}]
-                        if tenant == "tenant" else [])
+    captured = {}
+
+    def fake_catalog(tenant, groups=None):
+        captured["args"] = (tenant, groups)
+        return [{"service_id": 3, "name": "docs", "type": "container"}] if tenant == "tenant" else []
+
+    monkeypatch.setattr(monitoring, "mcp_server_catalog", fake_catalog)
 
     response = client.get("/ops/v1/monitoring/mcp-tools/catalog")
     assert response.status_code == 200
     assert response.json()["data"] == [{"service_id": 3, "name": "docs", "type": "container"}]
+    assert captured["args"] == ("tenant", None)
 
     other = client.get("/ops/v1/monitoring/mcp-tools/catalog", params={"tenant_id": "elsewhere"})
     assert other.json()["data"] == []
+    assert captured["args"] == ("elsewhere", None)
+
+    # The dropdown refresh passes the selected group through to the catalog.
+    grouped = client.get("/ops/v1/monitoring/mcp-tools/catalog",
+                         params=[("group_ids", 5), ("group_ids", 7)])
+    assert grouped.status_code == 200
+    assert captured["args"] == ("tenant", [5, 7])
+    assert client.get("/ops/v1/monitoring/mcp-tools/catalog",
+                      params={"group_ids": 0}).status_code == 422
 
 
 def test_mcp_tools_overview_aggregates_platform_trend_and_per_tenant_inventory(monitoring_client, monkeypatch):
@@ -274,7 +326,7 @@ def test_mcp_tools_overview_aggregates_platform_trend_and_per_tenant_inventory(m
         captured["tenant"] = kwargs.get("tenant")
         return (rows if captured["tenant"] is None else
                 [row for row in rows if row["tenant_id"] == captured["tenant"]],
-                [date(2026, 11, 17)], _tool_status())
+                [], [date(2026, 11, 17)], _tool_status())
 
     captured = {}
     monkeypatch.setattr(monitoring, "read_mcp_tools", fake_read)
@@ -337,8 +389,8 @@ def test_mcp_tool_selection_accepts_builtin_server_type(monitoring_client, monke
     """The synthesized tenant-local endpoint is selectable through its type."""
     client, _ = monitoring_client
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        Mock(return_value=([], [], {"coverage_state": "uncovered", "is_stale": False,
-                                                    "data_as_of": None})))
+                        Mock(return_value=([], [], [], {"coverage_state": "uncovered", "is_stale": False,
+                                                        "data_as_of": None})))
     response = client.get("/ops/v1/monitoring/mcp-tools",
                           params={"start_date": "2026-11-17", "end_date": "2026-11-17",
                                   "server_type": "builtin"})

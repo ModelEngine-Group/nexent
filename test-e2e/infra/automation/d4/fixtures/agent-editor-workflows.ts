@@ -21,7 +21,7 @@ export function label(key: string): string {
   return value;
 }
 
-export async function installEditor(page: Page, permission = "EDIT") {
+export async function installEditor(page: Page, permission = "EDIT", role = "SPEED") {
   const state = {
     draft: makeDraft(permission),
     creationAttempts: [] as Record<string, any>[],
@@ -56,7 +56,7 @@ export async function installEditor(page: Page, permission = "EDIT") {
       }
       return json(route, state.templateAgents);
     }
-    if (await fulfillEditorReadFixture(route, endpoint)) return;
+    if (await fulfillEditorReadFixture(route, endpoint, role)) return;
     if (request.method() === "POST" &&
         /^\/tag-libraries\/assignments\/(?:knowledge_base|skill|agent|tool)\/batch_read$/.test(endpoint)) {
       return json(route, (payload?.resource_ids || []).map((resourceId: string) => ({

@@ -31,7 +31,7 @@
 {{- define "nexent-monitoring.claimName" -}}
 {{- $root := .root -}}
 {{- $name := .name -}}
-{{- $mode := default "local" $root.Values.persistence.mode -}}
+{{- $mode := default "dynamic" $root.Values.persistence.mode -}}
 {{- $prefix := default "" $root.Values.persistence.existingClaimPrefix -}}
 {{- if and (eq $mode "existing") $prefix -}}{{ printf "%s-%s" $prefix $name }}{{- else -}}{{ $name }}{{- end -}}
 {{- end -}}
@@ -40,8 +40,8 @@
 {{- $root := .root -}}
 {{- $name := .name -}}
 {{- $size := .size -}}
-{{- $mode := default "local" $root.Values.persistence.mode -}}
-{{- $storageClassName := default "" $root.Values.persistence.storageClassName -}}
+{{- $mode := default "dynamic" $root.Values.persistence.mode -}}
+{{- $storageClassName := default (ternary "nexent-local" "" (eq $mode "local")) $root.Values.persistence.storageClassName -}}
 {{- $localPath := default "/var/lib/nexent-data" $root.Values.persistence.localPath -}}
 {{- $accessModes := default (list "ReadWriteMany") $root.Values.persistence.accessModes -}}
 {{- if and $root.Values.enabled $root.Values.persistence.enabled -}}
@@ -70,6 +70,12 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ $name }}
   namespace: {{ $root.Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
 spec:
   accessModes:
 {{ toYaml $accessModes | indent 4 }}

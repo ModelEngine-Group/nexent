@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: PW-CHAT-04-MODEL-BINDING-20261126
+  change_type: test-fix
+  title: Select the prepared collaboration parent model before sending
+  description: Carry the published parent Agent model display name from the existing
+    multi-Agent preparation into the browser journey. Select that model before sending. The case
+    continues to assert two real child cards, partial failure, and persisted recovery.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: The change updates formal test preparation and browser actions only.
+  affected_features:
+    existing: [V5-PW-CHAT-04]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [PW-CHAT-04]
+    modified: []
+    added: []
+    retired: []
+  no_case_change_reason: The test now selects its existing prepared model under the same contract.
+  notes: The multi preparation group supplies the parent model and owns the three Agents and
+    controlled MCP. The browser registers the server conversation ID for authenticated batch cleanup.

@@ -26,7 +26,7 @@ journey("FAF-D4-001", async (context) => {
   const { page, expect, contract } = context;
   const chat = new ChatPage(page);
   const conversations: number[] = [];
-  let agents: Record<string, { name: string; display_name: string }>;
+  let agents: Record<string, { name: string; display_name: string; model_display_name: string }>;
   let currentKind = "";
   let parentConversationId = 0;
   const answer = (text: string) => chat.assistantMessages().last().locator("p").filter({ hasText: new RegExp(`^${text}$`) });
@@ -46,9 +46,10 @@ journey("FAF-D4-001", async (context) => {
   const run = async (kind: string) => {
     currentKind = kind;
     await chat.openAgent(agents[kind].display_name);
+    await chat.selectModelByDisplayName(agents[kind].model_display_name);
     await chat.selectMode("执行");
     await chat.startMessage("Execute the final-answer acceptance task.");
-    conversations.push(chat.currentConversationId());
+    conversations.push(chat.registerOwnedConversation("FAF-D4-001"));
     await chat.waitForCompletion();
   };
   const expandChild = async () => {
@@ -66,11 +67,10 @@ journey("FAF-D4-001", async (context) => {
       // Record a started run even if completion failed before its step ended.
       try {
         const current = chat.currentConversationId();
-        if (!conversations.includes(current)) conversations.push(current);
+        if (!conversations.includes(current)) conversations.push(chat.registerOwnedConversation("FAF-D4-001"));
       } catch { /* no response header means no known owned conversation */ }
       if (conversations.length) await chat.captureConversationState(join(contract.caseDir, "conversation-state.json"), "FAF-");
     } finally {
-      for (const id of conversations) await chat.deleteConversationById(id);
       await fixtures("cleanup");
     }
   });

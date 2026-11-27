@@ -5,11 +5,10 @@ import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { runToken } from "../../infra/automation/d4/runner/runtime-config";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
-import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 
 journey("PW-CHAT-02", async (context) => {
-  const { page, expect, contract } = context;
+  const { page, expect } = context;
   const token = runToken("PW-CHAT-02");
   const toolName = "get_test_code";
   const expectedCode = "NX-92831";
@@ -22,18 +21,11 @@ journey("PW-CHAT-02", async (context) => {
   let noToolAnswer = "";
   let completedToolCount = 0;
   let wireAfterTool = 0;
-  let conversationId: number | undefined;
-
-  contract.deferCleanup(async () => {
-    if (conversationId) await chat.deleteConversationById(conversationId);
-  });
-
   await executeFixedScenario(context, {
     preconditions: [
       async () => {
         await loginCurrent(page, "tenant_a_admin");
-        agentDisplay = resolveReadyAsset("agents", "d4_tool_chat_display_name", "PW-CHAT-02");
-        await chat.openAgent(agentDisplay);
+        agentDisplay = await chat.openPreparedAgent("d4_tool_chat", "PW-CHAT-02");
         return `selected published Agent ${agentDisplay}, whose Draft was bound to ${toolName} before publishing`;
       },
       async () => {
@@ -57,7 +49,7 @@ journey("PW-CHAT-02", async (context) => {
       async () => {
         const prompt = await chat.composerText();
         await chat.startMessage(prompt);
-        conversationId = chat.currentConversationId();
+        chat.registerOwnedConversation("PW-CHAT-02");
         return "sent the request and observed the real streaming turn start";
       },
       async () => {
@@ -66,7 +58,7 @@ journey("PW-CHAT-02", async (context) => {
         return "the current DOM exposed a real tool-call group and execution state";
       },
       async () => {
-        await chat.waitForCompletion(300_000);
+        await chat.waitForDisplayedCompletion();
         const group = page.locator("[data-slot='tool-group-root']").last();
         const trigger = group.locator("[data-slot='tool-group-trigger']");
         if ((await trigger.getAttribute("data-state")) === "closed") await trigger.click();
@@ -89,7 +81,7 @@ journey("PW-CHAT-02", async (context) => {
         const toolLabel = new RegExp("(?:Used tool:|已使用工具[:：]?)\\s*" + toolName);
         completedToolCount = await page.getByRole("button", { name: toolLabel }).count();
         wireAfterTool = readFileSync(wirePath, "utf8").length;
-        const response = await chat.sendAndWait(`不要调用任何工具，只回复：${noToolMarker}`);
+        const response = await chat.sendAndWaitForDisplayedCompletion(`不要调用任何工具，只回复：${noToolMarker}`);
         noToolAnswer = await chat.messageText(response);
         expect(noToolAnswer).toContain(noToolMarker);
         await expect(page.getByRole("button", { name: toolLabel })).toHaveCount(completedToolCount);

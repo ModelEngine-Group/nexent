@@ -12,13 +12,15 @@ case:
   automation: automated
   objective: Prove both Core retry persistence and branch navigation through the deployed browser and database.
   preconditions:
-  - Authorized file-assistant source and configured real model; deployed Web runtime and database with machine-local fixture identity.
+  - Authorized file-assistant source and configured real model. An isolated deployment
+    supports Core switching with the same Web runtime entry, database, and machine-local fixture identity.
   test_data:
     profile: real_smoke
     locale: zh
   steps:
   - order: 1
-    action: Clone the authorized file assistant and publish each Core in turn; send one question and regenerate twice using the message Refresh action.
+    action: Clone and publish the authorized file assistant. Select each deployment Core
+      in turn, send one question and regenerate twice using the message Refresh action.
     expected: Three real answers share one persisted user and adjacent assistant index, with a single selected answer and 3/3 shown.
   - order: 2
     action: Reload saved history and the page, navigate 1/3 through 3/3, then submit the exact same question as a new message and reload again.

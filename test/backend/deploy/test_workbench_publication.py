@@ -24,7 +24,10 @@ def shell_function(platform, name):
 
 
 def run_shell(script, env=None):
-    return subprocess.run([BASH, "-c", script], env=env, capture_output=True, text=True, check=False)
+    prelude = 'source "$1" || exit\nshift\n'
+    common = (REPO / "deploy/common/common.sh").as_posix()
+    return subprocess.run([BASH, "-c", prelude + script, "deploy-test", common], env=env,
+                          capture_output=True, text=True, check=False, timeout=20)
 
 
 @pytest.mark.parametrize("failure", [False, True])
@@ -40,6 +43,7 @@ publish_shared_workbench
 ''')
     assert result.returncode == (1 if failure else 0), result.stderr
     assert "<run>\n<--rm>\n<--no-deps>\n<--workdir>\n</opt/backend>" in result.stdout
+    assert "<--env>\n<NEXENT_SQL_SKIP_IF_CURRENT=false>" in result.stdout
     assert "<--entrypoint>\n</opt/nexent/scripts/start-backend.sh>\n<nexent-config>" in result.stdout
     assert "</deployment with spaces/.env>" in result.stdout
     assert "system_initialize && python -m management.services.agent.system_release" in result.stdout

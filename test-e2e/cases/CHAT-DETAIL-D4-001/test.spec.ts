@@ -11,6 +11,8 @@ journey("CHAT-DETAIL-D4-001", async ({ page, contract }) => {
     agent_id: 7,
     create_time: Date.now(),
     update_time: Date.now(),
+    last_activity_time: Date.now(),
+    pinned_at: null,
   }));
   const state = await prepareWorkbench(page, 1, { histories });
   await page.route("**/api/agent/published_list", (route) =>
@@ -29,6 +31,32 @@ journey("CHAT-DETAIL-D4-001", async ({ page, contract }) => {
           allow_chat_metadata: true,
         },
       ],
+    }),
+  );
+  await page.route(/\/api\/conversation\/agent_groups(?:\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        code: 0,
+        data: {
+          items: [{
+            group_key: "agent:7",
+            agent_id: 7,
+            agent_name: "Detail Analyst",
+            agent_available: true,
+            last_activity_time: histories[0].last_activity_time,
+            matched_conversation: false,
+          }],
+          pinned_items: [],
+          included_items: [],
+          next_cursor: null,
+        },
+      },
+    }),
+  );
+  await page.route(
+    /\/api\/conversation\/agent_groups\/agent(?::|%3[Aa])7\/conversations(?:\?|$)/,
+    (route) => route.fulfill({
+      json: { code: 0, data: { items: histories, pinned_items: [], next_cursor: null } },
     }),
   );
   await page.route("**/api/conversation/*", async (route) => {

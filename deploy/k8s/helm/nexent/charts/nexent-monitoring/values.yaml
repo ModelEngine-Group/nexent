@@ -119,8 +119,8 @@ langfuse:
 
 persistence:
   enabled: true
-  mode: local
-  storageClassName: nexent-local
+  mode: dynamic
+  storageClassName: ""
   accessModes:
     - ReadWriteMany
   localPath: /var/lib/nexent-data

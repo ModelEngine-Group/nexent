@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 # Helm uninstall script for Nexent.
 
 if [ -z "$BASH_VERSION" ]; then
@@ -24,11 +25,15 @@ APPLICATION_RELEASE_NAME="nexent"
 INFRASTRUCTURE_RELEASE_NAME="nexent-infrastructure"
 RELEASE_SCOPE="all"
 DELETE_DATA=""
+DELETE_PVC=""
 DELETE_NAMESPACE=""
 DELETE_LOCAL_DATA=""
 LOCAL_DATA_DELETED="false"
 PERSISTENCE_MODE=""
 COMMAND="uninstall"
+DYNAMIC_PVC_NAMES=()
+DYNAMIC_PVC_UIDS=()
+DYNAMIC_PVCS_WITHOUT_KEEP=()
 
 print_usage() {
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -37,15 +42,16 @@ print_usage() {
     echo "卸载 Nexent K8s 资源。"
     echo ""
     echo "命令："
-    echo "  delete       卸载 Helm release 并删除 namespace"
-    echo "  delete-all   卸载 Helm release、删除 namespace，并在 local 模式下删除本地数据"
+    echo "  delete       卸载 Helm release 并请求删除 namespace"
+    echo "  delete-all   卸载 Helm release、请求删除 namespace，并在 local 模式下删除本地数据"
     echo "  clean        仅清理 Helm release 状态"
     echo ""
     echo "选项："
-    echo "  --delete-data true|false        兼容选项；Helm 会删除托管的 PV/PVC 资源"
+    echo "  --delete-data true|false        兼容选项，控制 Helm 卸载失败后的清理行为"
     echo "  --delete-volumes true|false     等同于 --delete-data"
     echo "  --remove-volumes                等同于 --delete-data true"
     echo "  --keep-volumes                  等同于 --delete-data false"
+    echo "  --delete-pvc true|false         删除或保留所选 release 的动态 PVC（默认保留）"
     echo "  --delete-local-data true|false  控制是否删除本地 PV 数据（仅 local 模式）"
     echo "  --remove-local-data             等同于 --delete-local-data true（仅 local 模式）"
     echo "  --keep-local-data               等同于 --delete-local-data false（仅 local 模式）"
@@ -62,6 +68,7 @@ print_usage() {
     echo "  bash uninstall.sh --release-scope nexent --keep-namespace"
     echo "  bash uninstall.sh --release-scope infrastructure --keep-namespace"
     echo "  bash uninstall.sh --delete-data true"
+    echo "  bash uninstall.sh --delete-pvc true --keep-namespace"
     echo "  bash uninstall.sh --delete-local-data true"
     echo "  bash uninstall.sh --keep-local-data"
     echo "  bash uninstall.sh --keep-namespace"
@@ -77,15 +84,16 @@ print_usage() {
   echo "Uninstall Nexent K8s resources."
   echo ""
   echo "Commands:"
-  echo "  delete       Uninstall Helm release and delete namespace"
-  echo "  delete-all   Uninstall Helm release, delete namespace, and delete local data in local mode"
+  echo "  delete       Uninstall Helm release and request namespace deletion"
+  echo "  delete-all   Uninstall Helm release, request namespace deletion, and delete local data in local mode"
   echo "  clean        Clean Helm release state only"
   echo ""
   echo "Options:"
-  echo "  --delete-data true|false     Compatibility option; Helm removes managed PV/PVC resources"
+  echo "  --delete-data true|false     Compatibility option for cleanup after Helm uninstall fails"
   echo "  --delete-volumes true|false  Alias for --delete-data"
   echo "  --remove-volumes             Alias for --delete-data true"
   echo "  --keep-volumes               Alias for --delete-data false"
+  echo "  --delete-pvc true|false      Delete or keep dynamic PVCs in the selected release scope (default: keep)"
   echo "  --delete-local-data true|false  Control whether local PV data is deleted (local mode only)"
   echo "  --remove-local-data             Alias for --delete-local-data true (local mode only)"
   echo "  --keep-local-data               Alias for --delete-local-data false (local mode only)"
@@ -102,6 +110,7 @@ print_usage() {
   echo "  bash uninstall.sh --release-scope nexent --keep-namespace"
   echo "  bash uninstall.sh --release-scope infrastructure --keep-namespace"
   echo "  bash uninstall.sh --delete-data true"
+  echo "  bash uninstall.sh --delete-pvc true --keep-namespace"
   echo "  bash uninstall.sh --delete-local-data true"
   echo "  bash uninstall.sh --keep-local-data"
   echo "  bash uninstall.sh --keep-namespace"
@@ -216,6 +225,18 @@ while [[ $# -gt 0 ]]; do
       DELETE_DATA="false"
       shift
       ;;
+    --delete-pvc)
+      if [ "$#" -lt 2 ]; then
+        echo "Error: --delete-pvc requires true or false." >&2
+        exit 1
+      fi
+      if parse_bool_option "$2"; then
+        DELETE_PVC="true"
+      else
+        DELETE_PVC="false"
+      fi
+      shift 2
+      ;;
     --delete-local-data)
       DELETE_LOCAL_DATA="$2"
       shift 2
@@ -293,6 +314,129 @@ guard_infrastructure_uninstall() {
     echo "Uninstall the Nexent release first or use --release-scope all."
     return 1
   fi
+}
+
+# Nexent's static claims specify a volumeName in the stored Helm manifest.
+manifest_pvc_policies() {
+  awk '
+    function emit() {
+      if (kind == "PersistentVolumeClaim" && name != "") {
+        print name "|" (static_volume ? "local" : "dynamic") "|" (keep ? "keep" : "delete")
+      }
+    }
+    /^---([[:space:]]|$)/ { emit(); kind = name = section = ""; static_volume = keep = 0; next }
+    /^Error: / && kind == "" { print; next }
+    /^kind:[[:space:]]/ { kind = $2 }
+    /^[[:alpha:]][^:]*:/ { section = $1 }
+    section == "metadata:" && /^  name:[[:space:]]/ { name = $2; gsub(/["\047\r]/, "", name) }
+    section == "metadata:" && /^    helm\.sh\/resource-policy:[[:space:]]/ {
+      policy = $2; gsub(/["\047\r]/, "", policy); keep = (policy == "keep")
+    }
+    section == "spec:" && /^  volumeName:[[:space:]]/ {
+      volume = $2; gsub(/["\047\r]/, "", volume); static_volume = (volume != "")
+    }
+    END { emit() }
+  '
+}
+
+discover_dynamic_pvcs() {
+  local live_claims release manifest_claims name uid owner owner_namespace mode manifest_entry manifest_mode policy
+  local releases=()
+  [ "$RELEASE_SCOPE" = "infrastructure" ] || releases+=("$APPLICATION_RELEASE_NAME")
+  [ "$RELEASE_SCOPE" = "nexent" ] || releases+=("$INFRASTRUCTURE_RELEASE_NAME")
+
+  live_claims=$(kubectl get pvc -n "$NAMESPACE" --ignore-not-found -o \
+    'jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.uid}{"|"}{.metadata.annotations.meta\.helm\.sh/release-name}{"|"}{.metadata.annotations.meta\.helm\.sh/release-namespace}{"|"}{.metadata.labels.nexent\.io/persistence-mode}{"\n"}{end}') || return 1
+  for release in "${releases[@]}"; do
+    if ! manifest_claims=$(set -o pipefail; helm get manifest "$release" --namespace "$NAMESPACE" 2>&1 | manifest_pvc_policies); then
+      if ! grep -qiE 'release: not found|release "[^"]+" not found' <<< "$manifest_claims"; then
+        printf 'Error: unable to read the Helm manifest for %s. %s\n' "$release" "$manifest_claims" >&2
+        return 1
+      fi
+      manifest_claims=""
+    fi
+
+    while IFS='|' read -r name uid owner owner_namespace mode; do
+      [ "$owner" = "$release" ] && [ "$owner_namespace" = "$NAMESPACE" ] || continue
+      manifest_entry=$(awk -F '|' -v name="$name" '$1 == name {print $2 "|" $3; exit}' <<< "$manifest_claims")
+      IFS='|' read -r manifest_mode policy <<< "$manifest_entry"
+      [ "$mode" = "dynamic" ] || [ "$manifest_mode" = "dynamic" ] || continue
+      if [[ ! "$uid" =~ ^[a-zA-Z0-9-]+$ ]]; then
+        printf 'Error: unable to identify PVC %s/%s by UID.\n' "$NAMESPACE" "$name" >&2
+        return 1
+      fi
+      DYNAMIC_PVC_NAMES+=("$name")
+      DYNAMIC_PVC_UIDS+=("$uid")
+      if [ "$policy" = "delete" ]; then
+        DYNAMIC_PVCS_WITHOUT_KEEP+=("$release/$name")
+      fi
+    done <<< "$live_claims"
+  done
+}
+
+resolve_delete_pvcs() {
+  if [ -n "$DELETE_PVC" ]; then
+    [ "$DELETE_PVC" = "true" ]
+    return
+  fi
+  [ "$COMMAND" = "uninstall" ] && [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ] && [ -t 0 ] || return 1
+  local answer
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    read -r -p "删除所选 release 的动态 PVC？这可能删除卷中的数据。[y/N]：" answer || return 1
+  else
+    read -r -p "Delete dynamic PVCs for the selected releases? This can delete volume data. [y/N]: " answer || return 1
+  fi
+  [[ "$(sanitize_input "$answer")" =~ ^[Yy]$ ]]
+}
+
+prepare_dynamic_pvcs() {
+  discover_dynamic_pvcs || return 1
+  if resolve_delete_pvcs; then
+    if [ "$COMMAND" = "clean" ]; then
+      echo "Error: --delete-pvc true requires an uninstall command." >&2
+      return 1
+    fi
+    DELETE_PVC="true"
+  else
+    DELETE_PVC="false"
+    if [ "${#DYNAMIC_PVCS_WITHOUT_KEEP[@]}" -gt 0 ]; then
+      printf 'Error: the installed Helm release lacks a keep policy for these dynamic PVCs: %s\n' \
+        "${DYNAMIC_PVCS_WITHOUT_KEEP[*]}" >&2
+      echo "Upgrade the release with the current chart before uninstalling to preserve these PVCs." >&2
+      return 1
+    fi
+  fi
+  if [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ] && [ -z "$PERSISTENCE_MODE" ]; then
+    PERSISTENCE_MODE="dynamic"
+  fi
+}
+
+cleanup_dynamic_pvcs() {
+  [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ] || return 0
+  if [ "$DELETE_PVC" = "false" ]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "动态 PVC 已保留：${DYNAMIC_PVC_NAMES[*]}"
+    else
+      echo "Preserved dynamic PVCs: ${DYNAMIC_PVC_NAMES[*]}"
+    fi
+    return 0
+  fi
+
+  local index name uid output
+  for index in "${!DYNAMIC_PVC_NAMES[@]}"; do
+    name="${DYNAMIC_PVC_NAMES[index]}"
+    uid="${DYNAMIC_PVC_UIDS[index]}"
+    # A claim recreated after discovery has a different UID.
+    if ! output=$(kubectl delete --raw "/api/v1/namespaces/$NAMESPACE/persistentvolumeclaims/$name" -f - 2>&1 <<< \
+      "{\"apiVersion\":\"v1\",\"kind\":\"DeleteOptions\",\"preconditions\":{\"uid\":\"$uid\"}}"); then
+      if ! grep -qi '(NotFound)' <<< "$output"; then
+        printf 'Error: unable to delete PVC %s/%s. %s\n' "$NAMESPACE" "$name" "$output" >&2
+        return 1
+      fi
+    else
+      printf 'Requested deletion of PVC %s/%s\n' "$NAMESPACE" "$name"
+    fi
+  done
 }
 
 clean_one_helm_release_state() {
@@ -394,7 +538,13 @@ resolve_delete_namespace() {
 }
 
 maybe_delete_namespace_after_uninstall() {
-  if resolve_delete_namespace; then
+  if [ "$DELETE_PVC" = "false" ] && [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "Namespace '$NAMESPACE' 已保留，以保留动态 PVC。"
+    else
+      echo "Namespace '$NAMESPACE' preserved with its dynamic PVCs."
+    fi
+  elif [ "$RELEASE_SCOPE" = "all" ] && resolve_delete_namespace; then
     delete_namespace_after_uninstall
   else
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -586,6 +736,7 @@ uninstall_preserve_data() {
     fi
   fi
   cleanup_leftover_nexent_resources
+  cleanup_dynamic_pvcs || return 1
   maybe_delete_local_volume_data
   maybe_delete_namespace_after_uninstall
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -625,23 +776,28 @@ delete_all_data() {
     return 1
   fi
   cleanup_leftover_nexent_resources
+  cleanup_dynamic_pvcs || return 1
   maybe_delete_local_volume_data
   maybe_delete_namespace_after_uninstall
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    echo "清理完成。Helm 托管的 PV/PVC 资源已随 release 删除。"
+    echo "清理完成。"
   else
-    echo "Cleanup completed. Helm-managed PV/PVC resources were deleted with the release."
+    echo "Cleanup completed."
   fi
 }
 
 case "$COMMAND" in
   clean)
     validate_scope_options
+    guard_infrastructure_uninstall
+    prepare_dynamic_pvcs
     clean_helm_state
     ;;
   uninstall)
     validate_scope_options
-    if [ -n "$DELETE_DATA" ] && parse_bool_option "$DELETE_DATA"; then
+    guard_infrastructure_uninstall
+    prepare_dynamic_pvcs
+    if { [ -n "$DELETE_DATA" ] && parse_bool_option "$DELETE_DATA"; } || [ "$DELETE_PVC" = "true" ]; then
       delete_all_data
     else
       uninstall_preserve_data

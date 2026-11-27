@@ -228,6 +228,17 @@ class TestParamsValueForDb:
         assert "outer" in result
 
 
+@pytest.fixture(autouse=True)
+def isolated_denylist_policy(monkeypatch):
+    """Keep the database unit's stubbed ORM independent of the policy service."""
+    from management.db.skill import repository
+    from management.services.configuration import resource_denylist
+
+    monkeypatch.setattr(repository, "select", lambda *args: MagicMock())
+    monkeypatch.setattr(repository, "or_", lambda *args: MagicMock())
+    monkeypatch.setattr(resource_denylist, "require_skill_allowed", MagicMock())
+
+
 # ===== create_or_update_skill_by_skill_info Tests =====
 
 class TestCreateOrUpdateSkillBySkillInfo:

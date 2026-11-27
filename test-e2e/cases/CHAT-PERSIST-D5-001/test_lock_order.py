@@ -18,6 +18,8 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "infra/automation"))
 from shared.postgres import apply_product_postgres_env, postgres_url
+from infrastructure.rdb.account_record import UserTenant
+from infrastructure.rdb.trajectory.models import TrajectoryExecution
 
 apply_product_postgres_env()
 
@@ -143,7 +145,7 @@ def contention(monkeypatch):
     state = Contention(engine)
     with engine.begin() as connection:
         connection.execute(CreateSchema(schema))
-        for model in MODELS:
+        for model in (*MODELS, TrajectoryExecution, UserTenant):
             model.__table__.create(connection)
     try:
         with state.session() as session:

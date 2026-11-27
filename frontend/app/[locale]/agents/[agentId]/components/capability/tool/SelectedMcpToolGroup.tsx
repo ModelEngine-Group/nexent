@@ -14,6 +14,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import log from "@/lib/logger";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { SelectedToolIcon } from "./SelectedToolIcon";
@@ -49,6 +50,7 @@ export function SelectedMcpToolGroup({
 }: SelectedMcpToolGroupProps) {
   const { t, i18n } = useTranslation("common");
   const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
   const { token } = theme.useToken();
   const mergeParams = useMergedToolParams(agentId);
   const countId = useId();
@@ -110,11 +112,27 @@ export function SelectedMcpToolGroup({
     const state = useAgentStore.getState();
     if (!editable || inFlight.current || state.agentId !== agentId) return;
     const ids = new Set(scope.map((tool) => String(tool.id)));
-    state.updateTools(
-      (state.editedAgent?.tools ?? []).filter(
-        (tool) => !ids.has(String(tool.id))
+    const remove = () => {
+      const current = useAgentStore.getState();
+      if (
+        !canCommit.current ||
+        current.agentId !== agentId ||
+        current.isReadOnly
       )
-    );
+        return;
+      current.updateTools(
+        (current.editedAgent?.tools ?? []).filter(
+          (tool) => !ids.has(String(tool.id))
+        )
+      );
+    };
+    if (scope.some((tool) => tool.blocked_by_denylist)) {
+      confirm({
+        title: t("toolPool.remove"),
+        content: t("resourceDenylist.removeWarning"),
+        onOk: remove,
+      });
+    } else remove();
   }
 
   async function addTools(scope: Tool[], configureIndividually = false) {

@@ -289,7 +289,7 @@ def test_mcp_tool_fact_rejects_unknown_fields_and_invalid_enums():
         tool_fact(error_category="not_upper")
 
 
-def test_mcp_tool_accumulate_groups_by_server_tool_agent_and_group():
+def test_mcp_tool_accumulate_groups_by_server_tool_and_agent():
     common = dict(mcp_server_id=3, mcp_server_name="docs", mcp_server_type="container")
     rows = [
         tool_fact(outcome="succeeded", duration_ms=40, agent_id=7, agent_run_id="run-1", **common),
@@ -297,32 +297,34 @@ def test_mcp_tool_accumulate_groups_by_server_tool_agent_and_group():
         tool_fact(outcome="cancelled", duration_ms=200, agent_id=7, agent_run_id="run-1", **common),
         tool_fact(outcome="started", agent_id=7, agent_run_id="run-1", **common),
         tool_fact(outcome="succeeded", duration_ms=10, agent_id=8, agent_run_id="run-2", **common),
+        # Initiator groups stay on the fact envelope but no longer split daily rows.
         tool_fact(outcome="succeeded", duration_ms=5, agent_id=7, agent_run_id="run-1", initiator_group_ids=[9], **common),
         tool_fact(outcome="succeeded", duration_ms=7, mcp_server_id=4, mcp_server_name="other",
                   mcp_server_type="remote", agent_id=7, agent_run_id="run-1"),
         tool_fact(outcome="succeeded", duration_ms=3, **common),
     ]
     result = dict(accumulate_mcp_tool(rows))
-    assert len(result) == 5
+    assert len(result) == 4
     # Rows only carry dimensions present on the group's facts (exclude_none documents).
     grouped = {
         (row.get("mcp_server_id"), row.get("agent_id"), row["has_agent_run"],
-         tuple(row.get("initiator_group_ids") or ()), row.get("mcp_server_name"),
-         row.get("mcp_server_type")): row
+         row.get("mcp_server_name"), row.get("mcp_server_type")): row
         for row in result.values()
     }
-    main = grouped[(3, 7, True, (), "docs", "container")]
-    assert main["request_count"] == 4
+    main = grouped[(3, 7, True, "docs", "container")]
+    assert main["request_count"] == 5
     assert main["error_count"] == 1
-    assert main["error_eligible_count"] == 2
-    assert main["duration_ms_sum"] == 100
-    assert main["duration_ms_sample_count"] == 2
-    assert grouped[(3, 8, True, (), "docs", "container")]["duration_ms_sum"] == 10
-    assert grouped[(3, 7, True, (9,), "docs", "container")]["duration_ms_sum"] == 5
-    assert grouped[(4, 7, True, (), "other", "remote")]["duration_ms_sum"] == 7
-    unattributed = grouped[(3, None, False, (), "docs", "container")]
+    assert main["error_eligible_count"] == 3
+    assert main["duration_ms_sum"] == 105
+    assert main["duration_ms_sample_count"] == 3
+    assert grouped[(3, 8, True, "docs", "container")]["duration_ms_sum"] == 10
+    assert grouped[(4, 7, True, "other", "remote")]["duration_ms_sum"] == 7
+    unattributed = grouped[(3, None, False, "docs", "container")]
     assert unattributed["request_count"] == 1
     assert unattributed["duration_ms_sum"] == 3
+    # Daily rows no longer carry the initiator-group dimensions of the old design.
+    assert all("initiator_group_ids" not in row and "group_key" not in row
+               and "group_snapshot_state" not in row for row in result.values())
 
 
 def test_mcp_tool_summarize_excludes_cancellation_from_duration():

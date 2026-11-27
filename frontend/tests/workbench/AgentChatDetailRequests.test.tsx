@@ -179,6 +179,42 @@ it("shares route, actual history, metadata, scope and late resume reads per Agen
   expect(fixture.router.replace).not.toHaveBeenCalled();
 });
 
+it("keeps successive Agent drafts distinct in the real thread runtime", async () => {
+  window.history.replaceState({}, "", "/zh/newchat");
+  mount();
+  await waitFor(() => expect(chat.readOnly).toBe(false));
+  const firstAgent = {
+    ...fixture.agents[0],
+    description: "Test agent",
+    model: "test-model",
+    max_step: 1,
+    provide_run_summary: false,
+    tools: [],
+  } satisfies NonNullable<typeof chat.selectedAgent>;
+  const secondAgent = { ...firstAgent, id: "8", name: "Researcher" };
+  await act(async () => {
+    await chat.onAgentSelected?.(firstAgent);
+  });
+  const first = runtime.threads.mainItem.getState();
+  expect(first.custom).toMatchObject({ agentId: 7 });
+
+  await act(async () => {
+    await chat.onBack?.();
+  });
+  expect(chat.selectedAgent).toBeNull();
+  await act(async () => {
+    await chat.onAgentSelected?.(secondAgent);
+  });
+  const second = runtime.threads.mainItem.getState();
+  expect(second.id).not.toBe(first.id);
+  expect(second.remoteId).not.toBe(first.remoteId);
+  expect(second.custom).toMatchObject({ agentId: 8 });
+  expect(chat.selectedAgent?.id).toBe("8");
+  expect(chat.conversationId).toBeUndefined();
+  expect(conversationService.getById).not.toHaveBeenCalled();
+  expect(conversationService.getDetail).not.toHaveBeenCalled();
+});
+
 it("refreshes visibility and invalidates a saved knowledge change before later restoration", async () => {
   const get = vi.mocked(conversationService.getById);
   const client = new QueryClient();

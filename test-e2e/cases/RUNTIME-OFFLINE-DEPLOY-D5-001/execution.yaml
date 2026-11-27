@@ -13,6 +13,8 @@ acceptance_bindings:
   - test_offline_replica_sequence
   - test_activation_waits_for_bootstrap_and_deploy_lock
   - test_unfinished_bootstrap_job_does_not_pause_the_running_release
+  AC-P1-003:
+  - test_dynamic_pvc_uninstall_retains_then_deletes_claims
 preparation:
   families: []
   anchors: false

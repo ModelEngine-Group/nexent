@@ -30,6 +30,7 @@ from contracts.errors.exceptions import (
     AgentRelationValidationError,
     AppException,
     ForbiddenError,
+    ResourceBindingError,
     TenantResourceLimitError,
 )
 from contracts.roles import has_any_role, roles_from_record
@@ -709,6 +710,57 @@ async def update_agent_info_impl(
         )
         if permission != "EDIT":
             raise ForbiddenError("You do not have permission to edit this agent")
+
+    existing_instances = []
+    enabled_set = set()
+    if request.enabled_tool_ids is not None:
+        from management.services.configuration.resource_denylist import load_tool_denylist
+
+        tools = query_tools_by_ids(list(set(request.enabled_tool_ids)))
+        enabled_set = {tool["tool_id"] for tool in tools if tool.get("is_available") is not False}
+        if agent_id is not None:
+            existing_instances = query_tool_instances_by_agent_id(agent_id, tenant_id)
+        existing_enabled = {item["tool_id"] for item in existing_instances if item.get("enabled")}
+        new_tool_ids = enabled_set - existing_enabled
+        if new_tool_ids:
+            denylist = load_tool_denylist(tenant_id)
+            if any(denylist.blocks(tool.get("name"), tool["tool_id"]) for tool in tools if tool["tool_id"] in new_tool_ids):
+                raise ResourceBindingError("resource_blocked")
+
+    existing_skill_instances = None
+    requested_skills = getattr(request, "skill_instances", None)
+    if isinstance(requested_skills, list) or request.enabled_skill_ids is not None:
+        from management.services.configuration.resource_denylist import load_tool_denylist
+
+        selected_skills = ({item.skill_id for item in requested_skills if item.enabled}
+                           if isinstance(requested_skills, list) else set(request.enabled_skill_ids or []))
+        if isinstance(requested_skills, list):
+            seen_skill_ids = set()
+            for item in requested_skills:
+                if item.skill_id in seen_skill_ids:
+                    raise ValueError(f"Duplicate skill_id in skill_instances: {item.skill_id}")
+                seen_skill_ids.add(item.skill_id)
+            valid_skills = skill_db.get_valid_skill_ids(tenant_id=tenant_id, skill_ids=list(selected_skills))
+            missing_skills = selected_skills - valid_skills
+            if missing_skills:
+                raise AppException(ErrorCode.COMMON_PARAMETER_INVALID,
+                                   "skill_instances contains invalid or unavailable "
+                                   f"skill IDs: {sorted(missing_skills)}")
+        raw_version = getattr(request, "version_no", 0)
+        skill_version = raw_version if isinstance(raw_version, int) else 0
+        existing_skills = (skill_db.query_skill_instances_by_agent_id(agent_id, tenant_id, version_no=skill_version)
+                           if agent_id is not None else [])
+        existing_skill_instances = existing_skills
+        new_skills = selected_skills - {item["skill_id"] for item in existing_skills if item.get("enabled")}
+        if new_skills:
+            policy = load_tool_denylist(tenant_id)
+            if any(policy.blocks_skill(None, skill_id) for skill_id in new_skills):
+                raise ResourceBindingError("resource_blocked")
+            if any(ref.startswith("skill:") for ref in policy.global_resources):
+                names = skill_db.query_skill_names_by_ids(tenant_id, sorted(new_skills))
+                if any(policy.blocks_skill(item["name"], item["skill_id"]) for item in names):
+                    raise ResourceBindingError("resource_blocked")
+
     try:
         if agent_id is None:
             # Create agent - automatically set group_ids to current user's groups
@@ -788,16 +840,6 @@ async def update_agent_info_impl(
     # Handle enabled tools saving when provided
     try:
         if request.enabled_tool_ids is not None and agent_id is not None:
-            requested_enabled_set = set(request.enabled_tool_ids)
-            available_tools = query_tools_by_ids(list(requested_enabled_set))
-            enabled_set = {
-                tool["tool_id"]
-                for tool in available_tools
-                if tool.get("is_available") is not False
-            }
-            # Query existing tool instances for this agent
-            existing_instances = query_tool_instances_by_agent_id(agent_id, tenant_id)
-
             # Handle unselected tool（already exist instance）→ enabled=False
             for instance in existing_instances:
                 inst_tool_id = instance.get("tool_id")
@@ -837,6 +879,8 @@ async def update_agent_info_impl(
                     tenant_id=tenant_id,
                     user_id=user_id,
                 )
+    except ResourceBindingError:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent tools: {str(e)}")
         raise ValueError(f"Failed to update agent tools: {str(e)}")
@@ -869,24 +913,9 @@ async def update_agent_info_impl(
             else:
                 enabled_set = set(request.enabled_skill_ids or [])
 
-            if has_structured_skill_instances:
-                valid_skill_ids = skill_db.get_valid_skill_ids(
-                    tenant_id=tenant_id,
-                    skill_ids=list(enabled_set),
-                )
-                missing_skill_ids = enabled_set - valid_skill_ids
-                if missing_skill_ids:
-                    raise AppException(
-                        ErrorCode.COMMON_PARAMETER_INVALID,
-                        (
-                            "skill_instances contains invalid or unavailable "
-                            f"skill IDs: {sorted(missing_skill_ids)}"
-                        ),
-                    )
-
             # Query existing skill instances for this agent
-            existing_instances = skill_db.query_skill_instances_by_agent_id(
-                agent_id, tenant_id, version_no=request_version_no
+            existing_instances = existing_skill_instances if existing_skill_instances is not None else (
+                skill_db.query_skill_instances_by_agent_id(agent_id, tenant_id, version_no=request_version_no)
             )
 
             # Handle unselected skill (already exist instance) -> enabled=False
@@ -932,7 +961,7 @@ async def update_agent_info_impl(
                     user_id=user_id,
                     version_no=request_version_no,
                 )
-    except AppException:
+    except (AppException, ResourceBindingError):
         raise
     except Exception as e:
         logger.error(f"Failed to update agent skills: {str(e)}")

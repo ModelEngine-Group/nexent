@@ -61,7 +61,7 @@ IS_MAINLAND=""
 APP_VERSION=""
 DEPLOYMENT_VERSION=""
 VERSION_CHOICE_SAVED=""
-PERSISTENCE_MODE="local"
+PERSISTENCE_MODE="dynamic"
 STORAGE_CLASS_NAME=""
 LOCAL_PATH="/var/lib/nexent-data"
 LOCAL_NODE_NAME=""
@@ -198,6 +198,7 @@ esac
 
 cd "$SCRIPT_DIR"
 if [ "$COMMAND" != "help" ]; then
+    deployment_start_log "$PROJECT_ROOT" || exit 1
     deployment_source_root_env "$PROJECT_ROOT" "$PROJECT_ROOT/docker" || exit 1
 fi
 
@@ -396,8 +397,8 @@ validate_runtime_replica_options() {
             echo "Error: multiple Runtime replicas require dynamic or existing shared RWX storage, not local hostPath." >&2
             return 1
         fi
-        if [ "$PERSISTENCE_MODE" = "dynamic" ] && { [ -z "$STORAGE_CLASS_NAME" ] || [ "$STORAGE_CLASS_NAME" = "nexent-local" ]; }; then
-            echo "Error: multiple Runtime replicas in dynamic mode require an explicit RWX --storage-class." >&2
+        if [ "$PERSISTENCE_MODE" = "dynamic" ] && [ "$STORAGE_CLASS_NAME" = "nexent-local" ]; then
+            echo "Error: multiple Runtime replicas in dynamic mode require an RWX StorageClass. The nexent-local class is for static volumes." >&2
             return 1
         fi
     fi
@@ -695,9 +696,7 @@ choose_image_env() {
 
 # Render image tags into generated Helm values based on loaded environment variables
 update_values_yaml() {
-  echo "=========================================="
-  echo "  Rendering generated image values"
-  echo "=========================================="
+  deployment_log "Preparing Helm configuration and storage settings..."
 
   # Get APP_VERSION if not already set
   if [ -z "$APP_VERSION" ]; then
@@ -708,8 +707,7 @@ update_values_yaml() {
     echo "Failed to determine APP_VERSION from VERSION, using 'latest'"
     APP_VERSION="latest"
   fi
-  echo "Using APP_VERSION: $APP_VERSION"
-  echo ""
+  deployment_log "Application version: $APP_VERSION"
 
   deployment_apply_image_source
   deployment_prepare_monitoring_env k8s || exit 1
@@ -719,15 +717,10 @@ update_values_yaml() {
   render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
   render_infrastructure_runtime_values "$INFRASTRUCTURE_GENERATED_RUNTIME_VALUES"
   render_persistence_values
-  echo "Generated application Helm values: $GENERATED_VALUES"
-  echo "Generated infrastructure Helm values: $INFRASTRUCTURE_GENERATED_VALUES"
-  echo "Generated application runtime values: $GENERATED_RUNTIME_VALUES"
-  echo "Generated infrastructure runtime values: $INFRASTRUCTURE_GENERATED_RUNTIME_VALUES"
-  echo "Generated application persistence values: $GENERATED_PERSISTENCE_VALUES"
-  echo "Generated infrastructure persistence values: $INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES"
-  echo ""
-  echo "--------------------------------"
-  echo ""
+  deployment_run_logged printf 'Generated Helm values: %s\n' \
+      "$GENERATED_VALUES" "$INFRASTRUCTURE_GENERATED_VALUES" \
+      "$GENERATED_RUNTIME_VALUES" "$INFRASTRUCTURE_GENERATED_RUNTIME_VALUES" \
+      "$GENERATED_PERSISTENCE_VALUES" "$INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES"
 }
 
 ensure_namespace() {
@@ -758,7 +751,7 @@ helm_application_chart() {
 }
 
 helm_upgrade_application_release() {
-    helm_application_chart "$1" "$2" upgrade --install
+    deployment_run_logged helm_application_chart "$1" "$2" upgrade --install
 }
 
 validate_application_release() {
@@ -857,7 +850,7 @@ stop_old_business_workloads() {
     done
     for deployment in "${business[@]}"; do
         [ -n "${existing[$deployment]:-}" ] || continue
-        kubectl scale "deployment/$deployment" -n "$NAMESPACE" --replicas=0 || return 1
+        deployment_run_logged kubectl scale "deployment/$deployment" -n "$NAMESPACE" --replicas=0 || return 1
     done
     for deployment in "${business[@]}"; do
         elapsed=0
@@ -888,9 +881,10 @@ stop_old_business_workloads() {
 
 bootstrap_job_failed() {
     local job="$1"
-    kubectl logs -n "$NAMESPACE" "job/$job" --all-containers=true --tail=200 >&2 || true
-    kubectl delete job "$job" -n "$NAMESPACE" --wait=true --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" >/dev/null || true
-    echo "Error: system Agent bootstrap failed; business workloads remain paused." >&2
+    deployment_run_logged kubectl logs -n "$NAMESPACE" "job/$job" --all-containers=true \
+        --request-timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" >&2 || true
+    deployment_run_logged kubectl delete job "$job" -n "$NAMESPACE" --wait=true --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" >/dev/null || true
+    deployment_error "Error: system Agent bootstrap failed. Business workloads remain paused."
     return 1
 }
 
@@ -922,6 +916,7 @@ run_system_agent_bootstrap() {
     if [ "$replicas" -gt 1 ]; then
         require_runtime_shared_storage || { bootstrap_job_failed "$job"; return 1; }
     fi
+    deployment_log "Synchronizing official skills and initializing the database and system Agents..."
     require_runtime_deploy_lock || return 1
     sync_official_skills_to_workspace "$pod" || { bootstrap_job_failed "$job"; return 1; }
     require_runtime_deploy_lock || return 1
@@ -930,7 +925,14 @@ run_system_agent_bootstrap() {
     while true; do
         status=$(kubectl get job "$job" -n "$NAMESPACE" -o 'jsonpath={.status.succeeded}:{.status.failed}') || { bootstrap_job_failed "$job"; return 1; }
         case "$status" in
-            1:*) return 0 ;;
+            1:*)
+                if [ -n "${NEXENT_DEPLOY_LOG_FILE:-}" ]; then
+                    deployment_run_logged kubectl logs -n "$NAMESPACE" "job/$job" --all-containers=true \
+                        --request-timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" ||
+                        deployment_warn "Could not collect the completed bootstrap Job logs for $job."
+                fi
+                return 0
+                ;;
             *:[1-9]*) bootstrap_job_failed "$job"; return 1 ;;
         esac
         if [ "$elapsed" -ge "$K8S_WAIT_TIMEOUT_SECONDS" ]; then
@@ -999,7 +1001,8 @@ deploy_application_release() {
                 require_runtime_shared_storage || return 1
             fi
             require_runtime_deploy_lock || return 1
-            helm_application_chart false "" upgrade || return 1
+            deployment_run_logged helm_application_chart false "" upgrade || return 1
+            deployment_log "Waiting for the application workloads..."
             require_runtime_deploy_lock || return 1
             wait_for_nexent_ready || return 1
             require_runtime_deploy_lock || return 1
@@ -1019,6 +1022,7 @@ deploy_application_release() {
                 require_runtime_shared_storage || return 1
                 require_runtime_deploy_lock || return 1
             fi
+            deployment_log "Stopping old application workloads for bootstrap..."
             stop_old_business_workloads || return 1
             require_runtime_deploy_lock || return 1
             helm_upgrade_application_release true "$bootstrap_run_id" || return 1
@@ -1030,12 +1034,13 @@ deploy_application_release() {
         if [ -n "$bootstrap_run_id" ]; then
             require_runtime_deploy_lock || return 1
         fi
+        deployment_log "Waiting for the application workloads..."
         wait_for_nexent_ready || return 1
     )
 }
 
 helm_upgrade_infrastructure_release() {
-    helm upgrade --install "$INFRASTRUCTURE_RELEASE_NAME" "$INFRASTRUCTURE_CHART_DIR" \
+    deployment_run_logged helm upgrade --install "$INFRASTRUCTURE_RELEASE_NAME" "$INFRASTRUCTURE_CHART_DIR" \
         --namespace "$NAMESPACE" \
         -f "$INFRASTRUCTURE_GENERATED_VALUES" \
         -f "$INFRASTRUCTURE_GENERATED_RUNTIME_VALUES" \
@@ -1045,7 +1050,7 @@ helm_upgrade_infrastructure_release() {
 
 wait_for_deployment_ready() {
     local deployment="$1"
-    kubectl rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
+    deployment_run_logged kubectl rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
 }
 
 release_scope_includes_infrastructure() {
@@ -1266,12 +1271,12 @@ require_infrastructure_release() {
 wait_for_infrastructure_ready() {
     local deployment
     for deployment in nexent-elasticsearch nexent-postgresql nexent-redis nexent-minio; do
-        echo "  Waiting for $deployment..."
+        deployment_run_logged printf 'Waiting for %s...\n' "$deployment"
         if ! wait_for_deployment_ready "$deployment"; then
-            echo "Error: $deployment did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
+            deployment_error "$deployment did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
             return 1
         fi
-        echo "  $deployment is ready."
+        deployment_run_logged printf '%s is ready.\n' "$deployment"
     done
 }
 
@@ -1297,12 +1302,12 @@ wait_for_nexent_ready() {
     fi
 
     for deployment in $deployments; do
-        echo "  Waiting for $deployment..."
+        deployment_run_logged printf 'Waiting for %s...\n' "$deployment"
         if ! wait_for_deployment_ready "$deployment"; then
-            echo "Error: $deployment did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
+            deployment_error "$deployment did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
             return 1
         fi
-        echo "  $deployment is ready."
+        deployment_run_logged printf '%s is ready.\n' "$deployment"
     done
 }
 
@@ -1436,7 +1441,7 @@ pull_mcp_image() {
     if [[ "$image_tail" != *:* ]]; then
         mcp_image_name="${image}:${APP_VERSION:-latest}"
     fi
-    echo "Checking MCP image: ${mcp_image_name}"
+    deployment_run_logged printf 'Checking MCP image: %s\n' "$mcp_image_name"
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "Warning: Docker is not installed or not in PATH, skipping MCP image pull."
@@ -1454,7 +1459,7 @@ pull_mcp_image() {
         echo "Build or load it locally before using --image-source local-latest."
     else
         echo "MCP image not found locally, pulling..."
-        if docker pull "${mcp_image_name}"; then
+        if deployment_run_logged docker pull "${mcp_image_name}"; then
             echo "MCP image pulled successfully."
         else
             echo "Warning: Failed to pull MCP image, but deployment will continue."
@@ -1479,7 +1484,7 @@ pull_sandbox_image() {
     if [[ "$image_tail" != *:* ]]; then
         sandbox_image_name="${image}:${APP_VERSION:-latest}"
     fi
-    echo "Checking sandbox image: ${sandbox_image_name}"
+    deployment_run_logged printf 'Checking sandbox image: %s\n' "$sandbox_image_name"
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "Warning: Docker is not installed or not in PATH, skipping sandbox image pull."
@@ -1496,7 +1501,7 @@ pull_sandbox_image() {
         echo "Build or load it locally before using --image-source local-latest."
     else
         echo "Sandbox image not found locally, pulling..."
-        if docker pull "${sandbox_image_name}"; then
+        if deployment_run_logged docker pull "${sandbox_image_name}"; then
             echo "Sandbox image pulled successfully."
         else
             echo "Warning: Failed to pull sandbox image, but deployment will continue."
@@ -1577,9 +1582,9 @@ render_infrastructure_secret_values() {
 
 apply() {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-        echo "正在使用 Helm 部署 Nexent..."
+        deployment_log "正在使用 Helm 部署 Nexent..."
     else
-        echo "Deploying Nexent using Helm..."
+        deployment_log "Deploying Nexent using Helm..."
     fi
 
     # Step 1: Select deployment components, port policy and image source.
@@ -1611,15 +1616,11 @@ apply() {
     fi
 
     # Step 3: Generate or reuse stable MinIO credentials for both releases.
-    echo "=========================================="
-    echo "  MinIO Access Key/Secret Key Setup"
-    echo "=========================================="
+    deployment_log "Preparing MinIO credentials..."
     if [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
         echo "Using MinIO credentials from deploy/env/.env."
-        echo "Access Key: $MINIO_ACCESS_KEY"
     elif load_existing_minio_secrets; then
         echo "Reusing existing MinIO credentials from Kubernetes secret."
-        echo "Access Key: $MINIO_ACCESS_KEY"
     elif grep -q "minio:" "$COMMON_VALUES" && grep -q "accessKey:" "$COMMON_VALUES"; then
         MINIO_ACCESS_KEY=$(grep "accessKey:" "$COMMON_VALUES" | head -1 | sed 's/.*accessKey: *//' | tr -d '"' | tr -d "'" | xargs)
         MINIO_SECRET_KEY=$(grep "secretKey:" "$COMMON_VALUES" | head -1 | sed 's/.*secretKey: *//' | tr -d '"' | tr -d "'" | xargs)
@@ -1631,11 +1632,8 @@ apply() {
         MINIO_SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)
 
         echo "MinIO credentials generated for generated Helm values"
-        echo "Access Key: $MINIO_ACCESS_KEY"
-        echo "Secret Key: $MINIO_SECRET_KEY (saved in generated Helm values)"
     else
         echo "MinIO credentials already exist"
-        echo "Access Key: $MINIO_ACCESS_KEY"
     fi
     echo ""
 
@@ -1666,9 +1664,9 @@ apply() {
     if release_scope_includes_infrastructure; then
         render_infrastructure_secret_values
         if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-            echo "正在部署基础设施 Helm release '$INFRASTRUCTURE_RELEASE_NAME'..."
+            deployment_log "正在部署基础设施 Helm release '$INFRASTRUCTURE_RELEASE_NAME'..."
         else
-            echo "Deploying infrastructure Helm release '$INFRASTRUCTURE_RELEASE_NAME'..."
+            deployment_log "Deploying infrastructure Helm release '$INFRASTRUCTURE_RELEASE_NAME'..."
         fi
         helm_upgrade_infrastructure_release
     else
@@ -1676,7 +1674,7 @@ apply() {
     fi
 
     if release_scope_includes_infrastructure || [ "$RELEASE_SCOPE" = "nexent" ]; then
-        echo "Waiting for Elasticsearch, PostgreSQL, Redis, and MinIO..."
+        deployment_log "Waiting for Elasticsearch, PostgreSQL, Redis, and MinIO..."
         if ! wait_for_infrastructure_ready; then
             echo "Infrastructure is not ready; the Nexent release was not installed or upgraded."
             exit 1
@@ -1686,9 +1684,9 @@ apply() {
     if [ "$RELEASE_SCOPE" = "infrastructure" ]; then
         persist_deploy_options
         if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-            echo "基础设施 release 部署完成。"
+            deployment_log "基础设施 release 部署完成。"
         else
-            echo "Infrastructure release deployed successfully."
+            deployment_log "Infrastructure release deployed successfully."
         fi
         return 0
     fi
@@ -1703,10 +1701,7 @@ apply() {
         fi
     fi
 
-    echo ""
-    echo "=========================================="
-    echo "  Elasticsearch Initialization"
-    echo "=========================================="
+    deployment_log "Checking Elasticsearch and its API key..."
     local es_key_output_file
     es_key_output_file="$(mktemp "${TMPDIR:-/tmp}/nexent-es-key.XXXXXX")"
     if ! ROOT_ENV_FILE="$ROOT_ENV_FILE" \
@@ -1715,7 +1710,7 @@ apply() {
         NEXENT_ES_INIT_TIMEOUT_SECONDS="$K8S_WAIT_TIMEOUT_SECONDS" \
         DEPLOYMENT_REFRESH_ES_KEY="${DEPLOYMENT_REFRESH_ES_KEY:-false}" \
         DEPLOYMENT_ROTATE_SECRETS="${DEPLOYMENT_ROTATE_SECRETS:-false}" \
-        bash "$SCRIPT_DIR/init-elasticsearch.sh"; then
+        deployment_run_logged bash "$SCRIPT_DIR/init-elasticsearch.sh"; then
         rm -f "$es_key_output_file"
         echo "Error: Elasticsearch API key initialization failed; the Nexent release was not installed or upgraded."
         exit 1
@@ -1754,7 +1749,8 @@ apply() {
 
     # Complete historical import before replacing source Secrets or starting application SQL.
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-        deployment_upgrade_local_accounts kubernetes "$NAMESPACE" || exit 1
+        deployment_log "Checking for historical accounts to migrate..."
+        deployment_run_logged deployment_upgrade_local_accounts kubernetes "$NAMESPACE" || exit 1
     fi
 
     render_runtime_secret_values
@@ -1762,12 +1758,12 @@ apply() {
 
     # Step 8: Deploy the application release using the selected upgrade flow.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-        echo "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
+        deployment_log "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
     else
-        echo "Deploying application Helm release '$APPLICATION_RELEASE_NAME'..."
+        deployment_log "Deploying application Helm release '$APPLICATION_RELEASE_NAME'..."
     fi
     if ! deploy_application_release; then
-        echo "Error: application deployment failed; no automatic old-service restart was attempted."
+        deployment_error "Application deployment failed."
         exit 1
     fi
 
@@ -1777,12 +1773,9 @@ apply() {
     CREATE_SUADMIN_SCRIPT="$SCRIPT_DIR/create-suadmin.sh"
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
         if [ -f "$CREATE_SUADMIN_SCRIPT" ]; then
-            echo ""
-            echo "=========================================="
-            echo "  Super Admin User Creation"
-            echo "=========================================="
+            deployment_log "Initializing the super administrator..."
             if ! bash "$CREATE_SUADMIN_SCRIPT"; then
-                echo "Error: Super admin user creation failed. Deployment aborted."
+                deployment_error "Super admin user creation failed. Deployment aborted."
                 exit 1
             fi
         else
@@ -1797,11 +1790,9 @@ apply() {
     pull_sandbox_image
 
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-        echo "部署完成！"
-        echo "应用访问地址：http://localhost:30000"
+        deployment_log "部署完成。应用地址：http://localhost:30000"
     else
-        echo "Deployment completed successfully!"
-        echo "Access the application at: http://localhost:30000"
+        deployment_log "Deployment completed. Application URL: http://localhost:30000"
     fi
     if [ "$ENABLE_OPENSSH" = "true" ]; then
         if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -1828,7 +1819,7 @@ print_usage() {
         echo "  --version VERSION          指定应用版本（未设置时读取当前仓库 VERSION）"
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
-        echo "  --persistence-mode MODE    local、dynamic 或 existing"
+        echo "  --persistence-mode MODE    dynamic（默认）、local 或 existing"
         echo "  --runtime-replicas COUNT   设置 Runtime 固定副本数"
         echo "  --direct-upgrade           直接更新现有应用，跳过全局缩零和系统初始化 Job"
         echo "  --storage-class NAME       用于 PV/PVC 绑定的 StorageClass（别名：--storageclass、--storage-class-name、--sc）"
@@ -1864,7 +1855,7 @@ print_usage() {
     echo "  --version VERSION          Specify app version (defaults to the current repository VERSION)"
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
-    echo "  --persistence-mode MODE    local, dynamic, or existing"
+    echo "  --persistence-mode MODE    dynamic (default), local, or existing"
     echo "  --runtime-replicas COUNT   Set the fixed Runtime replica count"
     echo "  --direct-upgrade           Upgrade an existing application without scaling to zero or running bootstrap"
     echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"

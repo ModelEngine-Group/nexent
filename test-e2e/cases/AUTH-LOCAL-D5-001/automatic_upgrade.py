@@ -19,18 +19,16 @@ def docker(*args, data=None):
 
 
 def build_worker_image(root, image, run_id):
-    sql_file = root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
-    role_sql = root / "deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql"
+    bundle = root / "deploy/sql/migrations/v2.9.0_merged_migrations.sql"
     context = io.BytesIO()
     with tarfile.open(fileobj=context, mode="w") as archive:
         content = ("FROM nexent/nexent:latest\nLABEL codex.test=" + run_id + "\n"
                    "COPY migrate_docker.py /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py\n"
                    "COPY inspect_accounts.sql /opt/deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql\n"
-                   "COPY account.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql\n"
-                   "COPY account_roles.sql /opt/deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql\n"
+                   "COPY merged.sql /opt/deploy/sql/migrations/v2.9.0_merged_migrations.sql\n"
                    'ENTRYPOINT ["sh","-c","exit 88"]\n').encode()
         info = tarfile.TarInfo("Dockerfile"); info.size = len(content); archive.addfile(info, io.BytesIO(content))
-        for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (sql_file, "account.sql"), (role_sql, "account_roles.sql"), (root / "deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql", "inspect_accounts.sql")]:
+        for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (bundle, "merged.sql"), (root / "deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql", "inspect_accounts.sql")]:
             archive.add(source, arcname=destination)
     built = subprocess.run(["docker", "build", "-t", image, "-"], input=context.getvalue(), capture_output=True)
     assert built.returncode == 0, built.stderr
@@ -54,8 +52,7 @@ def assert_automatic_upgrade(root, temporary):
     password = "IsolatedAutoTest123"
     user_id = str(uuid4())
     encoded = bcrypt.hashpw(b"original-password", bcrypt.gensalt(rounds=4)).decode()
-    sql_file = root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
-    role_sql = root / "deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql"
+    bundle = root / "deploy/sql/migrations/v2.9.0_merged_migrations.sql"
     env = {**os.environ, "SUPABASE_MIGRATION_DB_CONTAINER": names["db"],
            "SUPABASE_MIGRATION_AUTH_CONTAINER": names["auth"], "SUPABASE_MIGRATION_KONG_CONTAINER": names["kong"],
            "SUPABASE_POSTGRES_USER": "postgres", "SUPABASE_POSTGRES_DB": "postgres",
@@ -177,35 +174,39 @@ def assert_automatic_upgrade(root, temporary):
             INSERT INTO nexent.tenant_invitation_code_t (code_type) VALUES ('DEV_INVITE');
         """)
         docker("exec", worker, "mkdir", "-p", "/tmp/auth-migrations")
-        for file in [sql_file, role_sql]:
-            docker("cp", str(file), worker + ":/tmp/auth-migrations/" + file.name)
-        runner = (root / "deploy/common/run-sql-migrations.sh").read_text(encoding="utf-8")
-        docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/run-auth-sql.sh", data=runner)
+        docker("cp", str(bundle), worker + ":/tmp/auth-migrations/" + bundle.name)
+        for script in ("run-sql-migrations.sh", "start-backend.sh"):
+            docker("cp", str(root / "deploy/common" / script), f"{worker}:/tmp/{script}")
         docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/init-auth.sql", data="CREATE SCHEMA IF NOT EXISTS nexent;\n")
-        sql_command = ["exec", "-e", "NEXENT_APP_VERSION=2.9.0", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql",
-                       worker, "bash", "/tmp/run-auth-sql.sh", "--migrate"]
+        sql_environment = ["exec", "-e", "NEXENT_APP_VERSION=2.9.0", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql"]
+        sql_command = [*sql_environment, worker, "bash", "/tmp/run-sql-migrations.sh", "--migrate"]
+        startup_command = [*sql_environment, "-e", "NEXENT_SQL_STARTUP_MODE=migrate", "-e", "NEXENT_SQL_SKIP_IF_CURRENT=true",
+                           worker, "bash", "/tmp/start-backend.sh", "printf", "CONFIG_STARTED\\n"]
         docker(*sql_command)
-        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_001_local_user_accounts.sql'") == "1"
-        assert query(
-            f"SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='{role_sql.name}'"
-        ) == "1"
+        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_merged_migrations.sql'") == "1"
         assert query("SELECT roles FROM nexent.tenant_invitation_code_t") == "{DEV}"
         assert query("SELECT count(*) FROM nexent.role_permission_t WHERE user_role='OPS'") == "12"
         # Old 002 execution records are retained even though the file is consolidated.
         query("INSERT INTO nexent.schema_migrations (migration_id,checksum,status,app_version,source_file) VALUES ('v2.9.0_002_account_availability.sql','legacy','applied','2.9.0','legacy-002')")
-        # Normal startup must also support unchanged checksums and forced replay.
-        docker(*sql_command)
-        query("UPDATE nexent.schema_migrations SET checksum='force-replay' WHERE migration_id='v2.9.0_001_local_user_accounts.sql'")
-        docker(*sql_command)
+        init_execution = "SELECT executed_at FROM nexent.schema_migrations WHERE migration_id='__init.sql'"
+        bootstrapped_at = query(init_execution)
+        assert docker(*startup_command).endswith("CONFIG_STARTED")
+        assert bootstrapped_at and query(init_execution) == bootstrapped_at
+        query("UPDATE nexent.schema_migrations SET checksum='force-replay' WHERE migration_id='v2.9.0_merged_migrations.sql'")
+        startup = docker(*startup_command)
+        assert "[sql-migrations] reapply v2.9.0_merged_migrations.sql" in startup
+        assert startup.endswith("CONFIG_STARTED")
+        assert query(init_execution) != bootstrapped_at
         assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
         assert query("SELECT checksum FROM nexent.schema_migrations WHERE migration_id='v2.9.0_002_account_availability.sql'") == "legacy"
         # A failed historical replay must roll back its schema/data changes,
         # preserving the already committed accounts instead of deleting them.
         query("ALTER TABLE nexent.user_tenant_t ADD COLUMN user_email varchar(255); "
               f"UPDATE nexent.user_tenant_t SET user_email='conflict@example.com' WHERE user_id='{user_id}'; "
-              "UPDATE nexent.schema_migrations SET checksum='force-failure' WHERE migration_id='v2.9.0_001_local_user_accounts.sql'")
-        failed = subprocess.run(["docker", *sql_command], capture_output=True, check=False)
+              "UPDATE nexent.schema_migrations SET checksum='force-failure' WHERE migration_id='v2.9.0_merged_migrations.sql'")
+        failed = subprocess.run(["docker", *startup_command], capture_output=True, check=False)
         assert failed.returncode != 0
+        assert b"CONFIG_STARTED" not in failed.stdout
         assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
         assert query(f"SELECT password_hash FROM nexent.user_account_t WHERE user_id='{user_id}'") == encoded
         query("ALTER TABLE nexent.user_tenant_t DROP COLUMN user_email")

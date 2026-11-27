@@ -13,7 +13,10 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from pydantic import BaseModel, model_validator
+
+from contracts.authentication import AuthenticatedIdentity
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND_DIR = _REPO_ROOT / "backend"
@@ -806,7 +809,7 @@ async def test_install_bundle_with_skills():
     fake_agent.import_agent_with_skills_impl.assert_awaited_once_with(
         bundle,
         bundle.skills,
-        "auth",
+        AuthenticatedIdentity("u", "tenant-1"),
         skill_resolutions=None,
     )
     fake_agent.import_agent_impl.assert_not_awaited()
@@ -837,7 +840,7 @@ async def test_install_bundle_without_skills():
 
     assert result == 100
     fake_agent.import_agent_impl.assert_awaited_once_with(
-        bundle, "auth"
+        bundle, AuthenticatedIdentity("u", "tenant-1")
     )
     fake_agent._create_skills_for_install.assert_not_awaited()
     fake_agent._import_agent_with_skill_links.assert_not_awaited()
@@ -1165,7 +1168,7 @@ async def test_install_bundle_creates_kb_and_remaps_refs():
     # tool references were remapped to the tenant-generated index name
     assert bundle.agent_info["1"].tools[0].params["index_names"] == ["42-abc"]
     fake_agent.import_agent_impl.assert_awaited_once_with(
-        bundle, "auth"
+        bundle, AuthenticatedIdentity("u", "tenant-1")
     )
 
 

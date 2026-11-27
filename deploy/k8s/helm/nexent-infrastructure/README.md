@@ -4,6 +4,8 @@ This chart owns the `nexent-infrastructure` release and contains only Elasticsea
 
 Use `bash deploy.sh k8s --release-scope infrastructure` from the repository root for normal operation. The deployment script generates stable credentials, renders PostgreSQL bootstrap SQL, installs this release, and waits for all four Deployments.
 
+The chart defaults to dynamically provisioned PVCs. An empty `persistence.storageClassName` lets Kubernetes use the cluster's default StorageClass. For an existing Helm release backed by static PVs, retain its `persistence.mode: local` overrides on upgrade.
+
 Operators that manage values externally can run:
 
 ```bash

@@ -80,14 +80,21 @@ def main():
         with guard:
             sent.add(query)
         body = {"agent_id": source, "model_id": model_id, "query": query, "history": []}
-        if cids[slot] is None:
-            body["model_parameter_preferences"] = {str(model_id): {"enable_thinking": False}}
-        else:
-            body["conversation_id"] = cids[slot]
-        with httpx.Client(base_url="http://nexent-runtime:5014", headers=headers, trust_env=False, timeout=240) as client:
+        with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=240) as client:
             with guard:
                 clients.add(client)
             try:
+                if cids[slot] is None:
+                    response = client.put("/conversation/create", json={"title": "Jiuwen concurrency fixture"})
+                    response.raise_for_status()
+                    cids[slot] = int(response.json()["data"]["conversation_id"])
+                    assert cids[slot] not in originals
+                    with guard:
+                        owned.add(cids[slot])
+                    preferences = client.patch(f"/conversation/{cids[slot]}/model_preferences/{model_id}",
+                                               json={"parameter_values": {"enable_thinking": False}})
+                    preferences.raise_for_status()
+                body["conversation_id"] = cids[slot]
                 events = []
                 with client.stream("POST", "/agent/run", json=body) as response:
                     if response.headers.get("conversation_id"):
@@ -97,31 +104,32 @@ def main():
                             owned.add(cids[slot])
                     assert response.status_code == 200, "Agent request did not start"
                     for line in response.iter_lines():
-                        if line.startswith("data:"):
+                        if line.startswith("data:") and line[5:].strip() != "[DONE]":
                             events.append(json.loads(line[5:].strip()))
                 starts = [e for e in events if e.get("type") == "subagent_start"]
                 ends = [e for e in events if e.get("type") == "subagent_end"]
-                terminals = [e for e in events if e.get("type") == "run_terminal"]
-                nested = [e for e in terminals if e.get("invocation_id")]
-                roots = [e for e in terminals if not e.get("invocation_id")]
+                finals = [e for e in events if e.get("type") == "final_answer" and e.get("answer_phase") == "complete"]
+                roots = [e for e in finals if not e.get("invocation_id")]
+                nested = [e for e in finals if e.get("invocation_id")]
                 start_ids = {e["invocation_id"] for e in starts}
                 end_ids = {e["invocation_id"] for e in ends}
                 child_ids = {e["invocation_id"] for e in nested}
+                child_statuses = [unpack(e["content"]).get("status") for e in ends]
                 payloads = [unpack(e["content"]) for e in starts]
                 final = "".join(str(e.get("content", "")) for e in events
                                 if e.get("type") == "final_answer" and not e.get("invocation_id"))
-                summary = {"slot": slot, "round": batch, "root_statuses": [e.get("status") for e in roots],
-                           "child_statuses": [e.get("status") for e in nested], "child_count": len(nested),
+                summary = {"slot": slot, "round": batch, "root_completed_answers": len(roots),
+                           "child_statuses": child_statuses, "child_count": len(nested),
                            "starts": len(starts), "ends": len(ends), "has_results": all(
                                value in final for value in config.get("expected_values", ["11", "22", "33"])),
                            "loop_errors": "bound to a different event loop" in str(events)}
                 with guard:
                     report["runs"].append(summary)
-                assert len(roots) == 1 and roots[0].get("status") == "completed", "Root did not complete"
+                assert len(roots) == 1 and roots[0].get("content"), "Root did not confirm a complete answer"
                 assert len(starts) == len(ends) == len(nested) == 3, "Extra or missing child attempt"
                 assert start_ids == end_ids == child_ids, "Invocation boundaries do not match"
                 assert {e["agent_id"] for e in payloads} == children, "Unexpected child identity"
-                assert all(e.get("status") == "completed" for e in nested), "A child failed before recovery"
+                assert child_statuses == ["completed"] * 3, "A child failed before recovery"
                 assert not [e for e in events if e.get("type") == "error"], "Execution emitted an error"
                 assert not summary["loop_errors"] and summary["has_results"], "Wrong result or loop failure"
                 with guard:
@@ -153,7 +161,7 @@ def main():
                     clients.discard(client)
 
     try:
-        with httpx.Client(base_url="http://nexent-config:5010", headers=headers, trust_env=False, timeout=30) as client:
+        with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=30) as client:
             assert client.get("/tenant_config/deployment_version").json()["agent_core"] == "jiuwen"
         for batch in range(3):
             futures = [manager.submit("client", ManagedTaskSpec(task_name=f"probe-{batch}-{slot}", owner=__name__),
@@ -170,7 +178,7 @@ def main():
             matches = session.query(ConversationMessage.conversation_id).filter(
                 ConversationMessage.message_content.in_(sent), ConversationMessage.created_by == actor).all()
             owned.update(row.conversation_id for row in matches if row.conversation_id not in originals)
-        with httpx.Client(base_url="http://nexent-runtime:5014", headers=headers, trust_env=False, timeout=30) as client:
+        with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=30) as client:
             if report["status"] != "PASS":
                 for cid in owned:
                     client.get(f"/agent/stop/{cid}")

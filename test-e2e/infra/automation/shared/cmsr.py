@@ -8,6 +8,7 @@ import uuid
 
 import httpx
 
+from shared.agent_core import require_code_agent
 from shared.asset_registry import AssetDependencyError, register_asset
 from shared.auth import sign_in
 from shared.config import controlled_asset_url
@@ -32,18 +33,25 @@ async def control(nonce, operation, *, mode=None):
     return response.json()
 
 
-async def wait_paused(nonce, phase):
+async def wait_paused(nonce, phase, *, stream=None):
     async with asyncio.timeout(60):
         while True:
             state = await control(nonce, 'state')
             assert not state['expired'], 'Provider release deadline expired'
             if state['paused'] == phase:
                 return state
+            if stream is not None and stream.done():
+                await stream
+                raise AssertionError(
+                    f"Public stream ended before provider phase {phase}; "
+                    f"recorded provider attempts={state['calls']}"
+                )
             await asyncio.sleep(0.1)
 
 
 async def setup(case_id, *, publish=False):
     identity = await sign_in('tenant_a_admin')
+    await require_code_agent(identity, case_id)
     nonce = uuid.uuid4().hex
     display = 'cmsr_' + nonce
     async with client('config', token=identity.access_token) as api:
@@ -63,10 +71,18 @@ async def setup(case_id, *, publish=False):
         matches = [row for row in rows if row.get('display_name') == display]
         assert len(matches) == 1
         model_id = int(matches[0].get('model_id') or matches[0]['id'])
-        health = await api.post('/model/healthcheck', params={'display_name': display, 'model_type': 'llm'})
-        assert_status(health, 200)
-        health_body = health.json()
-        assert health_body.get('data', health_body).get('connectivity') is True, 'Owned fixture model must be available to published chat'
+        # The current health check may stream. Keep its response separate from
+        # the attempt counters and release gates of the actual test.
+        await control(nonce, 'reset', mode='health')
+        try:
+            health = await api.post('/model/healthcheck', params={'display_name': display, 'model_type': 'llm'})
+            assert_status(health, 200)
+            health_body = health.json()
+            assert health_body.get('data', health_body).get('connectivity') is True, (
+                'Owned fixture model must be available to published chat'
+            )
+        finally:
+            await control(nonce, 'delete')
         agent = await api.post('/agent/update', json={
             'name': 'cmsr_' + nonce, 'display_name': display, 'description': 'Owned retry fixture',
             'business_description': 'CMSR integration', 'max_steps': 3, 'provide_run_summary': False,

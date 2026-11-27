@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-DYNAMIC-PVC-UNINSTALL-20261126
+  change_type: requirement
+  requirement_id: K8S-DYNAMIC-PVC-UNINSTALL-20261126
+  title: Preserve Kubernetes dynamic PVCs on uninstall by default
+  description: Track dynamic PVCs by Helm release and retain them and their namespace unless the operator chooses to delete them.
+  affected_features:
+    existing: [RUNTIME-REPLICAS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [RUNTIME-OFFLINE-DEPLOY-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Helm renders keep metadata on dynamic application, infrastructure and monitoring claims.
+    - The uninstall entry point retains claims and their namespace by default and deletes only selected owned dynamic claim UIDs after a successful explicit uninstall.
+    - Missing retention policy, failed Helm uninstall and a replaced PVC safely stop the applicable cleanup action.
+    reason: Render Helm metadata and isolate platform CLI calls locally. Reuse the dedicated Kubernetes deployment case for actual release and PVC behavior.
+    test_selectors:
+    - test/backend/deploy/test_k8s_persistence.py
+    - test/backend/deploy/test_k8s_uninstall_pvc.py
+  notes: The existing isolated Kubernetes case uses its owned releases and dedicated dynamic RWX class. It checks the retained claims by UID, requests their deletion and leaves namespace and PV cleanup to the ownership-checked fixture. The product deployment guide documents the current behavior.

@@ -1,25 +1,27 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { journey, observeAgentRunBodies, readFixtureConfig } from "../../infra/automation/d4/runner/journey";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 journey("JIUWEN-SKILL-FILES-D4-001", async ({ page, contract, expect }) => {
-  const input = JSON.parse(readFileSync(process.env.NEXENT_SKILL_FILES_CONFIG!, "utf8"));
+  const input = readFixtureConfig("NEXENT_SKILL_FILES_CONFIG");
   const base = process.env.NEXENT_BASE_URL || "http://127.0.0.1:3000";
-  const container = input.container || "nexent-runtime";
+  const container = input.container || "nexent-config";
   const unique = randomUUID().replaceAll("-", "").slice(0, 12);
   const target = `/tmp/nexent_skill_files_${unique}`;
   const local = join(contract.caseDir, "private-state.json");
   const outcomes: any[] = [];
   let state: any;
   let runCount = 0;
+  const readRunBody = await observeAgentRunBodies(page);
   const docker = (...args: string[]) => {
     try { return execFileSync("docker", args, {encoding:"utf8",timeout:120000,stdio:["ignore","pipe","pipe"]}); }
     catch (error) { throw new Error(String((error as any).stdout || "").split(/\r?\n/).find(l=>l.startsWith("FIXTURE_FAILURE=")) || "Owned fixture command failed"); }
   };
-  const fixture = (mode: string, ...args: string[]) => JSON.parse(docker("exec", "-e", "PYTHONPATH=/opt/backend",
+  const fixture = (mode: string, ...args: string[]) => JSON.parse(docker("exec", "-e", "PYTHONPATH=/opt:/opt/backend",
     "-w", "/opt/backend", container, "/opt/backend/.venv/bin/python", target+".py", mode, target+".json", ...args).trim().split(/\r?\n/).at(-1)!);
   const save = () => writeFileSync(join(contract.caseDir,"real-outcomes.json"),JSON.stringify(outcomes,null,2));
   docker("cp", join(process.env.NEXENT_REPO!,"test-e2e/cases/JIUWEN-SKILL-FILES-D4-001/fixture.py"),container+":"+target+".py");
@@ -41,6 +43,7 @@ journey("JIUWEN-SKILL-FILES-D4-001", async ({ page, contract, expect }) => {
     .filter(n=>!n.closest(".aui-reasoning-root")&&!n.closest("[data-subagent-run-id]"))
     .map(n=>(n as HTMLElement).innerText));
   const send=async(query:string,model:number)=>{
+    await new ChatPage(page).selectBoundModel(model);
     await page.getByRole("textbox").last().fill(query);
     const wire=page.waitForResponse(r=>r.request().method()==="POST"&&new URL(r.url()).pathname==="/api/agent/run");
     await page.getByRole("button",{name:"发送",exact:true}).click();
@@ -48,13 +51,13 @@ journey("JIUWEN-SKILL-FILES-D4-001", async ({ page, contract, expect }) => {
     const request=response.request().postDataJSON();expect(request.agent_id).toBe(state.agent_id);
     expect(request.agent_core).toBeUndefined();expect(request.model_id).toBe(model);
     const conversation=request.conversation_id??Number(response.headers()["conversation_id"]);
-    const events=(await response.body()).toString("utf8").split(/\r?\n/).filter(l=>l.startsWith("data:")).map(l=>JSON.parse(l.slice(5).trim()));
+    const events=(await readRunBody()).split(/\r?\n/).filter(l=>l.startsWith("data:")&&l.slice(5).trim()!=="[DONE]").map(l=>JSON.parse(l.slice(5).trim()));
     expect(events.filter(e=>e.type==="error")).toEqual([]);
-    const terminal=events.filter(e=>e.type==="run_terminal"&&!e.invocation_id);
-    expect(terminal).toHaveLength(1);expect(terminal[0].status).toBe("completed");
-    expect(terminal[0].final_content).not.toMatch(/completed_action_history|historical_attachments|<\/?final_answer\b/);
+    const terminal=events.filter(e=>e.type==="final_answer"&&e.answer_phase==="complete"&&!e.invocation_id);
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0].content).not.toMatch(/completed_action_history|historical_attachments|<\/?final_answer\b/);
     await expect(roots().last().locator('[data-slot="aui_assistant-message-completion-indicator"]')).toBeVisible({timeout:30000});
-    return {conversation,events,final:terminal[0].final_content};
+    return {conversation,events,final:terminal[0].content};
   };
   const completed:any[]=[];
   const steps=contract.expectedIds("steps");

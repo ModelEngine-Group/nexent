@@ -339,6 +339,7 @@ _category_memory = {'store_memory': ['memory']}
 _category_terminal = {'terminal': ['terminal']}
 PARALLEL_EXECUTOR_TOOL_NAME = 'parallel_executor'
 SYSTEM_MANAGED_TOOL_NAMES = frozenset({'store_memory', 'search_memory', 'download_from_s3', 'upload_to_s3', PARALLEL_EXECUTOR_TOOL_NAME})
+MANAGED_KNOWLEDGE_TOOL_NAMES = frozenset({'knowledge_base_search', 'aidp_search'})
 # Centralized definitions for tool parameter constraints.
 # These constants are shared by tool configuration validation
 # (``management.services.tool.configuration``) and the error message

@@ -41,7 +41,7 @@ describe("MCP monitoring reads", () => {
 
   beforeEach(() => fetch.mockReset());
 
-  it("reads the registered catalog independently of calendar, group and resource filters", async () => {
+  it("sends the group filter with the registered catalog request", async () => {
     const data = [
       { service_id: 12, name: "Registered service", type: "remote" },
       { service_id: null, name: "Builtin", type: "builtin" },
@@ -49,11 +49,14 @@ describe("MCP monitoring reads", () => {
     fetch.mockImplementation(async () => Response.json({ data }));
 
     await expect(
-      getMcpMonitoringCatalog(scope.tenantId, signal)
+      getMcpMonitoringCatalog(scope.tenantId, scope.groupIds, signal)
     ).resolves.toEqual(data);
-    await expect(getMcpMonitoringCatalog(null, signal)).resolves.toEqual(data);
+    await expect(getMcpMonitoringCatalog(null, [], signal)).resolves.toEqual(data);
     expect(fetch.mock.calls).toEqual([
-      [`${endpoint}/catalog?tenant_id=tenant%2Fa`, { signal }],
+      [
+        `${endpoint}/catalog?tenant_id=tenant%2Fa&group_ids=3&group_ids=5`,
+        { signal },
+      ],
       [`${endpoint}/catalog`, { signal }],
     ]);
   });

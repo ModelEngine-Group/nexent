@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-DENYLIST-EXISTING-BINDINGS-20261126
+  change_type: requirement
+  requirement_id: RESOURCE-DENYLIST-EXISTING-BINDINGS-20261126
+  title: Retain blocked existing bindings and confirm removal
+  description: Existing enabled tool and skill bindings remain usable and configurable after exclusion. New bindings and recommendations stay blocked. Removal requires an explicit warning; cancellation leaves the binding intact. Reject blocked new skill selections before saving Agent fields or removing old bindings.
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NL2A-COVERAGE-D3-001, RESOURCE-CONFIG-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Keep existing blocked skills configurable and removable; reject blocked new skills in both request formats before any writes.
+    - Show retained binding status; confirm local tool, MCP individual or bulk, and skill removal; cancel without mutation and reject callbacks after Agent switching.
+    reason: The existing D3 owns real policy persistence and runtime binding reads. The existing D4 owns exclusion presentation and is extended with the real Agent editor confirmation flow; no duplicate Case is added. Unit tests prove the write-before-validation regression and interaction variants.
+    test_selectors:
+    - test/backend/services/test_agent_denylist_existing_bindings.py
+    - test/backend/services/test_agent_service.py
+    - frontend/tests/component/selectedMcpTools.test.tsx
+    - frontend/tests/component/blockedSelectedSkills.test.tsx
+    - frontend/tests/component/toolDrawer.test.tsx
+    - frontend/tests/component/skillDrawer.test.tsx
+    - frontend/tests/component/skillDenylistCatalog.test.tsx
+  notes: SPEC is nexent-doc/docs/Developing/chat-nl2agent-resource-denylist/design.md and its resource-configuration change. Responsibility remains F-045-RULE-12. D3 retains its owned PostgreSQL schema/Redis/ES/model endpoint and cleanup. D4 uses in-memory route fixtures and browser context cleanup, without persistent business writes or Agent execution. Runtime materialization and execution policy are unchanged. Prevalidation removes the deterministic blocked-skill partial-save path; it does not claim whole-request atomicity against concurrent policy changes or unrelated storage errors. No unrelated review P2 fixes or branch merges are included.

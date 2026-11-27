@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSkills } from "@/services/agentConfigService";
 import { useMemo } from "react";
@@ -16,10 +18,10 @@ export function useSkillList(options?: {
   const queryClient = useQueryClient();
   const { t } = useTranslation("common");
 
-  const query = useQuery({
+  const query = useQuery<Skill[]>({
     queryKey: ["skills"],
     queryFn: async () => {
-      const res = await fetchSkills();
+      const res = await fetchSkills(undefined, "mount");
       if (!res || !res.success) {
         throw new Error(res?.message || "Failed to fetch skills");
       }
@@ -30,7 +32,10 @@ export function useSkillList(options?: {
   });
 
   const skills = query.data;
-  const availableSkills = useMemo(() => skills ?? [], [skills]);
+  const availableSkills = useMemo(
+    () => (skills ?? []).filter((skill: Skill) => !skill.blocked_by_denylist),
+    [skills]
+  );
 
   const groupedSkills = useMemo(() => {
     const groups: SkillGroup[] = [];

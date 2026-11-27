@@ -597,7 +597,7 @@ export function ResourceDrawer({
       classNames={{ body: bodyClassName }}
       onClose={handleClose}
       closable={false}
-      mask={{ closable: false }}
+      mask={{ closable: true }}
       styles={{
         body: {
           padding: 24,

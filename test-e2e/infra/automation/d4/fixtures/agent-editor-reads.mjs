@@ -58,7 +58,7 @@ export function makeDraft(permission = "EDIT") {
 }
 
 /** Handle shared read-only editor fixtures; journey-specific writes stay in callers. */
-export async function fulfillEditorReadFixture(route, endpoint) {
+export async function fulfillEditorReadFixture(route, endpoint, role = "SPEED") {
   const respond = async (requestRoute, body, status = 200) => {
     await requestRoute.fulfill({
       status,
@@ -80,11 +80,11 @@ export async function fulfillEditorReadFixture(route, endpoint) {
           user_id: "fixture-user",
           tenant_id: "fixture-tenant",
           user_email: "fixture@nexent.test",
-          user_role: "SPEED",
+          user_role: role,
           auth_provider: "local",
           group_ids: [],
           permissions: [],
-          accessibleRoutes: [
+          accessiblePages: [
             "/agents",
             "/mcp-space",
             "/knowledges",
