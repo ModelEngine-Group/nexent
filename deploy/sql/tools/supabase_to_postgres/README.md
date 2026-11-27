@@ -8,16 +8,16 @@ assets for the original source database.
 
 ## Completion rule and execution order
 
-Migration completion depends on account data, not table existence. Every active
-historical member must have usable local credentials, a recognized API-only,
-provider or SPEED identity, an explicitly disabled local account, or per-user
-source-unavailability exclusion evidence. New imports must pass this validation before commit. Existing incomplete tables
-stop deployment and require consistent backup recovery; no automatic repair runs. No historical membership relation
-means fresh initialization. Versions and SQL checksums do not select migration.
+The preflight checks whether active historical members have usable local
+credentials, a recognized API-only, provider or SPEED identity, a disabled local
+account, or exclusion evidence. Coverage gaps log the affected user ID and email
+(null when unavailable) and deployment continues. An existing account table skips
+automatic import. No historical membership relation means fresh initialization.
+Versions and SQL checksums do not select migration.
 
 **Run the importer before account SQL or the new application.** If account SQL
 already removed legacy role/email fields and no account holds their canonical
-copies, the importer stops with unresolved IDs and performs no automatic repair. Restore those business profiles
+copies, the importer warns about unresolved IDs and skips automatic repair. Recover those business profiles
 from the target's pre-upgrade backup; Supabase cannot reconstruct application roles.
 
 | Stage | Docker | Kubernetes |
@@ -213,7 +213,7 @@ source-directory deletion. No recovery or migration command needs host Python.
 | Banned/deleted/anonymous users and orphans | Exclude from the new account table. Original Supabase records and membership rows remain; no role or tenant is synthesized |
 | API-only batch users | Active blank-email USER/DEV membership plus historical token evidence creates a passwordless account; preserve ID, original keys and revoked key state |
 | Default SPEED seed | Preserve `user_id` / `tenant_id`, mark `system_identity=speed`, keep unavailable for full-mode login. The retired SPEED role is removed without granting replacement permissions |
-| Unknown/custom identities | Unresolved active members stop migration with IDs; recover source/business profiles without generating replacement IDs or roles |
+| Unknown/custom identities | Unresolved active members produce a warning with ID and available email. Missing local profiles retain their historical data as disabled accounts when a new table is created |
 | CAS/OAuth | Existing provider bindings and CAS sessions remain in business PostgreSQL. Preserve original IDs and valid bindings. Provider-only identities stay passwordless; accounts with actual local password credentials retain password login. Import Supabase credentials only where those source identities exist |
 | Audit and refresh data | Do not read/import `auth.audit_log_entries`, Supabase sessions, refresh tokens or recovery/confirmation secrets. No audit archive is created |
 
@@ -243,13 +243,18 @@ not print them. Re-running deployment cannot recover a password from its hash.
 
 Email reuse is checked after final account eligibility is computed. Soft-deleted,
 banned, anonymous or orphaned ordinary identities do not occupy an
-email in the new account table. Temporary schema-created unavailable profiles are
-removed in the same transaction, except the recognized SPEED system identity.
-Only final active duplicate emails fail; logs contain the conflicting account IDs
-without email values, hashes or connection details. Docker and Kubernetes preserve
-the same structured conflict through psql error transport. Complete
+active email in the new account table. Schema-created unavailable accounts remain
+stored with their disabled status.
+Duplicate active emails and mismatches with historical email fields produce
+warnings containing user IDs and email values. Migrated accounts retain their
+source email and conflicting historical emails remain in account metadata.
+Repeated source IDs produce warnings and retain the original rows in Supabase
+storage. The worker does not select credentials from an ambiguous source ID.
+An execution error still stops deployment and the transaction owner handles
+uncommitted changes. Complete
 account data skips source import, without retroactive deletion of local accounts.
-Missing roles or ordinary password credentials reject the current transaction.
+Missing roles or ordinary password credentials can leave coverage gaps. The
+import logs the affected ID and available email and records the gap before commit.
 Historical associations without an eligible account cannot authenticate and no
 longer block SU preflight merely because the association row remains.
 
@@ -276,12 +281,13 @@ a remote source requires manual cleanup, while preview and failure retain it.
 
 | Symptom | Checks and recovery |
 | --- | --- |
-| Account table exists but historical passwords were never imported | Check whether 001 or the new application was started manually first. Stop identity writes and recover a consistent pre-upgrade target backup, including original membership roles/emails, then run migration before application SQL. Reconcile newer local credentials before backup recovery. The script reports unresolved IDs and stops without automatically repairing or deleting existing account data |
+| Account table exists but historical passwords were never imported | The script reports unresolved IDs and available emails and continues deployment. Recover affected credentials or business profiles from the matching backup, taking subsequent local identity changes into account |
 | SU bootstrap reports an existing SU membership or missing account profile | Verify original ID and membership/account consistency. Deleting only account rows leaves tenant ownership behind. Restore the matching target backup; do not replace the owner with a new UUID or delete memberships to bypass preflight |
 | Original source container or data directory missing | For Docker, set `SUPABASE_DATA_DIR` to the original PostgreSQL data directory or check `ROOT_DIR`. Restore that data from backup if needed, then retry deployment. Check the configured container name if another candidate exists. For Kubernetes or remote sources, restore the original workload or verify the remote endpoint |
 | Source stopped, no published port, or readiness timeout | The Shell coordinator starts an existing source and the worker uses internal endpoints. Check source readiness, both Docker bridge networks or Kubernetes services/network policies, and adjust `--wait-timeout` within its supported range |
 | Password unavailable or PostgreSQL authentication fails | Use the original `SUPABASE_POSTGRES_PASSWORD` and target credentials. Check the selected environment file and exported values; automatic local mode can read original container/pod settings. Changing a new container environment does not reset the old DB password |
-| Target account/role/email conflict, ambiguous source IDs, unsupported date or hash | Resolve the actual conflicting legacy metadata or recover its backup. Import must preserve stable IDs and supported hashes; do not invent UUIDs, roles or replacement passwords. Failure leaves the original target schema/data available for a clean retry |
+| Account ID or email warning | Use the logged user ID and email to reconcile the historical profiles. Original source storage and account and membership records remain available |
+| Invalid schema or roles, unsupported date or hash, or database execution error | Deployment stops. Correct the underlying error before retrying with the original source. Import requires stable IDs and supported hashes |
 | `ModuleNotFoundError` for dotenv or psycopg2 | Rebuild/select the matching backend image. The worker requires its packaged database driver; installing packages on the host does not fix the image |
 | Python path contains `C:/c/...` or `/opt/C:/Program Files/Git/...` | Use the current `migrate.sh` entry, which never launches host Python. Docker/kubectl container paths retain scoped exclusions; host filenames passed to native kubectl are converted explicitly |
 | Missing `migration.py`, `migrate.py`, `legacy_stack.py`, or old version/pending-account errors | Use a consistent checkout/package. Current host entry is `migrate.sh`; the image contains its Python worker; remove stale launch commands instead of restoring deleted migration environment variables or phase files |

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-MIGRATION-WARNING-20261127
+  change_type: bugfix
+  bug_id: AUTH-MIGRATION-WARNING-20261127
+  title: Continue deployment after account validation warnings
+  description: Report missing account coverage, duplicate source IDs and email conflicts with user ID and available email, preserving account and membership records.
+  observed_behavior: An existing incomplete account table blocks the preflight and a newly discovered coverage gap rolls back migration. The importer also deletes disabled local account rows.
+  expected_behavior: Coverage gaps, duplicate source IDs and email conflicts emit warnings and deployment proceeds. Existing incomplete tables skip automatic import and new imports retain historical profiles. Execution errors stop deployment and are handled by the transaction owner.
+  escaped_stage: unknown
+  coverage_gap:
+    type: no_gap
+    description: The existing deployment case explicitly exercised both failing coverage paths. The assertions now verify the updated contract and preservation of a disabled provider-bound account.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-LOCAL]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AUTH-LOCAL-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - New imports emit contact warnings and return success in apply and preview.
+    - Existing incomplete tables return success without source access or writes.
+    - Duplicate source identities warn and leave their credentials on the source; worker execution errors propagate without explicit error rollback.
+    test_selectors:
+    - test/backend/services/test_auth_migration_automatic.py
+    - test/backend/services/test_auth_migration_container_worker.py
+    reason: UT proves warning output and error propagation. The existing D5 case proves transaction persistence and deployment caller behavior using owned PostgreSQL and Docker resources.
+  notes: SPEC ../nexent-doc/docs/Developing/auth-local-account-migration/design.md. The existing D5 fixture uses isolated databases and labelled Docker resources with cleanup and no shared preparation families.

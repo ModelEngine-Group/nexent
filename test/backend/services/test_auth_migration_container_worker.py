@@ -53,11 +53,13 @@ def test_worker_rechecks_complete_and_fresh_targets_without_accessing_source(wor
 
 
 @pytest.mark.parametrize("failure", [migration.MigrationConflict('Account migration conflict IDs: ["original-id"]'), RuntimeError("source-private hash-value")])
-def test_worker_failure_rolls_back_and_sanitizes_driver_details(worker, capsys, failure):
+def test_worker_failure_exits_and_sanitizes_driver_details(worker, capsys, failure):
     target, _, _, importer = worker
     importer.side_effect = failure
     assert migration.container_main(["--container", "--apply"]) == 1
-    target.rollback.assert_called()
+    target.__exit__.assert_called_once()
+    assert target.__exit__.call_args.args[:2] == (type(failure), failure)
+    target.rollback.assert_not_called()
     target.close.assert_called_once()
     output = capsys.readouterr()
     assert not output.out
@@ -72,7 +74,7 @@ def test_worker_bounds_source_readiness_and_preserves_target(worker, mocker, cap
     mocker.patch.object(migration.time, "monotonic", side_effect=[0, 301])
     assert migration.container_main(["--container", "--apply"]) == 1
     importer.assert_not_called()
-    target.rollback.assert_called()
+    target.rollback.assert_not_called()
     assert "source-private" not in capsys.readouterr().err
 
 
@@ -97,7 +99,7 @@ def test_worker_missing_source_configuration_preserves_target(worker, monkeypatc
     assert migration.container_main(["--container", "--apply"]) == 1
     assert worker[2].call_count == 1
     worker[3].assert_not_called()
-    worker[0].rollback.assert_called()
+    worker[0].rollback.assert_not_called()
     assert "missing" in capsys.readouterr().err
 
 
@@ -121,13 +123,17 @@ def test_worker_failed_source_read_closes_both_connections_and_never_imports(wor
     assert "private row" not in capsys.readouterr().err
 
 
-def test_worker_rejects_preexisting_incomplete_table_without_source_or_writes(worker, capsys):
+def test_worker_warns_about_preexisting_incomplete_table_without_source_or_writes(worker, capsys):
     target, source, connect, importer = worker
     target.cursor.return_value.__enter__.return_value.fetchone.return_value = ({
         "complete": False, "legacy": True, "account_table": True,
         "unresolved_ids": ["historical-user"],
+        "account_warnings": [{"user_id": "historical-user", "user_email": "old@example.com"}],
     },)
-    assert migration.container_main(["--container", "--apply"]) == 1
+    assert migration.container_main(["--container", "--apply"]) == 0
     assert connect.call_count == 1
     importer.assert_not_called()
-    assert "historical-user" in capsys.readouterr().err
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {"skipped": True, "complete": False, "new": False}
+    assert "[warning]" in output.err and "historical-user" in output.err and "old@example.com" in output.err
+    target.rollback.assert_not_called()
