@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-TIMEOUT-RUNTIME-20261127
+  change_type: bugfix
+  bug_id: JIUWEN-TIMEOUT-RUNTIME-20261127
+  title: Restore Jiuwen deployment deadlines in Runtime
+  description: Apply the validated deployment defaults when Runtime constructs an SDK run through AgentOS.
+  observed_behavior: Runtime omits both Jiuwen deadline fields, so the SDK applies 300 seconds even when the deployment sets other values.
+  expected_behavior: Runtime uses the validated deployment values for both deadlines and honors explicit per-run overrides.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: The existing D3 and D5 cases converted deployment settings to SDK kwargs in the fixture, bypassing Runtime's configuration wiring.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-RESOURCES]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [JIUWEN-RESOURCES-D3-002, JIUWEN-RESOURCES-D5-003]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Runtime run construction uses configured values and preserves the 300-second defaults and explicit per-run overrides.
+    - Both deployment settings still reject invalid values at startup.
+    reason: Unit tests prove configuration parsing and precedence. D3 and D5 prove completion, timeout and cleanup through the integrated Runtime and Jiuwen path.
+    test_selectors:
+    - test/backend/consts/test_jiuwen_timeout_config.py
+    - test/sdk/core/agents/test_jiuwen_tool_timeouts.py
+  notes: >-
+    SPEC in nexent-doc at docs/Developing/runtime-agent-core-factory/changes/runtime-jiuwen-timeout-configuration/design.md.
+    RULE-004 and both Case contracts remain applicable. Both Cases route to runtime and use self-contained
+    preparation for loopback model and A2A servers, workspaces, native sessions and managed workers.
+    Their existing teardown and recovery assertions cover owned resources. No additional proof boundary is needed.
