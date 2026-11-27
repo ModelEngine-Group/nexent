@@ -258,16 +258,28 @@ curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh
 | `test/backend/deploy/test_ops_image_whitelist.py` | 新增：Ops 导入图 ↔ 镜像白名单一致性防护（子进程隔离） |
 | `test/backend/management/test_unified_identity_dependency.py`、`test/backend/database/test_token_db.py` | 记账测试的拦截目标随实现迁移到共享模块（断言不变，仍经 management 入口调用，兼证重导出） |
 
-验证：`pytest test/backend/ops/ test/backend/gateway/ test/backend/deploy/ test/backend/management/ test/backend/database/ test/backend/app/ -q`（1111 通过；10 个失败为本机
-存量环境问题，与干净 develop 逐项一致）；`python scripts/generate_exposure_registry.py
---check`；`python scripts/check_copyright.py`。
+验证（合并 develop 至 `1b5667eeb` 后）：
 
-**端到端验证**：本地以本分支代码并行启动网关（:5023）与 Ops（:5026）实例，复用运行
-栈的 PostgreSQL/Redis/Elasticsearch 数据，用栈内真实 API Key（租户 465522b1…）执行
-18 项检查：12 个查询接口（models/skills/agents/mcp-tools 全域）信封响应、租户越界 403、
-未注册路径 404、缺凭据 401、refresh 动作 202→状态查询 200 回路、日期越界 422——全部
-通过（完整链路：伙伴凭据 → 网关注册表/凭据校验/签名身份 → Ops 双挂载/路径感知身份/
-租户锁定 → 真实监控数据）。正式 test-e2e 案例（API-142 起）需 NEXENT_TEST_HOME 与
+- **CI 同款逐文件 runner 完整执行**（`python test/run_all_test.py`，
+  `NEXENT_PYTEST_FILE_TIMEOUT=600`）：1308 个测试文件通过、55 个失败，覆盖率 91.9%。
+  与干净 develop 同款基线运行（1300 通过 / 56 失败，覆盖率 91.8%）对比：53 个失败文件为
+  双方共有的本机环境问题（deploy/k8s 需 docker、trajectory 依赖 POSIX `os.pread`、
+  sdk 工具为 Windows 路径分隔符、若干网络受限项，另 3 个仅基线失败的时间敏感用例）；
+  分支独有的 2 个已处理：`test_api_db_directory_architecture`（模型注册打开 DB 客户端，
+  真问题——`token_usage.py` 的会话工厂改为惰性解析，11/11 通过）与
+  `test_canonical_agent_imports`（本地陈旧字节码目录的命名空间包假象，清理后 34/34）。
+- 自有套件（逐文件隔离执行，同 CI 模型）：接口契约扫描与记账/身份测试 42、
+  网关↔Ops 集成与暴露断言 153、`test_northbound_service` 118（零改动）、
+  `test_unified_identity_dependency` 36（仅拦截目标随实现迁移）、`test_token_db` 28、
+  `test_audit_service` 16——全部通过。
+- `python scripts/generate_exposure_registry.py --check`（快照新鲜，643 行）；
+  `python scripts/check_copyright.py` 全过。
+- **端到端验证**（最终合并代码）：本地以本分支代码并行启动网关（:5023）与 Ops（:5026）
+  实例，复用运行栈的 PostgreSQL/Redis/Elasticsearch 数据，用栈内真实 API Key 执行
+  24 项检查：18 个查询接口（models/skills/agents/mcp-tools 全域）信封响应、租户越界 403、
+  未注册路径 404、缺凭据 401、refresh 动作 202→状态查询 200 回路、日期越界 422——全部
+  通过（完整链路：伙伴凭据 → 网关注册表/凭据校验/签名身份 → Ops 双挂载/网关签名身份
+  读取/租户锁定 → 真实监控数据）。正式 test-e2e 案例（API-142 起）需 NEXENT_TEST_HOME 与
 northbound.yaml 测试资产，本机缺失，故以本地双实例 e2e 为等价证据。
 
 ## 7. 已知权衡（显式选型）

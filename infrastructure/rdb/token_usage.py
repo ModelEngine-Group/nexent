@@ -15,7 +15,20 @@ from sqlalchemy import Column, Index, Integer, Sequence, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from infrastructure.rdb.base import SCHEMA, TableBase
-from infrastructure.rdb.client import get_db_session
+
+# Resolved lazily on first write: importing the model registry must not open
+# the shared database client (pinned by test_api_db_directory_architecture),
+# while the module-level name stays patchable for tests.
+get_db_session = None
+
+
+def _resolve_session_factory():
+    global get_db_session
+    if get_db_session is None:
+        from infrastructure.rdb.client import get_db_session as factory
+
+        get_db_session = factory
+    return get_db_session
 
 
 class UserTokenUsageLog(TableBase):
@@ -65,7 +78,7 @@ def log_token_usage(
     Returns:
         The created token_usage_id.
     """
-    with get_db_session() as session:
+    with _resolve_session_factory()() as session:
         usage_log = UserTokenUsageLog(
             token_id=token_id,
             call_function_name=call_function_name,
