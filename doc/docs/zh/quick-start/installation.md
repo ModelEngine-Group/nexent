@@ -1,6 +1,8 @@
 # 基于 Docker 安装部署
 
-## 🎯 系统要求
+## 环境准备
+
+### 🎯 系统要求
 
 | 资源 | 最低要求 | 推荐配置 |
 |----------|---------|-------------|
@@ -11,6 +13,22 @@
 | **软件** | Docker Engine 18.09+、Docker Compose v2 | 使用仍受维护的 Docker Engine 和 Compose v2 |
 
 > **💡 注意**：推荐配置适合启用完整应用、数据处理和 Docker 沙箱的环境。模型服务通常独立部署，不计入上表资源。
+
+### 安装 Docker 和 Compose
+
+| 部署主机 | 安装方法 |
+| --- | --- |
+| Linux 服务器 | 按发行版的官方步骤配置软件仓库，安装 Docker Engine、命令行工具和 Compose 插件，然后启动 Docker 服务。已有 Engine 的主机可单独补装 Compose 插件。[安装 Docker Engine](https://docs.docker.com/engine/install/) · [安装 Compose 插件](https://docs.docker.com/compose/install/linux/) |
+| macOS 或 Windows 开发机 | 安装并启动 Docker Desktop，它自带 Docker Engine 和 Compose。Windows 上使用 Linux 容器，并在可运行 Bash 的终端执行后续部署命令。[在 macOS 上安装 Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) · [在 Windows 上安装 Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) |
+
+用准备执行部署的账号，在同一终端运行以下命令。已有 Docker 环境可以直接从这里开始检查。
+
+```bash
+docker version
+docker compose version
+```
+
+`docker version` 应同时显示 `Client` 和 `Server` 信息，第二条命令应输出 Compose 版本。如果只看到客户端信息并提示连接失败，先确认 Docker 服务或 Docker Desktop 已启动，并检查当前账号能否访问 Docker。检查通过后，在线和离线部署均可继续。
 
 ## 🚀 快速开始
 

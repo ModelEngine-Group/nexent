@@ -1,6 +1,8 @@
 # Kubernetes 安装部署
 
-## 🎯 系统要求
+## 环境准备
+
+### 🎯 系统要求
 
 | 资源 | 最低要求 | 推荐配置 |
 |----------|---------|-------------|
@@ -12,6 +14,28 @@
 
 > **💡 注意**：推荐配置适合完整部署。实际资源需求还取决于副本数、知识库规模和并发智能体数量，生产环境应根据压测结果设置 requests 与 limits。
 
+### 准备 Kubernetes 集群
+
+- **已有集群**：向集群管理员或云服务商获取可用于部署 Nexent 的 kubeconfig，在部署机上配置集群访问。
+- **本机单节点试用**：按操作系统选择驱动，安装 minikube 并启动集群。创建虚拟节点时，为节点分配满足上表要求的 CPU、内存和磁盘。[minikube 官方入门指南](https://minikube.sigs.k8s.io/docs/start/)
+- **自建 Linux 集群**：在节点上准备支持 CRI 的容器运行时（如 containerd），安装 kubeadm 和 kubelet。随后初始化控制平面、安装 Pod 网络插件，并按需加入工作节点。[安装 kubeadm](https://kubernetes.io/zh-cn/docs/setup/production-environment/tools/kubeadm/install-kubeadm/) · [使用 kubeadm 创建集群](https://kubernetes.io/zh-cn/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/)
+
+### 安装管理工具并验证环境
+
+在运行 Nexent 部署脚本的机器上准备 Bash 4 或更高版本，并安装与集群版本兼容的 kubectl 和 Helm。kubectl 用于访问集群，Helm 用于安装 Nexent 的 Chart。[Kubernetes 官方工具安装指南](https://kubernetes.io/zh-cn/docs/tasks/tools/) · [Helm 官方安装指南](https://helm.sh/zh/docs/intro/install/)
+
+```bash
+bash --version
+kubectl version --client
+helm version --short
+kubectl config current-context
+kubectl cluster-info
+kubectl get nodes
+kubectl get storageclass
+```
+
+确认当前上下文是目标集群，API Server 可访问，部署所用节点的状态为 `Ready`。全新安装默认通过集群的默认 StorageClass 动态创建持久卷，共享存储需要支持 `ReadWriteMany`（RWX）。如果集群没有合适的默认类，可通过 `--storage-class <存储类名称>` 指定。单节点测试可使用 `--persistence-mode local`。其他存储选项见[数据持久化](#数据持久化)。
+
 ## 🚀 快速开始
 
 - [在线部署](#在线部署)
@@ -19,17 +43,7 @@
 
 ### 在线部署
 
-#### 1. 准备 Kubernetes 集群
-
-在部署机上确认集群、节点和存储类。全新安装默认由 Kubernetes 的默认 StorageClass 动态创建持久卷，部署使用的存储类需要支持 `ReadWriteMany`（RWX）。如果集群没有合适的默认类，可在部署命令后添加 `--storage-class <存储类名称>`。单节点测试和使用现有 PVC 的方法见[数据持久化](#数据持久化)。
-
-```bash
-kubectl cluster-info
-kubectl get nodes
-kubectl get storageclass
-```
-
-#### 2. 克隆并进入目录
+#### 1. 克隆并进入目录
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
@@ -38,7 +52,7 @@ cd nexent
 
 首次安装到多节点集群时，先选择支持跨节点读写的存储。如果使用默认启用的本地轨迹采集，可将 `deploy/env/.env.example` 复制为新的 `deploy/env/.env`，在首次启动前设置 `TRAJECTORY_STORAGE_MODE=shared_directory`。存储要求和三副本安装命令见[部署多个 Runtime 副本](#部署多个-runtime-副本)。
 
-#### 3. 部署
+#### 2. 部署
 
 运行部署脚本：
 

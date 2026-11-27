@@ -1,6 +1,8 @@
 # Docker Installation & Deployment
 
-## 🎯 Prerequisites
+## Environment Setup
+
+### 🎯 Prerequisites
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
@@ -11,6 +13,22 @@
 | **Software** | Docker Engine 18.09+ and Docker Compose v2 | A maintained Docker Engine release and Docker Compose v2 |
 
 > **💡 Note**: The recommended configuration is suitable for environments that enable the complete application, data processing, and Docker sandboxes. Model services are usually deployed separately and are not included in the resource requirements above.
+
+### Install Docker and Compose
+
+| Deployment host | Installation steps |
+| --- | --- |
+| Linux server | Follow the official instructions for your distribution to configure the package repository, install Docker Engine, the CLI, and the Compose plugin, then start the Docker service. If Engine is already installed, you can add the Compose plugin separately. [Install Docker Engine](https://docs.docker.com/engine/install/) · [Install the Compose plugin](https://docs.docker.com/compose/install/linux/) |
+| macOS or Windows development machine | Install and start Docker Desktop, which includes Docker Engine and Compose. On Windows, use Linux containers and run the deployment commands in a terminal with Bash. [Install Docker Desktop on macOS](https://docs.docker.com/desktop/setup/install/mac-install/) · [Install Docker Desktop on Windows](https://docs.docker.com/desktop/setup/install/windows-install/) |
+
+Run these commands in the terminal and account you will use for deployment. If Docker is already installed, start here.
+
+```bash
+docker version
+docker compose version
+```
+
+`docker version` should show both the `Client` and `Server` sections, and the second command should print the Compose version. If you see only client details and a connection error, check that the Docker service or Docker Desktop is running and that your account can access it. Once both checks pass, continue with either online or offline deployment.
 
 ## 🚀 Quick Start
 

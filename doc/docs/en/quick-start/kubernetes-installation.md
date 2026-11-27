@@ -1,6 +1,8 @@
 # Kubernetes Installation & Deployment
 
-## 🎯 Prerequisites
+## Environment Setup
+
+### 🎯 Prerequisites
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
@@ -12,6 +14,28 @@
 
 > **💡 Note**: The recommended configuration is suitable for a complete deployment. Actual resource requirements also depend on the replica count, knowledge-base size, and number of concurrent agents. Set requests and limits in production according to load-test results.
 
+### Prepare a Kubernetes cluster
+
+- **Existing cluster.** Get a kubeconfig with the permissions needed to deploy Nexent from your cluster administrator or cloud provider. Configure it on the deployment host.
+- **Local single-node trial.** Choose a driver for your operating system, install minikube, and start a cluster. If the node runs in a VM, allocate the CPU, memory, and disk space listed above. [Official minikube getting started guide](https://minikube.sigs.k8s.io/docs/start/)
+- **Self-managed Linux cluster.** Prepare a CRI-compatible container runtime such as containerd on each node and install kubeadm and kubelet. Initialize the control plane, install a Pod network plugin, and join worker nodes as needed. [Install kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/) · [Create a cluster with kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/)
+
+### Install management tools and verify the environment
+
+On the host where you will run the Nexent deployment script, use Bash 4 or later and install versions of kubectl and Helm compatible with your cluster. Use kubectl to access the cluster and Helm to install the Nexent charts. [Official Kubernetes tools installation guide](https://kubernetes.io/docs/tasks/tools/) · [Official Helm installation guide](https://helm.sh/docs/intro/install/)
+
+```bash
+bash --version
+kubectl version --client
+helm version --short
+kubectl config current-context
+kubectl cluster-info
+kubectl get nodes
+kubectl get storageclass
+```
+
+Confirm that the current context points to the intended cluster, the API server is reachable, and the nodes that will run Nexent report `Ready`. A fresh installation dynamically provisions volumes through the cluster's default StorageClass. Shared storage needs `ReadWriteMany` (RWX) access. If the cluster has no suitable default, pass `--storage-class <storage-class-name>`. For a single-node test, you can use `--persistence-mode local`. See [Data Persistence](#data-persistence) for other storage options.
+
 ## 🚀 Quick Start
 
 - [Online Deployment](#online-deployment)
@@ -19,17 +43,7 @@
 
 ### Online Deployment
 
-#### 1. Prepare Kubernetes Cluster
-
-On the deployment host, check the cluster, nodes, and storage classes. For a fresh installation, Kubernetes dynamically provisions persistent volumes through the cluster's default StorageClass. Shared storage needs `ReadWriteMany` (RWX) access. If there is no suitable default, pass `--storage-class <storage-class-name>` to the deployment command. For single-node testing or pre-created persistent volume claims (PVCs), see [Data Persistence](#data-persistence).
-
-```bash
-kubectl cluster-info
-kubectl get nodes
-kubectl get storageclass
-```
-
-#### 2. Clone and Navigate
+#### 1. Clone and Navigate
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
@@ -38,7 +52,7 @@ cd nexent
 
 For a new multi-node cluster, choose storage that supports reads and writes from different nodes. Local trace capture is enabled by default. To use it across nodes, copy `deploy/env/.env.example` to a new `deploy/env/.env` and set `TRAJECTORY_STORAGE_MODE=shared_directory` before the first startup. For storage requirements and a three-replica installation, see [Deploy Multiple Runtime Replicas](#deploy-multiple-runtime-replicas).
 
-#### 3. Deployment
+#### 2. Deployment
 
 Run the deployment script:
 
