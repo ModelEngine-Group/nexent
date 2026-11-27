@@ -1,9 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { TFunction } from "i18next";
 
 import { ApiError } from "@/services/api";
 
 const AUTOMATION_ERROR_KEYS: Record<string, string> = {
   AUTOMATION_ERROR: "agentAutomation.errors.generic",
+  AUTOMATION_MODEL_UNAVAILABLE: "agentAutomation.errors.modelUnavailable",
   AUTOMATION_CAPABILITY_NOT_READY: "agentAutomation.errors.capabilityNotReady",
   AUTOMATION_CAPABILITY_UNAVAILABLE:
     "agentAutomation.errors.capabilityUnavailable",
@@ -15,14 +18,21 @@ const AUTOMATION_ERROR_KEYS: Record<string, string> = {
     "agentAutomation.errors.conversationAlreadyBound",
 };
 
+export function translateAutomationErrorCode(
+  code: string | number | null | undefined,
+  t: (key: string) => string
+): string | undefined {
+  const key = AUTOMATION_ERROR_KEYS[String(code)];
+  return key ? t(key) : undefined;
+}
+
 export function getAutomationErrorMessage(
   error: unknown,
   t: TFunction,
   fallbackKey: string
 ): string {
   if (error instanceof ApiError) {
-    const translationKey = AUTOMATION_ERROR_KEYS[String(error.code)];
-    if (translationKey) return t(translationKey);
+    return translateAutomationErrorCode(error.code, t) ?? t(fallbackKey);
   }
   return t(fallbackKey);
 }

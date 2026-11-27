@@ -36,6 +36,14 @@ class AgentAutomationProposal(TableBase):
             postgresql_where=text("delete_flag = 'N'"),
         ),
         Index(
+            "idx_agent_automation_proposal_conversation",
+            "tenant_id",
+            "user_id",
+            "conversation_id",
+            text("proposal_id DESC"),
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
             "uq_agent_automation_proposal_source_message",
             "tenant_id",
             "user_id",
@@ -56,4 +64,5 @@ class AgentAutomationProposal(TableBase):
     proposed_task = Column(JSONB, nullable=False, doc="Proposed automation task payload")
     capability_resolution = Column(JSONB, nullable=False, doc="Capability matching result")
     status = Column(String(32), nullable=False, doc="PENDING, ACCEPTED, REJECTED, or EXPIRED")
+    confirmed_task_id = Column(BigInteger, nullable=True, doc="Task created when this proposal was accepted")
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False, doc="Proposal expiry time")

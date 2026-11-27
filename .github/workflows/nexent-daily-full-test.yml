@@ -3,9 +3,9 @@ name: Nexent Daily Full Test
 on:
   # Product merges do not trigger Daily; manual execution remains available.
   workflow_dispatch:
-  # UTC 16:02 = Beijing 00:02 the following day.
+  # UTC 15:00 = Beijing 23:00.
   schedule:
-    - cron: "2 16 * * *"
+    - cron: "0 15 * * *"
 
 permissions:
   contents: read

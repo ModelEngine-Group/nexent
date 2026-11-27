@@ -211,6 +211,12 @@ append_one_migration_sql() {
   source_file_escaped="$(escape_sql_literal "$source_file")"
   app_version_escaped="$(escape_sql_literal "$APP_VERSION_VALUE")"
 
+  if [ "${NEXENT_SQL_MIGRATION_TIMING:-false}" = "true" ]; then
+    cat >> "$MIGRATION_PLAN_FILE" <<SQL
+SELECT clock_timestamp() AS migration_file_started \gset
+SQL
+  fi
+
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
 \echo [sql-migrations] check $migration_id
 -- Refresh cascade flag from the prior file's stored value, then decide whether
@@ -256,6 +262,12 @@ END AS migration_skip_eligible \gset
   SELECT 'true' AS migration_force_rerun \gset
 \endif
 SQL
+  if [ "${NEXENT_SQL_MIGRATION_TIMING:-false}" = "true" ]; then
+    cat >> "$MIGRATION_PLAN_FILE" <<SQL
+SELECT round(1000 * extract(epoch FROM clock_timestamp() - :'migration_file_started'::timestamptz)) AS migration_elapsed_ms \gset
+\echo [sql-migrations] timing $migration_id :migration_elapsed_ms
+SQL
+  fi
 }
 
 append_all_migrations_sql() {

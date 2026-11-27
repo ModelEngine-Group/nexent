@@ -81,6 +81,7 @@ MIGRATED_MODULES = {
     'automation/agent_identity.py',
     'automation/agentos_callback.py',
     'automation/capabilities.py',
+    'automation/confirmation.py',
     'automation/conversation.py',
     'automation/intent.py',
     'automation/intent_parser.py',

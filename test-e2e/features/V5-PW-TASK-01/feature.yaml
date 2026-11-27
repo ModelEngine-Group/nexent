@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: V5-PW-TASK-01-RULE-01
     description: Agent Tasks→Create in Chat→提案→Run/History/Edit/Pause/Resume/Delete
+  - rule_id: V5-PW-TASK-01-RULE-02
+    description: An affirmative reply to the immediately preceding invitation creates its uniquely pending proposal. Other topics and ambiguous drafts cannot trigger creation. An explicit retry returns the persisted task ID.
   required_test_stages:
   - D4
   source:

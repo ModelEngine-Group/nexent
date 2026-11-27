@@ -6,37 +6,80 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, func, insert, select, text, update
 
+from contracts.automation import AutomationProposalStatus
+from infrastructure.rdb.conversation_record import ConversationRecord
+from contracts.errors.exceptions import AutomationNotFoundError
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentAutomationProposal, AgentAutomationRun, AgentAutomationTask
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
 
 
+WORKBENCH_EXECUTION_KEY = "_workbench_execution"
+
+
+def workbench_execution_config(
+    runtime_snapshot: dict | None, conversation_config: dict | None, conversation_version: int | None,
+) -> dict | None:
+    """Prefer the confirmed configuration; older tasks use the owned conversation."""
+    saved = (runtime_snapshot or {}).get(WORKBENCH_EXECUTION_KEY)
+    if saved is not None:
+        return saved
+    if conversation_config is None:
+        return None
+    return {"config": conversation_config, "version": conversation_version}
+
+
+def read_running_workbench_execution(
+    session, run_id: str, conversation_id: int, agent_id: int, user_id: str, tenant_id: str,
+) -> dict | None:
+    """Find the configuration of a scoped automation with a prepared projection."""
+    run, task, conversation = AgentAutomationRun, AgentAutomationTask, ConversationRecord
+    row = session.execute(select(
+        task.runtime_snapshot, conversation.workbench_config, conversation.workbench_config_version,
+    ).select_from(run).join(task, task.task_id == run.task_id).join(
+        conversation, conversation.conversation_id == run.conversation_id,
+    ).where(
+        run.runtime_run_id == run_id, run.conversation_id == conversation_id,
+        run.tenant_id == tenant_id, run.user_id == user_id, run.delete_flag == "N",
+        run.status == "RUNNING", run.projection_message_index.is_not(None),
+        run.user_message_id.is_not(None),
+        task.conversation_id == conversation_id, task.agent_id == agent_id,
+        task.tenant_id == tenant_id, task.user_id == user_id, task.delete_flag == "N",
+        conversation.created_by == user_id, conversation.delete_flag == "N",
+        conversation.workbench_config.is_not(None),
+    )).one_or_none()
+    return workbench_execution_config(*row) if row is not None else None
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def create_task(task_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+def create_task(task_data: Dict[str, Any], user_id: str, db_session=None) -> Dict[str, Any]:
     data = {
         **task_data,
         "delete_flag": "N",
     }
     data = add_creation_tracking(data, user_id)
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         stmt = insert(AgentAutomationTask).values(**data).returning(AgentAutomationTask)
         task = session.execute(stmt).scalar_one()
         return as_dict(task)
 
 
-def get_task(task_id: int, tenant_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-    with get_db_session() as session:
+def _owned_tasks(tenant_id: str, user_id: str):
+    return select(AgentAutomationTask).where(
+        AgentAutomationTask.tenant_id == tenant_id,
+        AgentAutomationTask.user_id == user_id,
+        AgentAutomationTask.delete_flag == "N",
+    )
+
+
+def get_task(task_id: int, tenant_id: str, user_id: str, db_session=None) -> Optional[Dict[str, Any]]:
+    with get_db_session(db_session) as session:
         task = session.execute(
-            select(AgentAutomationTask).where(
-                AgentAutomationTask.task_id == task_id,
-                AgentAutomationTask.tenant_id == tenant_id,
-                AgentAutomationTask.user_id == user_id,
-                AgentAutomationTask.delete_flag == "N",
-            )
+            _owned_tasks(tenant_id, user_id).where(AgentAutomationTask.task_id == task_id)
         ).scalar_one_or_none()
         return as_dict(task) if task else None
 
@@ -264,6 +307,58 @@ def get_proposal(proposal_id: int, tenant_id: str, user_id: str) -> Optional[Dic
         return as_dict(proposal) if proposal else None
 
 
+def list_confirmation_proposals(conversation_id: int, tenant_id: str, user_id: str) -> list[dict]:
+    proposal = AgentAutomationProposal
+    live_receipt = _owned_tasks(tenant_id, user_id).with_only_columns(AgentAutomationTask.task_id).where(
+        AgentAutomationTask.task_id == proposal.confirmed_task_id,
+        AgentAutomationTask.conversation_id == proposal.conversation_id,
+    ).exists()
+    statement = select(proposal.proposal_id, proposal.status, proposal.expires_at, proposal.confirmed_task_id).where(
+        proposal.conversation_id == conversation_id,
+        proposal.tenant_id == tenant_id,
+        proposal.user_id == user_id,
+        proposal.delete_flag == "N",
+        proposal.status.in_([AutomationProposalStatus.PENDING, AutomationProposalStatus.EXPIRED])
+        | ((proposal.status == AutomationProposalStatus.ACCEPTED) & live_receipt),
+    ).order_by(proposal.proposal_id.desc())
+    with get_db_session() as session:
+        return [dict(row) for row in session.execute(statement).mappings()]
+
+
+def create_task_from_proposal(task_data: dict, expected_proposal: dict, user_id: str) -> dict:
+    """Serialize confirmation and commit its task and receipt together."""
+    tenant_id = task_data["tenant_id"]
+    proposal = AgentAutomationProposal
+    with get_db_session() as session:
+        row = session.scalar(select(proposal).where(
+            proposal.proposal_id == expected_proposal["proposal_id"],
+            proposal.conversation_id == task_data["conversation_id"],
+            proposal.tenant_id == tenant_id,
+            proposal.user_id == user_id,
+            proposal.delete_flag == "N",
+        ).with_for_update())
+        if row is not None and row.status == AutomationProposalStatus.ACCEPTED and row.confirmed_task_id:
+            task = get_task(row.confirmed_task_id, tenant_id, user_id, db_session=session)
+            if task is not None:
+                return task
+        if row is None or row.status != AutomationProposalStatus.PENDING or row.expires_at <= _utcnow():
+            raise AutomationNotFoundError("Automation proposal does not exist or is no longer pending.")
+        # Card projection can link the private message IDs while confirmation is preparing.
+        if any(
+            row.proposed_task.get(key) != expected_proposal["proposed_task"].get(key)
+            for key in row.proposed_task.keys() | expected_proposal["proposed_task"].keys()
+            if not key.startswith("_")
+        ):
+            raise AutomationNotFoundError("Automation proposal changed. Review the current draft and confirm again.")
+
+        task = create_task(task_data, user_id, db_session=session)
+        row.status = AutomationProposalStatus.ACCEPTED.value
+        row.confirmed_task_id = task["task_id"]
+        row.update_time = _utcnow()
+        row.updated_by = user_id
+        return task
+
+
 def get_proposal_by_source_message(
     source_message_id: int,
     tenant_id: str,
@@ -289,6 +384,7 @@ def update_proposal_status(proposal_id: int, tenant_id: str, user_id: str, statu
                 AgentAutomationProposal.proposal_id == proposal_id,
                 AgentAutomationProposal.tenant_id == tenant_id,
                 AgentAutomationProposal.user_id == user_id,
+                AgentAutomationProposal.status == AutomationProposalStatus.PENDING,
                 AgentAutomationProposal.delete_flag == "N",
             )
             .values(status=status, update_time=_utcnow(), updated_by=user_id)
@@ -354,6 +450,7 @@ def update_proposal(
     user_id: str,
     proposed_task: Dict[str, Any],
     capability_resolution: Dict[str, Any],
+    expected_status: str,
 ) -> bool:
     with get_db_session() as session:
         result = session.execute(
@@ -362,7 +459,7 @@ def update_proposal(
                 AgentAutomationProposal.proposal_id == proposal_id,
                 AgentAutomationProposal.tenant_id == tenant_id,
                 AgentAutomationProposal.user_id == user_id,
-                AgentAutomationProposal.status.in_(["PENDING", "ACCEPTED"]),
+                AgentAutomationProposal.status == expected_status,
                 AgentAutomationProposal.delete_flag == "N",
             )
             .values(

@@ -18,6 +18,12 @@ instead of `--generate`; it never rewrites repository assets or silently shrinks
 - Missing traditional UT references and stale derived reading views are metadata
   warnings, not proof that formal Cases cannot run. Authoritative assets still pass
   all other validation. Daily never claims UT execution from reference validation.
+- `UT_SELECTORS_MISSING` on a Change with absent or empty `test_selectors` is an
+  advisory Daily warning. The Change ID stays in the validation receipt, and
+  coverage integrity remains incomplete while eligible Cases execute. This
+  finding alone does not fail the batch. Strict implementation validation still
+  rejects the missing selectors, including for a Change selected with
+  `--require-ut-change`.
 - `FEATURE_RESPONSIBILITY_UNRESOLVED` and known-Case
   `CASE_RESPONSIBILITY_UNRESOLVED` are metadata warnings for missing or ambiguous
   routing. Workers still execute, including the unassigned Cases; preserve their
@@ -56,6 +62,13 @@ rules as targeted runs. D0 still saves the full inventory; blocked Case receipts
 name the unavailable fixture. Strict operator `static_assets.py apply` still rejects
 unready inputs. Malformed catalogs, unsafe paths/symlinks, damaged shared provision
 state and failed integrity checks remain batch errors, not Case skips.
+
+For newly recorded `BLOCKED` and `BLOCKED_BY_DEPENDENCY` results, the suite saves
+`cases/<Case-ID>/block-diagnostic.json` before publishing the result. It records
+the decision phase, worker start state, plan eligibility, reason and related
+batch-relative artifacts. A planning decision may be the only evidence for a
+Case that never started. Dashboard summaries reconstructed for older batches
+are derived from existing records and are not runner receipts.
 
 The parent validates the full registry; each worker inspects only its requested Case.
 Source/configuration fingerprints remain checked before every Case and finalization.

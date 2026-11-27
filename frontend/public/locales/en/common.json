@@ -4148,6 +4148,7 @@
   "agentAutomation.triggerType.MANUAL": "Manual",
   "agentAutomation.triggerType.SCHEDULED": "Scheduled",
   "agentAutomation.errors.generic": "Automation task operation failed",
+  "agentAutomation.errors.modelUnavailable": "No usable model is selected in the source conversation. Select a model and try again.",
   "agentAutomation.errors.capabilityNotReady": "The agent is missing capabilities required by this task. Configure them first.",
   "agentAutomation.errors.capabilityUnavailable": "A capability required by this task is unavailable. Check the agent configuration.",
   "agentAutomation.errors.capabilityBindingInvalid": "The task capability binding is invalid. Reconfigure it and try again.",
