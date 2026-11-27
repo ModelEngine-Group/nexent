@@ -76,6 +76,27 @@ function cookiesFor(session) {
   return Array.from(headers);
 }
 
+test("a session without a refresh cookie receives 204 without forwarding a credential", () => {
+  let status;
+  let ended = false;
+  const body = context.refreshBody(
+    "/api/user/refresh_token",
+    Buffer.alloc(0),
+    {},
+    {
+      writeHead: (value) => {
+        status = value;
+      },
+      end: () => {
+        ended = true;
+      },
+    }
+  );
+  assert.equal(body, null);
+  assert.equal(status, 204);
+  assert.equal(ended, true);
+});
+
 test("native login clears a stale refresh cookie and keeps JWT HttpOnly", () => {
   const headers = cookiesFor({
     access_token: "native-jwt",
@@ -127,9 +148,8 @@ test("renewal keeps the refresh secret HttpOnly and uses remaining server-side l
   );
   assert.match(refresh, /Max-Age=800/);
   assert.match(refresh, /HttpOnly/);
-  const marker = headers.find((value) =>
-    value.startsWith("nexent_can_refresh=")
+  assert.equal(
+    headers.some((value) => value.startsWith("nexent_can_refresh=")),
+    false
   );
-  assert.match(marker, /^nexent_can_refresh=1;/);
-  assert.doesNotMatch(marker, /local-refresh|HttpOnly/);
 });

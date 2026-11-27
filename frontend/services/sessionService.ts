@@ -1,6 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import {
-  canRefreshLocalSession,
   checkSessionValid,
   getTokenExpiresAt,
   handleSessionExpired,
@@ -18,11 +17,17 @@ export function withLocalSessionLock<T>(
 
 let pendingAttempt: { expiresAt: number; id: string } | undefined;
 let inFlight: Promise<Session | null> | undefined;
+let unavailableExpiry: number | undefined;
 
 async function refresh(): Promise<Session | null> {
   const expiresAt = getTokenExpiresAt();
-  if (expiresAt === null || !checkSessionValid() || !canRefreshLocalSession())
+  if (
+    expiresAt === null ||
+    !checkSessionValid() ||
+    expiresAt === unavailableExpiry
+  ) {
     return null;
+  }
 
   const attempt =
     pendingAttempt?.expiresAt === expiresAt
@@ -39,11 +44,12 @@ async function refresh(): Promise<Session | null> {
     method: "POST",
     headers: { "X-Refresh-Request-Id": attempt.id },
   });
-  if (
-    response.status === 401 &&
-    getTokenExpiresAt() === expiresAt &&
-    canRefreshLocalSession()
-  ) {
+  if (response.status === 204) {
+    unavailableExpiry = expiresAt;
+    pendingAttempt = undefined;
+    return null;
+  }
+  if (response.status === 401 && getTokenExpiresAt() === expiresAt) {
     pendingAttempt = undefined;
     handleSessionExpired();
   }

@@ -50,9 +50,6 @@ export const getTokenExpiresAt = (): number | null => {
 /**
  * Check if an authenticated session exists (cookie-based)
  */
-export const canRefreshLocalSession = (): boolean =>
-  getCookieValue(COOKIE_NAMES.CAN_REFRESH) === "1";
-
 export const hasAuthCookies = (): boolean => {
   return getTokenExpiresAt() !== null;
 };
@@ -118,7 +115,6 @@ export const saveSessionToStorage = (session: Session): void => {
  */
 export const removeSessionFromStorage = (): void => {
   clearCookie(COOKIE_NAMES.EXPIRES_AT);
-  clearCookie(COOKIE_NAMES.CAN_REFRESH);
   removeUserFromStorage();
 };
 

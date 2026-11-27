@@ -162,7 +162,6 @@ const proxy = createProxyServer({
 const COOKIE_NAMES = {
   ACCESS_TOKEN: "nexent_access_token",
   REFRESH_TOKEN: "nexent_refresh_token",
-  CAN_REFRESH: "nexent_can_refresh",
   EXPIRES_AT: "nexent_token_expires_at",
   OAUTH_PENDING: "nexent_oauth_pending",
 };
@@ -209,10 +208,6 @@ function setAuthCookies(res, session) {
     cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, canRefresh ? session.refresh_token : "", {
       ...buildCookieOptions(true),
       maxAge: canRefresh ? refreshTokenMaxAge : 0,
-    }),
-    cookie.serialize(COOKIE_NAMES.CAN_REFRESH, canRefresh ? "1" : "", {
-      ...buildCookieOptions(false),
-      maxAge: canRefresh ? refreshTokenMaxAge : 0,
     })
   );
 
@@ -242,7 +237,7 @@ function clearAuthCookies(res) {
       httpOnly: true,
     }),
     cookie.serialize(COOKIE_NAMES.EXPIRES_AT, "", expired),
-    cookie.serialize(COOKIE_NAMES.CAN_REFRESH, "", expired),
+    cookie.serialize("nexent_can_refresh", "", expired),
     cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
       ...expired,
       httpOnly: true,
@@ -373,14 +368,14 @@ function collectRequestBody(req) {
 /**
  * For the refresh_token endpoint, inject the refresh_token from cookie
  * into the request body so the backend can process it normally.
- * If no refresh_token cookie exists, return 401 immediately.
+ * Sessions without a refresh cookie do not support automatic renewal.
  */
 function prepareAuthRequestBody(pathname, body, cookies, res) {
   if (pathname === "/api/user/refresh_token") {
     const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
     if (!refreshToken) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
+      res.writeHead(204);
+      res.end();
       return null;
     }
     return Buffer.from(JSON.stringify({ refresh_token: refreshToken }));
@@ -414,6 +409,15 @@ function forwardAuthRequest(req, res, targetUrl) {
       res.end();
       return;
     }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(cookies, "nexent_can_refresh")) {
+    appendSetCookies(res, [
+      cookie.serialize("nexent_can_refresh", "", {
+        ...buildCookieOptions(false),
+        maxAge: 0,
+      }),
+    ]);
   }
 
   collectRequestBody(req)

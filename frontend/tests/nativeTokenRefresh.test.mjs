@@ -25,7 +25,7 @@ function loadTypescript(relativePath, context) {
 }
 
 function loadRefreshService({
-  canRefresh = true,
+  expiresAt = () => 1234,
   valid = true,
   fetch,
   onExpiry = () => {},
@@ -41,24 +41,38 @@ function loadRefreshService({
             },
           }
         : {
-            canRefreshLocalSession: () => canRefresh,
             checkSessionValid: () => valid,
-            getTokenExpiresAt: () => 1234,
+            getTokenExpiresAt: expiresAt,
             handleSessionExpired: onExpiry,
           },
   }).sessionService;
 }
 
-test("expired and legacy sessions make no renewal request", async () => {
+test("expired sessions make no renewal request", async () => {
   const fetch = () => assert.fail("unexpected renewal");
-  assert.equal(
-    await loadRefreshService({ fetch, canRefresh: false }).refreshToken(),
-    null
-  );
   assert.equal(
     await loadRefreshService({ fetch, valid: false }).refreshToken(),
     null
   );
+});
+
+test("a 204 skips further requests for the same expiry without logging out", async () => {
+  let requests = 0;
+  let expiration = 1234;
+  const service = loadRefreshService({
+    expiresAt: () => expiration,
+    fetch: async () => {
+      requests += 1;
+      return { ok: true, status: 204 };
+    },
+    onExpiry: () => assert.fail("unexpected logout"),
+  });
+  assert.equal(await service.refreshToken(), null);
+  assert.equal(await service.refreshToken(), null);
+  assert.equal(requests, 1);
+  expiration = 5678;
+  assert.equal(await service.refreshToken(), null);
+  assert.equal(requests, 2);
 });
 
 test("retry preserves the request ID and simultaneous calls share a request", async () => {
@@ -138,7 +152,6 @@ test("foreground activity starts renewal only inside the 30 minute window", asyn
     },
     "@/lib/session": {
       getTokenExpiresAt: () => expiresAt,
-      canRefreshLocalSession: () => true,
       checkSessionValid: () => expiresAt * 1_000 > now,
     },
     "@/lib/casHeartbeat": { getHeartbeatIntervalMs: () => 300_000 },

@@ -12,7 +12,6 @@ import {
 import { authFlowState } from "@/lib/authFlow";
 import {
   getTokenExpiresAt,
-  canRefreshLocalSession,
   hasAuthCookies,
   checkSessionValid,
   handleSessionExpired,
@@ -51,7 +50,6 @@ export const refreshSession = async (): Promise<boolean> => {
     if (
       authFlowState.isExplicitLogoutInProgress() ||
       document.hidden ||
-      !canRefreshLocalSession() ||
       !isSessionExpiringSoon() ||
       getTokenExpiresAt() !== expiresAt
     )
@@ -279,7 +277,6 @@ export function useSessionManager(user?: User | null) {
           !["click", "keydown", "touchstart"].includes(event.type) ||
           !event.isTrusted ||
           localRefreshInFlight ||
-          !canRefreshLocalSession() ||
           !isSessionExpiringSoon() ||
           now - lastLocalRefreshAttempt < MIN_ACTIVITY_CHECK_INTERVAL_MS
         )
