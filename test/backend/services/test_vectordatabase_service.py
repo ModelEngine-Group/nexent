@@ -1575,13 +1575,13 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
         # Assert
-        self.assertEqual(len(result["indices"]), 1)
-        self.assertEqual(result["count"], 1)
+        self.assertEqual(len(result["indices"]), 2)
+        self.assertEqual(result["count"], 2)
 
         # When include_stats=False, indices is just a list of names
         # When include_stats=True, indices_info contains the detailed info with permissions
         self.assertIn("index1", result["indices"])
-        self.assertNotIn("index2", result["indices"])
+        self.assertIn("index2", result["indices"])
 
         # The array is authoritative: adding OPS preserves DEV's group edit grant.
         mock_get_user_tenant.return_value = {
@@ -8313,8 +8313,8 @@ def test_resolve_knowledge_base_permission_unknown_role_is_rejected(monkeypatch)
 @pytest.mark.parametrize(
     "record,user_group_ids,expected",
     [
-        ({"group_ids": "1,2", "created_by": "other", "ingroup_permission": "EDIT"}, [2], None),
-        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "READ_ONLY"}, [1], None),
+        ({"group_ids": "1,2", "created_by": "other", "ingroup_permission": "EDIT"}, [2], "READ_ONLY"),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "READ_ONLY"}, [1], "READ_ONLY"),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "PRIVATE"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "UNKNOWN"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),

@@ -14,7 +14,7 @@ Decision order:
     1. Creator (matches ``owner_user_id``) -> EDIT.
     2. ``PRIVATE`` -> no access for every non-creator, including management
        roles.
-    3. USER -> no access to any non-owned KB.
+    3. USER with a group intersection -> READ_ONLY.
     4. Management roles (SU/ADMIN/ASSET_OWNER) -> EDIT for shared KBs.
     5. DEV with a group intersection -> ``ingroup_permission``.
     6. Empty ``group_ids`` or no intersection -> no access.
@@ -133,7 +133,7 @@ def _resolve_permission(
     user_id: str,
     tenant_id: str,
     user_groups: Sequence[int] | None = None,
-    user_role: str | None = None,
+    user_role: str | Sequence[str] | None = None,
 ) -> AidpPermissionDecision:
     """Compute effective permission using the matrix described in the module docstring.
 
@@ -151,6 +151,9 @@ def _resolve_permission(
     record_groups = set(_parse_group_ids(record.get("group_ids")))
 
     role = _get_user_role(user_id, tenant_id) if user_role is None else user_role
+    user_only = has_any_role(role, {"USER"}) and not has_any_role(
+        role, CAN_EDIT_ALL_USER_ROLES | {"DEV"}
+    )
 
     if owner_user_id and owner_user_id == user_id:
         return AidpPermissionDecision(
@@ -172,16 +175,6 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if has_any_role(role, {"USER"}) and not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
-        return AidpPermissionDecision(
-            kb_id=kb_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            permission=None,
-            is_management_role=False,
-            matched_group_ids=tuple(),
-        )
-
     if has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
         return AidpPermissionDecision(
             kb_id=kb_id,
@@ -192,7 +185,7 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if not has_any_role(role, {'DEV'}) or not record_groups:
+    if not has_any_role(role, {'USER', 'DEV'}) or not record_groups:
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,
@@ -222,7 +215,7 @@ def _resolve_permission(
         kb_id=kb_id,
         tenant_id=tenant_id,
         user_id=user_id,
-        permission=ingroup_permission,
+        permission=READ_ONLY if user_only else ingroup_permission,
         is_management_role=False,
         matched_group_ids=tuple(matched),
     )

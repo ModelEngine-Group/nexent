@@ -966,7 +966,7 @@ async def get_knowledge_base_bound_agents(
     """List agents bound to this AIDP knowledge base for deletion confirmation."""
     user_id, tenant_id = await _auth(request)
     try:
-        perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+        perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
     except AidpKbNotFoundError:
         return JSONResponse(status_code=HTTPStatus.OK, content={"agents": []})
     preview = await run_blocking(
