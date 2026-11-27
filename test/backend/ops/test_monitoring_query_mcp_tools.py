@@ -100,6 +100,33 @@ def test_read_mcp_tools_matches_requested_groups_against_configured_access_group
     assert "mcp_server_id" not in json.dumps(captured["constraints"])
 
 
+def test_local_service_query_includes_only_converted_rows_from_the_synthetic_endpoint(monkeypatch):
+    from ops.monitoring.query import read_mcp_tools
+
+    monkeypatch.setattr("ops.monitoring.query.mcp_server_inventory", lambda tenant: [])
+    day = date(2026, 11, 17)
+    states = [{"tenant_id": "tenant-a", "statistic_date": day, "source_revision": 1,
+               "published_source_revision": 1, "publish_id": "pub-1", "source_snapshot_at": None}]
+    service, _, captured = _tool_service(states)
+    scope = dict(tenant="tenant-a", start=day, end=day, groups=[], tool_name="converted_search")
+
+    read_mcp_tools(service, **scope, server_id=None, server_type="builtin")
+    clauses = captured["constraints"]["bool"]["filter"]
+    assert {"term": {"tool_name": "converted_search"}} in clauses
+    assert {"bool": {"should": [
+        {"term": {"mcp_server_type": "builtin"}},
+        {"bool": {"filter": [
+            {"term": {"mcp_server_type": "api_convert"}},
+            {"term": {"mcp_server_name": "outer-apis"}},
+        ], "must_not": [{"exists": {"field": "mcp_server_id"}}]}},
+    ], "minimum_should_match": 1}} in clauses
+
+    read_mcp_tools(service, **scope, server_id=3, server_type="builtin")
+    clauses = captured["constraints"]["bool"]["filter"]
+    assert {"term": {"mcp_server_type": "builtin"}} in clauses
+    assert "api_convert" not in json.dumps(clauses)
+
+
 def test_read_mcp_tools_applies_resource_filters_to_the_inventory(monkeypatch):
     from ops.monitoring.query import read_mcp_tools
 

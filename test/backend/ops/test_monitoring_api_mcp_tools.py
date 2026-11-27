@@ -391,22 +391,28 @@ def test_builtin_tools_use_published_calls_when_the_directory_is_missing(monitor
     service = {"tenant_id": "tenant", "mcp_server_id": None, "mcp_server_name": "outer-apis",
                "mcp_server_type": "builtin"}
     row = {**_tool_rows()[0], **service, "tool_name": "builtin_search", "request_count": 3}
+    converted = {**row, "mcp_server_type": "api_convert", "tool_name": "converted_search", "request_count": 2}
     monkeypatch.setattr(monitoring, "read_mcp_tools",
-                        Mock(return_value=([row], [service], [day], _tool_status())))
+                        Mock(return_value=([row, converted], [service], [day], _tool_status())))
     params = {"start_date": day.isoformat(), "end_date": day.isoformat(), "server_type": "builtin"}
     endpoint = "/ops/v1/monitoring/mcp-tools"
     response = client.get(endpoint, params={**params, "dimension": "tools"})
     assert response.status_code == 200
     result = response.json()["data"]
-    assert result["total"] == 1
-    tool = result["items"][0]
-    assert tool["tool_name"] == "builtin_search"
-    assert tool["metrics"]["request_count"] == 3
+    assert result["total"] == 2
+    assert [(tool["tool_name"], tool["metrics"]["request_count"]) for tool in result["items"]] == [
+        ("builtin_search", 3), ("converted_search", 2),
+    ]
+    assert result["items"][1]["mcp_server_type"] == "api_convert"
     ranking = client.get(endpoint + "/rankings", params={**params, "dimension": "tools"})
-    assert ranking.json()["data"] == [tool]
+    assert ranking.json()["data"] == result["items"]
     summary = client.get(endpoint + "/summary", params=params).json()["data"]
-    assert summary["tool_count"] == 1
-    assert summary["request_count"] == 3
+    assert summary["service_count"] == 1
+    assert summary["tool_count"] == 2
+    assert summary["request_count"] == 5
+    services = client.get(endpoint, params=params).json()["data"]["items"]
+    assert [row["mcp_server_name"] for row in services] == ["outer-apis"]
+    assert services[0]["metrics"]["request_count"] == 5
 
 
 def test_mcp_tools_require_an_available_monitoring_service(monitoring_client, monkeypatch):

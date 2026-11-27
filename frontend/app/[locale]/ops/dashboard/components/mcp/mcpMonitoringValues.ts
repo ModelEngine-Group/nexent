@@ -37,6 +37,11 @@ export function getMcpDrilldownService(
   return {
     service_id: row.mcp_server_id,
     name: mcpServiceName(row),
-    type,
+    type:
+      row.mcp_server_id === null &&
+      row.mcp_server_name === "outer-apis" &&
+      type === "api_convert"
+        ? "builtin"
+        : type,
   };
 }

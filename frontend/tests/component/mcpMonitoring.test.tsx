@@ -265,4 +265,17 @@ it("keeps tenant-qualified rows distinct and only drills into addressable servic
     type: "api_convert",
     name: "Local",
   });
+  expect(
+    getMcpDrilldownService({
+      ...row,
+      mcp_server_id: null,
+      mcp_server_type: "api_convert",
+      mcp_server_name: "outer-apis",
+      tool_name: "converted_search",
+    })
+  ).toEqual({
+    service_id: null,
+    type: "builtin",
+    name: "outer-apis",
+  });
 });

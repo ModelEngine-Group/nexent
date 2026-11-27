@@ -413,10 +413,19 @@ def read_mcp_tools(service, *, tenant, start: date, end: date, groups, server_id
                 constraints = filters(fact_kind="mcp_tool")
                 if groups or resource_group is not None:
                     constraints["bool"]["filter"].append({"terms": {"mcp_server_id": allowed_ids}})
-                for name, value in (("mcp_server_id", server_id), ("mcp_server_type", server_type),
-                                    ("tool_name", tool_name)):
+                for name, value in (("mcp_server_id", server_id), ("tool_name", tool_name)):
                     if value:
                         constraints["bool"]["filter"].extend(filters(**{name: value})["bool"]["filter"])
+                if server_id is None and server_type == "builtin":
+                    constraints["bool"]["filter"].append({"bool": {"should": [
+                        {"term": {"mcp_server_type": "builtin"}},
+                        {"bool": {"filter": [
+                            {"term": {"mcp_server_type": "api_convert"}},
+                            {"term": {"mcp_server_name": LOCAL_MCP_NAME}},
+                        ], "must_not": [{"exists": {"field": "mcp_server_id"}}]}},
+                    ], "minimum_should_match": 1}})
+                elif server_type:
+                    constraints["bool"]["filter"].append({"term": {"mcp_server_type": server_type}})
                 constraints["bool"]["filter"].append(selection)
                 rows.extend(point.documents(constraints))
     available = sorted({row["statistic_date"] for row in published})
@@ -435,7 +444,7 @@ def read_mcp_tools(service, *, tenant, start: date, end: date, groups, server_id
 def is_local_mcp_tool(row: dict) -> bool:
     return (row.get("mcp_server_id") is None
             and row.get("mcp_server_name") == LOCAL_MCP_NAME
-            and row.get("mcp_server_type") == "builtin")
+            and row.get("mcp_server_type") in ("builtin", "api_convert"))
 
 
 def mcp_tool_rows(rows, inventory=None, *, covered=False):
@@ -494,7 +503,7 @@ def mcp_server_rows(rows, inventory, *, covered):
                                     "mcp_server_type": key[3]})
     for row in rows:
         key = (row["tenant_id"], row.get("mcp_server_id"), row.get("mcp_server_name"),
-               row.get("mcp_server_type"))
+               "builtin" if is_local_mcp_tool(row) else row.get("mcp_server_type"))
         key = registered.get(key[:2], key)
         by_server[key].append(row)
         tools[key].add(row["tool_name"])
