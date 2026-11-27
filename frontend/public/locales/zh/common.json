@@ -8345,7 +8345,7 @@
   "aidpKnowledge.ontologyTaskFailureTitle": "失败详情",
   "aidpKnowledge.ontologyTaskSearchEmpty": "没有匹配的任务",
   "aidpKnowledge.ontologyTaskSearchPlaceholder": "搜索任务名称/ID",
-  "aidpKnowledge.ontologyTaskSortGap": "AIDP 任务接口不支持排序，固定按 id 升序返回；本页由 Nexent 读取全部任务后按最新优先展示，任务较多时加载会变慢。",
+  "aidpKnowledge.ontologyTaskSortGap": "AIDP 任务接口不支持排序，固定按 id 升序返回。",
   "aidpKnowledge.ontologyTaskStatus.failed": "失败",
   "aidpKnowledge.ontologyTaskStatus.partial_success": "部分成功",
   "aidpKnowledge.ontologyTaskStatus.queued": "排队中",

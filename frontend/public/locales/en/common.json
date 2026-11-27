@@ -8348,7 +8348,7 @@
   "aidpKnowledge.ontologyTaskFailureTitle": "Failure details",
   "aidpKnowledge.ontologyTaskSearchEmpty": "No matching tasks",
   "aidpKnowledge.ontologyTaskSearchPlaceholder": "Search task name or ID",
-  "aidpKnowledge.ontologyTaskSortGap": "AIDP tasks have no sort parameter and always return ascending id order. This page aggregates all tasks and shows newest first; loading is slower when there are many tasks.",
+  "aidpKnowledge.ontologyTaskSortGap": "AIDP tasks have no sort parameter and always return ascending id order.",
   "aidpKnowledge.ontologyTaskStatus.failed": "Failed",
   "aidpKnowledge.ontologyTaskStatus.partial_success": "Partially succeeded",
   "aidpKnowledge.ontologyTaskStatus.queued": "Queued",
