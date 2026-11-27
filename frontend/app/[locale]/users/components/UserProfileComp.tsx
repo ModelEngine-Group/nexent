@@ -317,6 +317,23 @@ export default function UserProfileComp() {
                       .join(" / ")}
                   </span>
                 </div>
+                {!!user?.casdoorRoles?.length && (
+                  <div className="px-6 py-3 flex items-center justify-between gap-4">
+                    <span className="text-gray-500 dark:text-gray-400 text-sm">
+                      {t("profile.casdoorRoles")}
+                    </span>
+                    <div className="flex min-w-0 flex-wrap justify-end gap-1">
+                      {user.casdoorRoles.map((role) => (
+                        <Tag
+                          key={role.name}
+                          className="whitespace-normal break-all"
+                        >
+                          {role.display_name}
+                        </Tag>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="px-6 py-3 flex items-center justify-between">
                   <span className="text-gray-500 dark:text-gray-400 text-sm">
                     {t("agent.userGroup") || "User Group"}

@@ -356,6 +356,7 @@ export const authService = {
           roles: data.data.user.roles ?? [data.data.user.user_role],
           authProvider: data.data.user.auth_provider,
           casdoorRoleSync: data.data.user.casdoor_role_sync === true,
+          casdoorRoles: data.data.user.casdoor_roles,
           casdoorFeaturePolicy: data.data.user.casdoor_feature_policy === true,
           casdoorAdditionalManagedActions:
             data.data.user.casdoor_additional_managed_actions,

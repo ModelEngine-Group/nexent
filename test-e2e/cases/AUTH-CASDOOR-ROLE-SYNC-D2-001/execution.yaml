@@ -14,4 +14,5 @@ acceptance_bindings:
   AC-02: [test_role_changes_apply_to_the_same_session]
   AC-03: [test_role_changes_apply_to_the_same_session]
   AC-04: [test_invitation_role_is_published_and_can_be_revoked]
+  AC-05: [test_role_changes_apply_to_the_same_session]
 notes: Self-contained FastAPI and PostgreSQL contract with an owned database and managed worker. The Casdoor directory uses a controlled HTTP transport and the Case closes the client and worker and drops its database.

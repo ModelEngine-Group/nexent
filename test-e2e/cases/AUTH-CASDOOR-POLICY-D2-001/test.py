@@ -214,7 +214,7 @@ async def test_staged_knowledge_actions_follow_policy_edits_in_same_session(runt
 async def test_linked_administrator_follows_feature_policy_without_role_sync(runtime, monkeypatch):
     client, _, auth, models = runtime
     from consts import const as settings
-    from infrastructure.security.passwords import hash_password
+    from management.utils.account_passwords import hash_password
     from management.api.identity import oauth
     from management.api.model import model_managment
     from infrastructure.rdb.client import get_db_session

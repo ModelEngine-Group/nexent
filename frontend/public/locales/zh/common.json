@@ -3964,6 +3964,7 @@
   "profile.username": "用户名",
   "profile.securitySettings": "安全设置",
   "profile.role": "角色",
+  "profile.casdoorRoles": "Casdoor 角色",
   "profile.changePassword": "修改密码",
   "profile.editProfile": "编辑个人信息",
   "profile.editProfileDesc": "更新您的账户信息",

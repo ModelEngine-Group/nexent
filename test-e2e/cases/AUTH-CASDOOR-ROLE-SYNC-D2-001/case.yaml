@@ -28,11 +28,15 @@ case:
   - order: 4
     action: Complete a Casdoor signup with a developer invitation, retry a failed provider write, then remove the resulting membership.
     expected: The invited role survives the failed write, is added once alongside existing Casdoor role members, and can subsequently be revoked without the worker restoring it.
+  - order: 5
+    action: Add an unmapped role to a verified account in the Casdoor directory, then rename its display label and remove it during consecutive reconciliations.
+    expected: The original session reports each change without changing the mapping or gaining administrative access. A refused or mismatched provider response cannot replace the last verified display data.
   expected_results:
   - Role and permissions reflect a verified promotion without a new session.
   - Role removal also removes administrative authorization without a new session.
   - Sync affects only verified Casdoor-registered tenant accounts.
   - The onboarding assignment is durable and ordinary reconciliation takes over after confirmation.
+  - The same session reports the unmapped role and its new display name, then removes it after confirmed revocation.
   forbidden_side_effects:
   - No business account writes, external provider calls, credential leaks or leftover owned test database.
   acceptance:
@@ -56,7 +60,12 @@ case:
     steps: [4]
     expected_results: [4]
     forbidden_side_effects: [1]
+  - id: AC-05
+    description: Dynamically display an enabled custom Casdoor role without granting Nexent administrative access.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]
   contract:
     protocol: FastAPI HTTP authorization and isolated PostgreSQL with controlled Casdoor user directory responses
-    request_expectations: [Existing user information and tenant user list endpoints with the same signed session]
+    request_expectations: [Existing user information and tenant role-assignment options with the same signed session]
     response_expectations: [Current role and permissions reflect each successful reconciliation; administrative access follows the updated role]

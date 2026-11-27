@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-IMPORT-SU-20261119
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-IMPORT-SU-20261119
+  title: Include existing super administrators in the Casdoor import
+  description: Import active platform administrators into the configured business organization as ordinary identities while preserving the original Nexent users, tenancy and roles.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AUTH-CASDOOR-IMPORT-D2-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_casdoor_import_script.py
+    behaviors:
+    - Represent the original membership tenant and omit external role writes for SU.
+    - Report platform administrators during preview without storing credentials or changing the directory.
+    - Reject unsafe recovery identities before creating a privileged local binding.
+    reason: Extend the importer units and prove the authentication boundary in the isolated D2 Case.
+  notes: System owns the Case. It uses an owned PostgreSQL database, a controlled Casdoor HTTP directory and local OAuth, with self-contained preparation and cleanup.

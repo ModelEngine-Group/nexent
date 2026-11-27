@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: AUTH-CASDOOR-IMPORT-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-CASDOOR-IMPORT-D2-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_import_preserves_super_admin_identity]
+  AC-02: [test_import_preserves_super_admin_identity]
+notes: The test owns a disposable PostgreSQL database and an in-process Casdoor HTTP transport. Fixture and context manager teardown release both.

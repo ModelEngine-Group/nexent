@@ -17,13 +17,15 @@ feature:
   - rule_id: AUTH-CASDOOR-ONLY
     description: Casdoor 首次回调凭有效邮箱和稳定身份自动创建无本地密码的账号及绑定，初始角色为 USER。禁止邮箱密码登录、密码设置、其他提供方关联及解绑唯一的 Casdoor 登录方式；已有本地账号显式绑定不受影响。
   - rule_id: AUTH-CASDOOR-ROLE-SYNC
-    description: 配置组织和角色映射后，Casdoor 角色同步到对应 Nexent 账号，无映射角色时为 USER。新自动开户不向 Casdoor 写入角色；历史账号的待写回仍可完成。现有会话和用户列表随之更新。
+    description: 通过已配置的组织和有效身份绑定，同步 Casdoor 启用角色的名称和显示名称。新增、改名或移除自定义角色在现有会话中自动反映，无需修改映射或重启。Nexent 租户角色仍由显式映射决定，无匹配时 Casdoor 注册账号为 USER。历史账号的待写回仍可完成。
   - rule_id: AUTH-CASDOOR-FEATURE-POLICY
     description: 启用专用 Casdoor 权限模型后，通过 Casdoor 注册和已绑定 Casdoor 的租户账号使用该模型的功能权限。页面与 API 使用同一份可撤销权限结果，存量绑定账号继续在 Nexent 管理角色和密码。策略可按资源类别配置，兼容原有统一资源策略。
   - rule_id: AUTH-CASDOOR-STAGED-ACTIONS
     description: 可分批启用已接入的操作动作。启用后仅 Casdoor 有效授权能通过动作检查，已有租户和具体资源的检查继续执行。
   - rule_id: AUTH-CASDOOR-GROUP-SYNC
     description: A configured tenant projects its Casdoor organization groups, hierarchy and verified direct members. Authorized Nexent group changes update the same Casdoor records.
+  - rule_id: AUTH-CASDOOR-IMPORT-SUPER-ADMIN
+    description: 存量迁移在选定业务组织创建已存在 Nexent 超级管理员的专用登录身份，并绑定原用户和所属租户。Casdoor 账号按普通身份创建，首次登录须改密。重复执行复用经核验的绑定，同邮箱冲突停止迁移。
   required_test_stages: [D2, D4]
   source:
     requirement_ids: [AUTH-CASDOOR-20261105]

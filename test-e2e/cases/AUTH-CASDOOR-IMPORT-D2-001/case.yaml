@@ -1,0 +1,46 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-CASDOOR-IMPORT-D2-001
+  feature_id: AUTH-CASDOOR
+  business_rule_ids: [AUTH-CASDOOR-IMPORT-SUPER-ADMIN]
+  title: 存量导入为原 Nexent 超级管理员建立 Casdoor 登录
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify privileged account discovery, safe import, retry, and login through the original Nexent account.
+  preconditions:
+  - NEXENT_AUTH_TEST_DSN points to an owned isolated PostgreSQL instance.
+  test_data:
+    profile: One platform administrator outside the business tenant, one member from another tenant, and an isolated Casdoor HTTP directory.
+  steps:
+  - order: 1
+    action: Exercise an administrator email collision and a group membership referencing an administrator outside the group's tenant, then plan with valid data.
+    expected: Each conflict stops the import before remote writes. The valid plan includes the platform administrator and excludes the unrelated tenant user.
+  - order: 2
+    action: Create and bind the imported administrator in the target directory, then plan again and sign in through the Casdoor callback.
+    expected: Casdoor receives a normal user with a temporary password and without role grants. Retry finds the verified binding. The callback signs in to the original Nexent identity, with its SU role and original tenant.
+  expected_results:
+  - The scope includes existing platform administrators and the selected tenant, and protects against email collisions.
+  - Password activation, idempotent binding and original Nexent identity are preserved without creating a Casdoor administrator.
+  forbidden_side_effects:
+  - No external Casdoor calls, live database writes or leftover owned test database.
+  acceptance:
+  - id: AC-01
+    description: Scope and collision checks detect an existing platform administrator safely.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Import and replay preserve the original administrator identity through the OAuth callback.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  contract:
+    protocol: PostgreSQL importer transaction, Casdoor directory HTTP, and FastAPI OAuth callback.
+    request_expectations:
+    - Casdoor receives only an ordinary business organization account creation for SU.
+    response_expectations:
+    - Subsequent planning sees the binding and the verified OAuth callback returns a session for the seed account.

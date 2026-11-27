@@ -4162,6 +4162,7 @@
   "profile.username": "Username",
   "profile.securitySettings": "Security",
   "profile.role": "Role",
+  "profile.casdoorRoles": "Casdoor roles",
   "profile.changePassword": "Change Password",
   "profile.editProfile": "Edit Profile",
   "profile.editProfileDesc": "Update your account information",

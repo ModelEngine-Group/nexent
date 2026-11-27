@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-DYNAMIC-ROLES-20261119
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-DYNAMIC-ROLES-20261119
+  title: Reflect verified Casdoor role memberships in active Nexent sessions
+  description: Discover enabled Casdoor roles assigned to bound user accounts during normal reconciliation and show them in the user profile. Creating or editing a role in Casdoor requires no new role mapping or service restart.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: [AUTH-CASDOOR-POLICY-D2-001]
+    added: []
+    modified: [AUTH-CASDOOR-ROLE-SYNC-D2-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_casdoor_role_sync.py
+    - frontend/tests/component/authorizationRecovery.test.tsx
+    behaviors:
+    - Accept enabled assigned roles from the expected organization and verified Casdoor subject even when their names have no Nexent mapping.
+    - Preserve explicit role mapping and reject invalid provider responses without granting additional tenant privileges.
+    - Refresh authorization data in an active browser session as Casdoor role assignments change.
+    reason: Unit tests cover sanitization and browser refresh. The existing D2 Case verifies real persistence and the authenticated HTTP response.
+  notes: System owns the D2 Case. Its existing preparation is self-contained in a disposable PostgreSQL database and a mocked Casdoor HTTP transport.

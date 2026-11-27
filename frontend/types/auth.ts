@@ -4,6 +4,11 @@ import type { USER_ROLES } from "@/const/auth";
 
 export type UserRole = USER_ROLES;
 
+export interface CasdoorRole {
+  name: string;
+  display_name: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -14,6 +19,7 @@ export interface User {
   tenantId?: string;
   authProvider?: "local" | "cas";
   casdoorRoleSync?: boolean;
+  casdoorRoles?: CasdoorRole[];
   casdoorFeaturePolicy?: boolean;
   casdoorAdditionalManagedActions?: string[];
 }

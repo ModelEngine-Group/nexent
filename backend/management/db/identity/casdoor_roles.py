@@ -1,9 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Persistence for reconciliation of Casdoor-managed tenant roles."""
 
-from typing import NamedTuple
+from typing import NamedTuple, TypedDict
 
 from sqlalchemy import func, select
+from consts import const as settings
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import RoleAssignmentConflict
@@ -15,6 +16,30 @@ from management.db.identity.user_tenant import _validate_user_tenant_limit
 from management.db.models import UserAccount, UserOAuthAccount, UserTenant
 
 CASDOOR_TENANT_ROLES = ("USER", "DEV", "ADMIN")
+ROLE_SNAPSHOT_KEY = "casdoor_assigned_roles"
+
+
+class CasdoorAssignedRole(TypedDict):
+    name: str
+    display_name: str
+
+
+def role_snapshot_scope() -> str:
+    return f"{settings.CASDOOR_ENDPOINT}|{settings.CASDOOR_ROLE_SYNC_ORGANIZATION}"
+
+
+def assigned_roles(metadata: object, subject: str) -> list[CasdoorAssignedRole]:
+    snapshot = metadata.get(ROLE_SNAPSHOT_KEY) if isinstance(metadata, dict) else None
+    if (isinstance(snapshot, dict) and snapshot.get("subject") == subject
+            and snapshot.get("scope") == role_snapshot_scope()):
+        roles = snapshot.get("roles")
+        if isinstance(roles, list):
+            return [
+                {"name": role["name"], "display_name": role["display_name"]}
+                for role in roles if isinstance(role, dict)
+                and isinstance(role.get("name"), str) and isinstance(role.get("display_name"), str)
+            ]
+    return []
 
 
 class CasdoorRoleBinding(NamedTuple):
@@ -95,20 +120,22 @@ def clear_initial_casdoor_role(binding: CasdoorRoleBinding) -> None:
             account.source_metadata = {k: v for k, v in account.source_metadata.items() if k != "casdoor_initial_role"}
 
 
-def store_feature_grants(binding: CasdoorRoleBinding, snapshot: dict) -> None:
-    """Persist only decisions that still belong to the verified active binding."""
-    from permissions.casdoor_policy import SNAPSHOT_KEY
-
+def store_casdoor_observation(binding: CasdoorRoleBinding, snapshots: dict[str, dict]) -> None:
+    """Persist observations only for the active binding and keep newer results."""
     with get_db_session() as session:
         current = (_bindings(session, include_linked=True).filter(UserAccount.user_id == binding.user_id)
                    .with_for_update(of=UserAccount).one_or_none())
         if current is None or CasdoorRoleBinding(*current) != binding:
             return
         account = session.query(UserAccount).filter_by(user_id=binding.user_id, delete_flag="N").one()
-        previous = account.source_metadata.get(SNAPSHOT_KEY)
-        if (isinstance(previous, dict) and previous.get("scope") == snapshot["scope"]
-                and previous.get("subject") == snapshot["subject"]):
-            observed = previous.get("at")
-            if type(observed) in (int, float) and observed >= snapshot["at"]:
-                return
-        account.source_metadata = {**account.source_metadata, SNAPSHOT_KEY: snapshot}
+        metadata = dict(account.source_metadata or {})
+        for key, snapshot in snapshots.items():
+            previous = metadata.get(key)
+            if (isinstance(previous, dict) and previous.get("scope") == snapshot["scope"]
+                    and previous.get("subject") == snapshot["subject"]):
+                observed = previous.get("at")
+                if type(observed) in (int, float) and observed >= snapshot["at"]:
+                    continue
+            metadata[key] = snapshot
+        if metadata != account.source_metadata:
+            account.source_metadata = metadata

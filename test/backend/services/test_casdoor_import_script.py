@@ -33,10 +33,12 @@ def test_group_order_uses_existing_parent_and_rejects_missing_or_cyclic_parent()
 def test_journal_persists_distinct_passwords_and_checks_scope_and_permissions(tmp_path):
     path = tmp_path / "credentials.json"
     journal = migration.create_journal(path, ["scope", "tenant"], {
-        "u1": ("a@example.test", "ADMIN"), "u2": ("b@example.test", "USER"),
+        "u1": migration.ImportAccount("a@example.test", "ADMIN", "tenant"),
+        "u2": migration.ImportAccount("b@example.test", "SU", "platform"),
     }, {}, {"ADMIN": "nexent-admin", "USER": "nexent-user"})
     assert path.stat().st_mode & 0o777 == 0o600
     assert migration.read_journal(path, ["scope", "tenant"]) == journal
+    assert journal["users"]["u2"]["tenant_id"] == "platform"
     assert len({user["temporary_password"] for user in journal["users"].values()}) == 2
     with pytest.raises(migration.ImportConflict, match="different tenant"):
         migration.read_journal(path, ["scope", "other"])
@@ -51,7 +53,7 @@ def test_remote_conflict_never_grants_role_or_writes_binding():
     session = Mock()
     saved = {"id": "expected", "username": "name", "email": "a@example.test"}
     with pytest.raises(migration.ImportConflict, match="differs from its recovery record"):
-        migration.import_users(session, None, "org", "tenant", {"u": (saved["email"], "ADMIN")},
+        migration.import_users(session, None, "org", {"u": migration.ImportAccount(saved["email"], "ADMIN", "tenant")},
                                {}, {"users": {"u": saved}}, collaborator, {"ADMIN": "nexent-admin"})
     assert collaborator._request.call_count == 1
     session.add.assert_not_called()
@@ -77,12 +79,17 @@ def test_preview_only_reads_the_configured_target(monkeypatch, capsys):
         "owner": "org", "name": "nexent-admin", "isEnabled": True,
     })
     monkeypatch.setattr(migration, "plan_import",
-                        lambda *args: ({"u": ("a@example.test", "ADMIN")}, {}, [], {}, {}, 0))
+                        lambda *args, **kwargs: ({
+                            "u": migration.ImportAccount("a@example.test", "ADMIN", "tenant"),
+                            "su": migration.ImportAccount("platform@example.test", "SU", "platform"),
+                        }, {}, [], {}, {}, 0))
     for write in ("create_journal", "import_users", "import_groups"):
         monkeypatch.setattr(migration, write, Mock(side_effect=AssertionError("Preview wrote data")))
     args = SimpleNamespace(tenant="tenant", organization="org", apply=False, credentials_file=None)
     migration.run(args)
-    assert "New users: 1 (1 tenant administrators)" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "New users: 2 (1 tenant administrators)" in output
+    assert "Nexent super administrators to link as regular Casdoor users: 1" in output
     args.organization = "built-in"
     with pytest.raises(migration.ImportConflict, match="business group sync target"):
         migration.run(args)
@@ -134,7 +141,7 @@ def test_apply_and_resume_keep_group_ids_and_existing_memberships():
             before = len(operations)
             session = Mock()
             bound = {}
-            migration.import_users(session, client, org, "tenant", {"u": (account["email"], "ADMIN")},
+            migration.import_users(session, client, org, {"u": migration.ImportAccount(account["email"], "ADMIN", "tenant")},
                                    bound, journal, directory, {"ADMIN": "nexent-admin"})
             migration.import_groups(client, org, [g1, g2], {}, {10: set(), 11: {"u"}},
                                     bound, journal, directory)
@@ -148,3 +155,29 @@ def test_apply_and_resume_keep_group_ids_and_existing_memberships():
     assert g2.casdoor_group_key.startswith("nexent-import-example-11/")
     assert remote_groups["nexent-import-example-11"]["parentId"] == "nexent-import-example-10"
     assert users["org/nexent-account"]["groups"] == ["org/keep", "org/nexent-import-example-11"]
+
+
+@pytest.mark.parametrize("conflict", [None, "isAdmin", "isGlobalAdmin", "isForbidden"])
+def test_platform_admin_binding_preserves_tenant_and_requires_ordinary_casdoor_identity(conflict):
+    saved = {"id": "fixed-id", "username": "fixed-name", "email": "su@example.test"}
+    remote = {
+        "id": saved["id"], "name": saved["username"], "email": saved["email"],
+        "owner": "org", "needUpdatePassword": True,
+    }
+    if conflict:
+        remote[conflict] = True
+    directory = Mock()
+    directory._request.return_value = remote
+    session = Mock()
+    args = (session, None, "org", {"original-su": migration.ImportAccount(saved["email"], "SU", "platform")},
+            {}, {"users": {"original-su": saved}}, directory, {})
+    if conflict:
+        with pytest.raises(migration.ImportConflict, match="differs from its recovery record"):
+            migration.import_users(*args)
+        session.add.assert_not_called()
+    else:
+        migration.import_users(*args)
+        binding = session.add.call_args.args[0]
+        assert binding.user_id == "original-su"
+        assert binding.tenant_id == "platform"
+    directory._request.assert_called_once_with(None, "get-user", params={"id": "org/fixed-name"})

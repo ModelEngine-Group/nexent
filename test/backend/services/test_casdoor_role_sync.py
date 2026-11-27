@@ -46,7 +46,10 @@ async def test_read_role_validates_subject_and_owner(bound_user, changes, expect
         return httpx.Response(200, json={"status": "ok", "data": user})
 
     async with httpx.AsyncClient(base_url="https://door.example.test", transport=httpx.MockTransport(respond)) as client:
-        assert await casdoor_roles.read_role(client, "business", {"admin": "ADMIN", "developer": "DEV"}, bound_user) == expected
+        verified = await casdoor_roles._read_bound_user(client, "business", bound_user)
+        roles = casdoor_roles.active_roles(verified["roles"], "business") if verified else None
+        role = casdoor_roles.mapped_tenant_role(roles, {"admin": "ADMIN", "developer": "DEV"}) if roles is not None else None
+        assert role == expected
 
 
 @pytest.mark.asyncio
@@ -55,7 +58,23 @@ async def test_provider_failure_has_no_authoritative_role(bound_user):
         return httpx.Response(503, json={"status": "error"})
 
     async with httpx.AsyncClient(base_url="https://door.example.test", transport=httpx.MockTransport(unavailable)) as client:
-        assert await casdoor_roles.read_role(client, "business", {"admin": "ADMIN"}, bound_user) is None
+        assert await casdoor_roles._read_bound_user(client, "business", bound_user) is None
+
+
+def test_custom_assigned_roles_do_not_need_a_mapping():
+    roles = casdoor_roles.active_roles([
+        {"name": "reviewer", "displayName": " Quality reviewer ", "owner": "business", "isEnabled": True},
+        {"name": "analyst", "owner": "business", "isEnabled": True},
+        {"name": "reviewer", "owner": "other", "isEnabled": True},
+        {"name": "disabled", "owner": "business", "isEnabled": False},
+        {"name": "other/admin", "owner": "business", "isEnabled": True},
+    ], "business")
+    assert roles == [
+        {"name": "analyst", "display_name": "analyst"},
+        {"name": "reviewer", "display_name": "Quality reviewer"},
+    ]
+    assert casdoor_roles.mapped_tenant_role(roles, {"tenant-admin": "ADMIN"}) == "USER"
+    assert casdoor_roles.active_roles([None], "business") is None
 
 
 @pytest.mark.asyncio

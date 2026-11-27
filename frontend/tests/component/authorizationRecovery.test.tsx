@@ -8,8 +8,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { App } from "antd";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import Homepage from "../../app/[locale]/page";
+import UserProfileComp from "../../app/[locale]/users/components/UserProfileComp";
 import {
   AuthorizationProvider,
   useAuthorizationContext,
@@ -58,6 +61,11 @@ vi.mock("@/lib/session", () => ({ checkSessionValid: () => true }));
 vi.mock("@/services/authService", () => ({
   authService: { getCurrentUserInfo: () => state.request() },
 }));
+vi.mock("@/services/tokenService", () => ({
+  getUserTokens: vi.fn().mockResolvedValue([]),
+  createUserToken: vi.fn(),
+  deleteUserToken: vi.fn(),
+}));
 vi.mock("@/hooks/group/useGroupList", () => ({
   useGroupList: () => ({ data: undefined }),
 }));
@@ -86,7 +94,7 @@ function PermissionsProbe() {
     </output>
   );
 }
-function renderHome(showHome = true) {
+function renderHome(showHome = true, content?: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
@@ -96,6 +104,7 @@ function renderHome(showHome = true) {
       <AuthorizationProvider>
         {showHome && <Homepage />}
         <PermissionsProbe />
+        {content}
       </AuthorizationProvider>
     </QueryClientProvider>
   );
@@ -144,6 +153,43 @@ test.each(["casdoorRoleSync", "casdoorFeaturePolicy"] as const)("refreshes autho
     await waitFor(() => expect(screen.getByTestId("permissions")).toHaveTextContent("chat:read"));
     await waitFor(() => expect(state.replace).toHaveBeenCalledWith("/"));
     expect(state.request).toHaveBeenCalledTimes(2);
+  } finally {
+    intervals.mockRestore();
+  }
+});
+
+test("refreshes assigned Casdoor roles in an already-open session", async () => {
+  const before = response();
+  before.user.casdoorRoles = [];
+  const after = response();
+  after.user.casdoorRoles = [{ name: "qa-reviewer", display_name: "QA reviewer" }];
+  const intervals = vi.spyOn(window, "setInterval");
+  state.request
+    .mockResolvedValueOnce(before)
+    .mockResolvedValueOnce(after)
+    .mockResolvedValue(before);
+
+  try {
+    renderHome(
+      false,
+      <App>
+        <UserProfileComp />
+      </App>
+    );
+    await screen.findByText("su@example.com");
+    expect(screen.queryByText("profile.casdoorRoles")).not.toBeInTheDocument();
+    const refresh = intervals.mock.calls.find(([, delay]) => delay === 15_000)?.[0];
+    expect(typeof refresh).toBe("function");
+    if (typeof refresh !== "function") {
+      throw new Error("Automatic refresh was not scheduled");
+    }
+    await act(async () => refresh());
+    expect(await screen.findByText("QA reviewer")).toBeInTheDocument();
+    await act(async () => refresh());
+    await waitFor(() =>
+      expect(screen.queryByText("QA reviewer")).not.toBeInTheDocument()
+    );
+    expect(state.request).toHaveBeenCalledTimes(3);
   } finally {
     intervals.mockRestore();
   }

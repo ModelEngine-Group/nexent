@@ -1,10 +1,10 @@
 # Nexent × Casdoor 接入与权限配置指南
 
-Casdoor 负责认证、角色成员和功能策略。Nexent 为首次登录的 Casdoor 用户自动建号、分配目标租户并建立会话，再执行功能和具体资源的访问检查。
+**当前采用：Casdoor 托管登录和注册，Nexent 管理角色、权限和用户组。** Nexent 在 OAuth 回调中绑定外部身份，首次登录时创建本地业务账号并分配目标租户。角色、功能权限、用户组和成员关系只在 Nexent 管理，不在两边同步。
 
 - **首次接入**先[创建 Casdoor 应用](#2-配置-casdoor-应用)，再[配置 Nexent 后端](#3-配置-nexent-后端)，最后用无会话浏览器[验证登录和注册回跳](#4-注册登录和绑定)。
-- **日常管理**可按需配置[角色和用户组](#5-让-casdoor-管理-nexent-角色)、[功能动作权限](#6-在-casdoor-编辑角色的功能权限)或[知识库和智能体的多组授权](#9-知识库和智能体的多组授权)。
-- **维护与选型**可查看[常见问题](#7-核对与排查)、[Nexent 代码接入点](#10-nexent-代码接入点与待改造清单)和[三种身份管理方案对比](#12-三种身份管理方案对比)。
+- **日常管理**在 Nexent 维护租户角色、用户组和[知识库与智能体的多组授权](#9-知识库和智能体的多组授权)。自定义角色、动作策略管理和树状群组页面的增量工作见[能力对比图](#企业身份与权限能力明细)。
+- **备选方案**：第 5、6 节和[同步设计](#同步设计用户角色功能权限与用户组)保留了 Casdoor 托管授权的实现说明，不作为当前方案的启用步骤。
 - **上线全量切换**可按[安装初始化与幂等迁移方案](#13-上线全量切换与安装初始化)准备凭证迁移、旧入口关闭、安装顺序和回退。
 
 ## 1. 接入后可以实现什么
@@ -12,23 +12,15 @@ Casdoor 负责认证、角色成员和功能策略。Nexent 为首次登录的 C
 | 场景 | 配置位置 | 生效范围 |
 | --- | --- | --- |
 | 登录或注册 | Casdoor 业务应用、Nexent OAuth 配置及新用户目标租户 | 从 Nexent 打开 Casdoor，认证后直接回到 Nexent；首次登录无需填写邀请码 |
-| 给已有账号增加 Casdoor 登录 | Nexent「个人设置 → 第三方账号」 | 主动绑定后复用原 Nexent 用户 ID、资源和租户 |
-| 调整租户角色 | Casdoor「Casbin 权限管理 → 角色」 | 通过 Casdoor 注册的受管账号同步为普通用户、开发者或租户管理员 |
-| 授予或撤销功能动作 | Casdoor「Casbin 权限管理 → 权限」 | 生效策略控制已绑定租户账号的受管菜单和 API |
-| 同步用户组和成员 | Casdoor「用户管理 → 群组」或 Nexent「资源管理 → 用户组」 | 同步业务组、直接成员关系及父子层级 |
+| 给已有账号增加 Casdoor 登录 | 管理员存量导入，或由原账号发起经认证的 OAuth 绑定 | 建立绑定后复用原 Nexent 用户 ID、资源和租户 |
+| 调整租户角色 | Nexent 用户管理 | 使用 Nexent 内置租户角色；自定义角色管理在 Nexent 扩展 |
+| 授予或撤销功能动作 | Nexent 本地规则 | 由 Nexent 校验菜单和 API；可编辑动作策略在 Nexent 扩展 |
+| 管理用户组和成员 | Nexent「资源管理 → 用户组」 | 本地维护群组、成员和父组；可展开的树状管理在 Nexent 扩展 |
 | 设置具体资源的共享范围 | Nexent 知识库或智能体的权限设置 | 同一资源可分别给多个组授予只读或编辑权限 |
 
-**本机使用的配置**。从 [Nexent 首页](http://localhost:3000/) 自动跳转到 Casdoor，Config 监听 `5010`。Casdoor 管理员使用 [内置组织入口](http://localhost:18000/login/built-in)。业务组织和应用均为 `nexent-org`，功能权限模型为 `nexent-feature-rbac`，群组同步对应 Nexent 的 `test` 租户。
+![Casdoor 与 Nexent 的职责边界：Casdoor 负责认证，Nexent 保存本地账号和业务授权数据，Gateway 验证 Nexent 会话](./assets/casdoor/casdoor-auth-nexent-architecture.png)
 
-```mermaid
-flowchart LR
-    A["用户从 Nexent 发起登录或注册"] --> B["Casdoor 校验身份"]
-    B --> C["Nexent 接收 OAuth 回调"]
-    C --> D["新用户自动加入预设租户，已有用户复用绑定账号"]
-    E["Casdoor 角色成员和功能策略"] --> F["Nexent Config 定期同步"]
-    F --> G["页面菜单和操作按钮"]
-    F --> H["后端 API 鉴权和租户、资源检查"]
-```
+两端只通过 OAuth 建立身份关系：Casdoor 返回的外部身份绑定到 Nexent 本地 `user_id`。Gateway 在部署启用时验证 Nexent 会话，业务服务检查角色、租户和资源权限。**不做授权数据同步，仍需要保留账号绑定；停用 Casdoor 后撤销 Nexent 会话也是单独的联动能力。**
 
 ## 2. 配置 Casdoor 应用
 
@@ -139,13 +131,13 @@ OAUTH_LOGIN_MODE=force
 
 保存后重启 Config。若从旧版镜像升级，使用包含 Casdoor 功能的前后端镜像重建服务。先检查 [Config 就绪状态](http://localhost:5010/health/ready)，再访问 [Nexent OAuth 配置接口](http://localhost:3000/api/user/oauth/config)，确认 `data.providers` 中包含启用的 `casdoor`。使用 `force` 模式时，`data.auto_login_provider` 应为 `casdoor`。
 
-本机的用户认证、授权同步和群组同步走本地 Nexent 与 Casdoor。登录页上的第三方图标由浏览器从 Casdoor CDN 获取。正式启用 QQ、微信或 GitHub 后，浏览器和 Casdoor 还会与对应平台交互。
+按当前方案，显式填写 `CASDOOR_SIGNUP_TENANT_ID`，不启用角色映射、功能权限模型和群组同步（`CASDOOR_ROLE_MAP_JSON`、`CASDOOR_PERMISSION_MODEL`、`CASDOOR_GROUP_SYNC_TENANT_ID` 留空）。若从曾启用群组同步的部署切换，先核对已被标记为 Casdoor 管理的组、成员和资源引用，再转为本地维护；仅关闭轮询不会解除组的托管标记。登录页正式启用 QQ、微信或 GitHub 后，浏览器和 Casdoor 还会与对应平台交互。
 
 ## 4. 注册、登录和绑定
 
 1. **新用户自助注册**。从 Nexent 首页进入 Casdoor，在登录页点击「立即注册」。在 Casdoor 填好账号信息并完成认证，Nexent 回调自动创建无本地密码的账号、租户成员和稳定身份绑定，随后进入首页。无需在 Nexent 补填资料或输入邀请码。
-2. **Casdoor 中已有账号**。使用 `nexent-org` 的业务账号从 Nexent 发起登录。已绑定用户复用原 Nexent 账号；首次登录的用户加入预设租户，初始为普通用户（`USER`）。启用角色同步后，已配置的映射角色由后台同步；没有角色时保持普通用户。
-3. **Nexent 中已有账号**。同邮箱不会自动关联。登录原账号并从「个人设置 → 第三方账号」绑定，或由管理员通过[存量导入](#将已有-nexent-用户和业务组导入-casdoor)建立绑定。
+2. **Casdoor 中已有账号**。使用 `nexent-org` 的业务账号从 Nexent 发起登录。已绑定用户复用原 Nexent 账号；首次登录的用户加入预设租户，初始为普通用户（`USER`）。需要调整角色时，在 Nexent 用户管理中操作。
+3. **Nexent 中已有账号**。同邮箱不会自动关联。当前个人信息页不展示绑定操作，通常由管理员通过[存量导入](#将已有-nexent-用户和业务组导入-casdoor)建立绑定。需要绑定已经存在的 Casdoor 账号时，可在确认双方账号归属后，通过原 Nexent 账号的有效会话发起后端 OAuth 绑定流程。
 4. **退出与重登**。退出 Nexent 会关闭本地会话。如果 Casdoor 会话仍有效，再次发起登录时可能直接通过单点登录返回 Nexent。
 
 ![当前 Casdoor 登录页，提供密码和验证码两个页签，第三方入口标记待配置](./assets/casdoor/casdoor-login-page.jpg)
@@ -167,7 +159,11 @@ OAUTH_LOGIN_MODE=force
 
 ## 5. 让 Casdoor 管理 Nexent 角色
 
-在 Casdoor 的「Casbin权限管理 → 角色」中，为 `nexent-org` 创建并启用角色。环境变量的键用角色的「名称」，显示名称可自定义。下表是当前本机映射。
+> 备选方案：仅在决定由 Casdoor 托管角色或群组时使用。当前方案的角色和用户组在 Nexent 维护。
+
+在 Casdoor 的「Casbin 权限管理 → 角色」中，为 `nexent-org` 创建并启用角色。在「包含用户」中加入目标账号。Config 会同步已绑定用户的启用角色，用户可以在 Nexent「个人信息 → Casdoor 角色」看到它们的显示名称。新增、修改显示名称、停用或移除角色都通过原有同步任务生效，无需修改环境变量、重启服务或重新登录。
+
+下面的映射用于决定 Nexent 的租户角色。配置键使用 Casdoor 角色的内部「名称」。自定义角色可以直接关联 Casdoor 权限策略，例如给 `qa-reviewer` 授予 Skill 仓库的已接入动作。只有匹配的租户角色映射才能授予 Nexent 开发者或租户管理员身份。
 
 | Casdoor 角色名称       | Nexent 角色        |
 | ------------------ | ---------------- |
@@ -193,7 +189,7 @@ CASDOOR_ROLE_MAP_JSON='{"nexent-user":"USER","nexent-developer":"DEV","nexent-ad
 
 - 新用户由 Nexent 自动建号为 `USER`，不向 Casdoor 写入默认角色。已在 Casdoor 分配的映射角色随后台同步生效；未分配映射角色时仍为 `USER`。
 - 如果普通用户也需要 Casdoor 接管的动作，在 Casdoor 应用设置默认群组，并在对应权限策略中授权给该群组或其角色。Nexent 中的 `USER` 标签本身不会自动授予 Casdoor 策略动作。
-- 角色同步面向通过 Casdoor 注册且绑定核验通过的普通租户账号。已有本地账号主动绑定 Casdoor，角色仍在 Nexent 管理。租户管理员额度继续由 Nexent 校验。
+- 通过核验的 Casdoor 绑定提供角色名称。通过 Casdoor 注册的普通租户账号按映射同步 Nexent 租户角色。已有本地账号绑定 Casdoor 后，Nexent 租户角色由 Nexent 管理。租户管理员额度继续由 Nexent 校验。
 - 移除全部映射角色后，已核验的受管账号在 Nexent 会回到 `USER`。需要普通用户策略时应给账号分配 `nexent-user`。租户归属由 Nexent 管理，资产管理员转为普通租户角色前需要先指定业务租户。
 
 ### 管理 Casdoor 群组
@@ -238,11 +234,13 @@ Casdoor 保存同步组的目录数据。Nexent 用本地 `group_id` 供现有�
 
 ### 将已有 Nexent 用户和业务组导入 Casdoor
 
-使用 [导入脚本](../scripts/import_nexent_to_casdoor.py) 执行一次存量迁移。脚本仅处理一个 Nexent 业务租户和对应的 Casdoor 组织。已绑定账号和已同步业务组直接复用。新增账号按 Casdoor 用户 ID 绑定到原 Nexent 用户 ID，保留该用户的角色和资源。脚本导入原有业务组及其父子关系、直接成员，并在原 Nexent 组记录上建立映射，以保留知识库和智能体现有授权引用。系统默认组继续由 Nexent 管理。
+使用 [导入脚本](../scripts/import_nexent_to_casdoor.py) 执行存量迁移。每批处理一个 Nexent 业务租户和对应的 Casdoor 组织，同时纳入 Nexent 已有的平台超级管理员 `SU`。已绑定账号和已同步业务组直接复用。新建的 Casdoor 身份绑定原 Nexent 用户 ID，因而保留原角色、租户和业务资源。脚本导入原有业务组、父子关系和直接成员，在原组记录上建立映射，保留知识库和智能体的授权引用。系统默认组由 Nexent 管理。
+
+超级管理员以普通账号创建在目标 Casdoor 业务组织，使用独立临时密码并在首次登录时改密。Nexent 从已有绑定中识别原 `SU`，权限由 Nexent 的原账号确定。即使超级管理员原来属于平台租户，脚本也使用其原租户记录。导入后，在切换到强制 Casdoor 登录前，用迁移后的身份验证原超级管理员能进入 Nexent。
 
 1. 在可访问实际 PostgreSQL 和 Casdoor 服务的 Linux 主机上，使用包含本脚本和群组同步代码的仓库版本，以及 Nexent 后端 Python 3.11 环境。确认已应用群组迁移。备份两边的数据，并在维护窗口暂停 Nexent Config 群组轮询及两边的账号、组和角色编辑，直到导入和核查完成。
 2. 准备运行 Config 使用的环境配置，确认 PostgreSQL 地址和数据库、Casdoor 应用凭证、两个 Casdoor 地址、`CASDOOR_ROLE_SYNC_ORGANIZATION`、`CASDOOR_GROUP_SYNC_TENANT_ID` 和 `CASDOOR_ROLE_MAP_JSON` 均指向目标环境。已有进程环境变量优先于配置文件。使用可调用该组织用户、角色和群组管理 API 的 Casdoor 应用凭证。Casdoor 的 Nexent 映射角色应事先启用，默认使用 `nexent-user`、`nexent-developer`、`nexent-admin`，分别映射 `USER`、`DEV`、`ADMIN`。
-3. 在仓库根目录先预览，核对组织、租户、新增账号、管理员和业务组数量。脚本遇到远端同邮箱账号、同名组、无法验证的绑定或不能迁移的组成员会停止。确认冲突归属后处理。同邮箱账号须走已有账号的主动绑定流程。
+3. 在仓库根目录先预览，核对组织、租户、新增账号、租户管理员、超级管理员和业务组数量。脚本遇到远端同邮箱账号、同名组、无法验证的绑定或不能迁移的组成员会停止。确认冲突归属后处理。同邮箱账号须走已有账号的主动绑定流程。
 
 ```bash
 backend/.venv/bin/python scripts/import_nexent_to_casdoor.py \
@@ -254,7 +252,11 @@ backend/.venv/bin/python scripts/import_nexent_to_casdoor.py \
 
 脚本遇到错误会退出并回滚本次 Nexent 数据库事务。Casdoor 已成功处理的写入可能保留，恢复时用相同目标、参数和凭据文件重新执行。脚本会校验已生成的身份和业务组后续跑。遇到数据冲突时，保留原凭据文件并核对 Casdoor 记录，避免另起一个批次重复创建账号。
 
+如果上一批已经完成，用一个新的凭据文件路径执行本批。脚本会复用已验证的绑定，已成功导入的普通用户无需重复迁移。
+
 ## 6. 在 Casdoor 编辑角色的功能权限
+
+> 备选方案：当前 Nexent 的业务权限由 Nexent 保存和判定，不启用 Casdoor 功能权限同步。
 
 ### 创建模型和策略
 
@@ -470,9 +472,9 @@ sequenceDiagram
 
 ## 10. Nexent 代码接入点与待改造清单
 
-### 在 Nexent 页面管理 Casdoor 用户和权限是否可行
+### 在 Nexent 页面管理 Casdoor 用户和权限
 
-可行。Casdoor 管理台本身使用 HTTP API，可在[本机 Swagger](http://localhost:18000/swagger/)查当前版本的路由与请求格式。Nexent 已调用部分接口做角色、功能权限和群组同步；完整的 Casdoor 用户和策略管理界面需要新增 Nexent 后端接口及页面。[Casdoor REST API 与认证](https://casdoor.ai/docs/basic/public-api/)
+Casdoor 管理台本身使用 HTTP API，可在[本机 Swagger](http://localhost:18000/swagger/)查当前版本的路由与请求格式。Nexent 已调用部分接口做角色、功能权限和群组同步；完整的 Casdoor 用户和策略管理界面需要新增 Nexent 后端接口及页面。[Casdoor REST API 与认证](https://casdoor.ai/docs/basic/public-api/)
 
 | 管理能力 | Casdoor API 或操作方式 | Nexent 接入建议 |
 | --- | --- | --- |
@@ -494,41 +496,290 @@ sequenceDiagram
 
 Docker Compose 默认让前端的 `HTTP_BACKEND` 指向 `nexent-gateway:5013`；源码开发若指向 Config 的 `5010`，则直接访问 Config。Casdoor 回调仍登记浏览器可访问的 **Nexent 前端 URL**。Gateway 校验的是 Nexent 下发的会话，并不会在每个请求中重新调用 Casdoor。两种部署路径分别可参考[前端代理](../frontend/server.js)、[网关公开路由表](../backend/gateway/exposure/registry.json)和 [Compose](../deploy/docker/compose/docker-compose.yml)。
 
+前三张时序图以已部署 Gateway 为前提，使用「创建模型」对比登录与鉴权。前两张的功能授权在 Management 执行，第三张展示方案二由 Gateway 在线调用 Casdoor 判权。方案一沿用第二张图的登录段和本地角色鉴权分支。第四张展示方案二如何扩展到 Nexent 代用户调用 AIDP API。 [方案一职责边界](#1-接入后可以实现什么)
+
+#### 接入前：Nexent 本地登录与角色鉴权
+
 ```mermaid
 sequenceDiagram
-    actor User as 用户浏览器
-    participant Door as Casdoor
-    participant Web as Nexent 前端代理
-    participant GW as Nexent Gateway
-    participant Config as Management
-    User->>Web: 发起 OAuth 登录
-    Web->>GW: authorize（公开接口）
-    GW->>Config: 转发
-    Config-->>User: 跳转 Casdoor，设置流程 Cookie
-    User->>Door: 登录或注册
-    Door-->>User: 浏览器携带授权码跳回 Nexent
-    User->>Web: callback
-    Web->>GW: 转发回调（公开接口）
-    GW->>Config: 转发
-    Config->>Door: 直接换码并读取用户信息
-    Config-->>Web: 新建或复用账号，签发 Nexent 会话
-    Web-->>User: 设置会话 Cookie 并进入首页
-    User->>GW: 后续 Nexent API 请求（经前端代理）
-    GW->>Config: 验证 Nexent 会话并转发可信身份
-    Config-->>User: 检查动作、租户及资源后返回
+    actor U as 用户浏览器
+    participant W as Nexent 前端代理
+    participant G as Nexent Gateway
+    participant M as Management / Config
+    participant DB as Nexent PostgreSQL
+
+    rect rgb(240, 247, 255)
+        Note over U,DB: 登录：Nexent 验证邮箱和密码
+        U->>W: 提交邮箱和密码
+        W->>G: POST /api/user/signin
+        G->>M: 公开路由，无需已有会话
+        M->>DB: 查询账号和租户关系
+        DB-->>M: 返回密码哈希与账号状态等
+        M->>M: 校验密码与账号状态，签发 Nexent JWT
+        M-->>G: 返回会话
+        G-->>W: 转发登录结果
+        W-->>U: 设置 HttpOnly 会话 Cookie
+    end
+
+    rect rgb(242, 250, 242)
+        Note over U,DB: 登录后：按 Nexent 本地角色规则授权
+        U->>W: 创建模型，携带会话 Cookie
+        W->>G: POST /api/model/create
+        G->>G: 验证 Nexent JWT
+        G->>DB: 核对账号、会话版本及租户关系
+        DB-->>G: 返回当前用户与租户身份
+        G->>M: 转发请求，附带签名身份
+        M->>M: 按本地角色检查 model:create<br/>通过后在当前租户内执行
+        M-->>G: 返回创建结果，或 403
+        G-->>W: 转发结果
+        W-->>U: 显示结果
+    end
 ```
 
-### 已实现 · 角色成员和功能权限的同步
+#### 接入后：Casdoor 登录与功能权限同步（备选方案）
 
-Casdoor 中「谁属于哪个角色」和「角色拥有哪些功能权限」由两条链路处理。已接入的角色和动作可以在 Casdoor 保存后自动生效。Nexent 的本地角色权限表继续为未绑定的本地账号和未接入 Casdoor 的动作提供规则。
+```mermaid
+sequenceDiagram
+    actor U as 用户浏览器
+    participant W as Nexent 前端代理
+    participant G as Nexent Gateway
+    participant M as Management / Config
+    participant DB as Nexent PostgreSQL
+    participant C as Casdoor
 
-| Casdoor 上的改动 | Nexent 处理路径 | 写入或读取的数据 |
+    rect rgb(240, 247, 255)
+        Note over U,C: 登录：Casdoor 验证身份，Nexent 签发会话
+        U->>W: 打开 Nexent，发起 Casdoor 登录
+        W->>G: GET /api/user/oauth/authorize?provider=casdoor
+        G->>M: 公开路由，无需已有会话
+        M-->>G: 302 跳转地址与 OAuth 流程 Cookie
+        G-->>W: 转发
+        W-->>U: 设置流程 Cookie，跳转 Casdoor
+        U->>C: 在 Casdoor 登录或注册
+        C-->>U: 302 回到 Nexent 前端，带 code 和 state
+        U->>W: GET /api/user/oauth/callback?provider=casdoor
+        W->>G: 转发回调
+        G->>M: 公开路由，无需已有会话
+        M->>M: 验证 state 与浏览器流程 Cookie
+        M->>C: 提交授权码和 PKCE verifier，换取令牌并读取用户信息
+        C-->>M: 返回外部用户标识 sub
+        M->>DB: 复用已绑定账号，或首次创建账号和租户关系
+        M-->>G: 签发并返回 Nexent JWT
+        G-->>W: 转发会话
+        W-->>U: 设置 HttpOnly 会话 Cookie，跳转首页
+    end
+
+    rect rgb(255, 249, 232)
+        Note over M,C: 后台同步独立运行，无需用户重新登录，也不经过 Gateway
+        M->>C: 定期读取角色、群组和策略，批量计算受管动作
+        C-->>M: 返回目录和动作授权结果
+        M->>DB: 更新适用的本地角色、群组成员及功能授权快照
+    end
+
+    rect rgb(242, 250, 242)
+        Note over U,DB: 登录后：Gateway 验会话，Management 判权限
+        U->>W: 创建模型，携带会话 Cookie
+        W->>G: POST /api/model/create
+        G->>G: 验证 Nexent JWT
+        G->>DB: 核对账号、会话版本及租户关系
+        DB-->>G: 返回当前用户与租户身份
+        G->>M: 转发请求，附带签名身份
+        alt 账号和动作已由 Casdoor 接管
+            M->>DB: 读取功能授权快照
+            M->>M: 校验快照有效且包含 model:create
+        else 未接管
+            M->>M: 按 Nexent 本地角色规则检查 model:create
+        end
+        M->>M: 授权通过后，在当前租户内执行
+        M-->>G: 返回创建结果，或 403
+        G-->>W: 转发结果
+        W-->>U: 显示结果
+    end
+```
+
+在备选的授权同步方案里，Casdoor 撤销 `model:create` 后，Management 会在下次成功同步并读取新快照时拒绝创建。当前方案一在 Nexent 调整授权。
+
+#### 方案二：Casdoor 登录与 Gateway 在线判权
+
+这是[方案二改造完成后](./casdoor-architecture-and-effort.md#方案二gateway-统一鉴权调用-casdoor-接口判权)的请求时序。登录仍由 Management 处理回调并签发 Nexent 会话；变化发生在登录后的业务请求：Gateway 在转发前在线查询 Casdoor。首批只接管已登记的功能动作，知识库和智能体的具体资源授权继续在 Nexent 执行。
+
+```mermaid
+sequenceDiagram
+    actor U as 用户浏览器
+    participant W as Nexent 前端代理
+    participant G as Nexent Gateway
+    participant M as Management / Config
+    participant DB as Nexent PostgreSQL
+    participant C as Casdoor
+
+    rect rgb(240, 247, 255)
+        Note over U,C: 登录：Casdoor 验身份，Nexent 签会话
+        U->>W: 发起 Casdoor 登录
+        W->>G: GET /api/user/oauth/authorize?provider=casdoor
+        G->>M: 公开路由，无需已有会话
+        M-->>G: 跳转地址与 OAuth 流程 Cookie
+        G-->>W: 转发登录跳转
+        W-->>U: 设置流程 Cookie，跳转 Casdoor
+        U->>C: 登录或注册
+        C-->>U: 带 code 和 state 回跳 Nexent
+        U->>W: GET /api/user/oauth/callback?provider=casdoor
+        W->>G: 转发回调
+        G->>M: 公开路由，无需已有会话
+        M->>M: 验证 state 与流程 Cookie
+        M->>C: 提交授权码和 PKCE verifier，换码并读取身份
+        C-->>M: 返回外部用户标识 sub
+        M->>DB: 核对身份绑定，复用或创建本地账号
+        M-->>G: 返回已签发的 Nexent 会话
+        G-->>W: 转发会话
+        W-->>U: 设置 HttpOnly 会话 Cookie，进入首页
+    end
+
+    rect rgb(242, 250, 242)
+        Note over U,C: 登录后：Gateway 在线判定功能动作
+        U->>W: 创建模型，携带会话 Cookie
+        W->>G: POST /api/model/create
+        G->>DB: 验证 JWT 后，核对本地账号、租户和 Casdoor 主体绑定
+        DB-->>G: 返回已核验的身份与绑定数据
+        G->>G: 将路由映射为 model:create，并确定租户策略范围
+        G->>C: 服务端调用 enforce，检查用户、模块和动作
+        alt Casdoor 允许
+            C-->>G: 返回允许
+            G->>M: 转发请求，附带可信身份及签名授权结果
+            M->>M: 核对执行对象与租户，检查业务状态并创建模型
+            M-->>G: 返回创建结果
+        else Casdoor 明确拒绝
+            C-->>G: 返回拒绝
+            G->>G: 返回 403，不转发业务请求
+        else Casdoor 超时或不可用
+            G->>G: 返回 503，不转发业务请求
+        end
+        G-->>W: 返回结果
+        W-->>U: 显示结果
+    end
+```
+
+对于**单个知识库或智能体**，若已迁移实例权限，Gateway 还要从可信数据解析租户、资源类型和 ID，再检查例如 `nexent:tenant-7:kb:42` 的 `read` 或 `edit`。需要同时检查功能和实例权限时，两项都通过才允许。若实际对象是在智能体运行时才确定，由执行点调用统一鉴权入口补查；未迁移的实例继续按 Nexent 本地多组规则执行。[方案二的资源鉴权范围](./casdoor-architecture-and-effort.md#复杂请求的鉴权覆盖)
+
+原有 GitHub、微信等若仍直连 Nexent，由 Config 与上游 OAuth 提供商交换授权码；迁至 Casdoor 后，改由 Casdoor 对接第三方。两条路径最后均由 Nexent 签发会话，登录后的 Gateway 链路相同。迁移操作见[第三方登录配置](#通过-casdoor-接入-qq微信和-github-登录)。
+
+#### Nexent 代用户访问 AIDP API
+
+这是方案二的扩展设计。Nexent 渲染页面，Nexent 和 AIDP 在同一 Casdoor 组织中各有独立的应用配置。以读取 AIDP 的 42 号知识库为例，浏览器请求使用 Nexent 会话，Nexent 后端通过 Token Exchange 换取面向 AIDP 的 Access Token。令牌的用户标识 `sub` 保持不变，受众 `aud` 设为 AIDP 的 Client ID。 [Casdoor Token Exchange](https://casdoor.ai/docs/how-to-connect/oauth/#token-exchange-grant)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 用户 / Nexent 页面
+    participant G as Nexent Gateway
+    participant N as Nexent 后端
+    participant C as Casdoor
+    participant A as AIDP API
+
+    Note over U,N: 用户已登录，Nexent 后端持有有效的 Casdoor 用户 Access Token
+    U->>G: 请求读取 AIDP 知识库 42（Nexent 会话）
+    G->>C: 校验 Nexent 入口动作
+    C-->>G: 允许
+    G->>N: 转发请求和已验证的用户上下文
+    N->>C: Token Exchange · 原 Casdoor 用户令牌<br/>audience = AIDP Client ID
+    C-->>N: AIDP Access Token · aud = AIDP，sub 不变
+    N->>A: 请求读取知识库 42<br/>Authorization: Bearer AIDP Access Token
+    A->>A: 校验签名、iss、aud、exp<br/>将 sub 解析为 Casdoor 判权主体
+    A->>C: POST /api/enforce · 用户、库 42、read
+    C-->>A: 返回权限判定
+    alt 有读取权限
+        A-->>N: 200 · 知识库数据
+    else 无读取权限
+        A-->>N: 403 · 拒绝读取
+    end
+    N-->>G: 返回业务结果
+    G-->>U: 显示知识库或权限提示
+```
+
+落地时，Nexent 需补服务端用户令牌管理和交换，AIDP 需补令牌验证和资源级在线判权。Gateway 的入口授权通过后，AIDP 仍按实际租户、知识库 ID 和操作判权。 [现有 Nexent 登录回调](../backend/management/services/permission/identity/casdoor.py) · [Casdoor 判权接口](https://casdoor.ai/docs/permission/exposed-casbin-apis/)
+
+##### AIDP 改造（外部系统工作量）
+
+这部分由 **AIDP 团队**负责。当前 Nexent 侧的知识库页面已接入 `/api/aidp-mgmt`，后端使用 `AIDP_API_KEY` 调用上游。下表按 Nexent 客户端实际调用的上游接口列出改造点，AIDP 团队需对照自身服务确认所有入口和兼容性。本次目标是 **Nexent 自己渲染页面，AIDP 承接用户身份和资源鉴权**。 [Nexent AIDP 管理接口](../backend/ext_components/aidp/apps/aidp_mgmt_app.py) · [上游 API 调用](../backend/ext_components/aidp/services/aidp_service.py)
+
+| AIDP 改动 | 具体操作或接口 | 验收 |
 | --- | --- | --- |
-| 在「角色」里增删成员 | Config 启动时挂载 `periodic_role_sync()`。每轮调用 `get-user` 核验组织和已绑定的用户 ID。对于通过 Casdoor 注册的账号，用 `CASDOOR_ROLE_MAP_JSON` 映射启用角色。 | 更新注册账号的 Nexent 租户角色，沿用租户归属和管理员额度校验。[Config 启动入口](../backend/management/api/application.py) · [同步服务](../backend/management/services/permission/identity/casdoor_roles.py) · [角色和快照写入](../backend/management/db/identity/casdoor_roles.py) |
-| 在「权限」里修改「包含角色」、资源或动作 | `read_policies()` 读取指定组织和模型下已启用、已批准且有效的允许策略。`evaluate_permissions()` 为已核验绑定的租户账号调用 `batch-enforce`，由 Casdoor 判断用户、资源和动作。 | 合并命中的允许动作，写入 `casdoor_feature_grants` 快照，记录模型范围、绑定标识、角色和观测时间。[策略同步](../backend/management/services/permission/identity/casdoor_feature_sync.py) · [Casbin 批量判权](https://casdoor.ai/docs/permission/exposed-casbin-apis/) |
-| 已登录用户再次访问页面或调用接口 | 通用 API 依赖 `permissions.depends.require()` 先读当前有效的 Casdoor 判定，Skill 仓库也在服务层使用同一快照。用户信息接口返回有效权限和路由，前端轮询后更新菜单和按钮。 | 受管动作缺少有效授权时返回拒绝，保留接口原有的租户、资源归属和业务状态检查。[API 权限依赖](../backend/permissions/depends.py) · [Skill 仓库服务](../backend/services/skill_repository_service.py) · [用户信息服务](../backend/management/services/permission/identity/authentication.py) · [前端轮询](../frontend/hooks/auth/useAuthorization.ts) |
+| 接收和验证 Casdoor 用户令牌 | 为受管 API 扩展认证中间件，从 `Authorization: Bearer` 读取 Access Token。配置可信签发方、签名公钥和 AIDP Client ID。使用实际交换出来的令牌验证签名、`iss`、`aud`、有效期和用户主体；联调签名密钥轮换及账号停用后的令牌失效策略。 | 只接受有效且面向 AIDP 的用户访问令牌。过期令牌、ID Token、面向其他应用的令牌和只代表应用的凭据均无法进入受管用户接口。 |
+| 绑定用户并确定租户 | 使用可信 `(iss, sub)` 映射到已有 AIDP 用户。若业务接口需要本地用户记录，为存量绑定和符合准入条件的首次建号定义规则。管理 AIDP 租户和 Casdoor 组织或策略域的对应关系，以实际资源记录校验租户和资源归属。 | 同一用户在 Nexent 与 AIDP 能关联到同一 Casdoor 身份。改名后仍回到原 AIDP 账号，跨租户 ID 不会命中其他租户资源。 |
+| 接入 Casdoor 在线判权 | AIDP 后端使用独立的服务端凭据调用 `POST /api/enforce`、`POST /api/batch-enforce`，将应用动作、资源 ID 和租户映射到专用模型。例如 `aidp:tenant-7:kb:42` 的 `read`。模型若使用 `组织/用户名`，应从已验证的组织和稳定 ID 解析主体。 | 同一个用户可读库 42、不可读库 43；只读用户调用修改接口被拒绝。权限变更后，已有 Nexent 会话的下一次在线检查使用新策略。 |
+| 知识库列表、计数和详情 | 覆盖上游 `KnowledgeBases`、`KnowledgeBases/0/Count` 和 `KnowledgeBases/{kds_id}`。列表和计数先按可读范围过滤，再分页或计数；详情检查指定知识库。创建先检查租户级创建权限，更新和删除分别校验目标库对应动作。 | 列表、计数、详情一致；不给无权用户返回库名和数量；只读账号不能修改或删除。 |
+| 文件和检索 | 覆盖 `KnowledgeFiles` 的列表、计数、下载、上传、删除，以及 `OcrAnnotate` 预览和 `Retrieval/FusionSearch`。先解析文件与知识库的归属；检索按实际参与的每个库校验，按既定契约过滤或拒绝。若返回签名下载链接，明确有效期内的撤权行为。 | 隐藏的库不能通过文件 ID、预览地址或检索接口读到；只读用户不能写入文件。 |
+| 异步导入和重试 | 核对 `Channels`、`KnowledgeFiles/History`、`KnowledgeFiles/Retry` 和索引任务。提交及重试时按目标库鉴权，后台执行记录明确的用户或受限服务身份，按任务约定复核权限。 | 查看任务历史受读取权限制；撤销写权限后，后续发起的重试被拒绝。 |
+| 存量权限迁移和旧凭据切换 | 盘点当前由 Nexent 保存的 AIDP 库组授权、AIDP 现有规则和实际资源归属，确认 Casdoor 接管的动作及唯一策略写入方。按租户导入并比对存量结果；分批切换用户入口。若保留旧 API Key 给机器任务，限制这些凭据能调用的接口和租户。 | 迁移前后授权差异可核对；受管用户接口不能通过旧 API Key 恢复已撤销的权限；切换失败可按租户恢复已验证的授权来源。 |
+| 联调和运维 | 约定身份无效返回 `401`、权限不足返回 `403`、判权服务不可用按双方约定返回 `503`。日志记录主体、资源、动作、决策及链路 ID。测试密钥轮换、跨租户、撤权以及 Casdoor 超时。 | 用已登录的普通用户验证「列表只见授权库 → 可读指定库 → 写入被拒绝 → 撤销读权后再次调用被拒绝」，并覆盖无权请求直接打到 AIDP 的情况。 |
 
-比如在 Casdoor 给 `nexent-developer` 增加 `nexent:model` 下的 `model:read`，下一轮同步后，命中该策略的受管用户会拿到模型读取权限，Nexent 角色仍为 `DEV`。撤销时要从所有授予该动作的有效策略中移除。若是把用户从开发者改为租户管理员，则在 Casdoor 调整角色成员关系。
+以上改造及联调单列为 [AIDP 外部系统工作量](./casdoor-architecture-and-effort.md#aidp-外部系统工作量)。Nexent 侧的用户令牌管理、交换和上游调用适配由 Nexent 团队负责。
+
+### 同步设计：用户、角色、功能权限与用户组
+
+> 本节记录备选的授权同步方案；只有 OAuth 建号与绑定部分也适用于当前方案。当前方案不启用角色、功能权限、群组及成员同步。
+
+在授权同步方案中，Casdoor 管登录身份、角色成员、功能策略及同步组目录；Nexent 管本地用户 ID、租户、会话和具体资源的共享规则。两边各用自己的数据库。Config 通过 OAuth 回调、后台轮询或写入后回读更新本地数据。同步请求直接访问 Casdoor，部署 Gateway 时，用户登录后的业务请求经过 Gateway 并由下游服务鉴权。
+
+| 对象 | 数据来源 | 同步方向和触发方式 |
+| --- | --- | --- |
+| 登录账号与绑定 | Casdoor 管认证；Nexent 管本地账号及租户 | Casdoor → Nexent：用户首次 OAuth 回调建号。Nexent → Casdoor：存量用户由管理员显式执行导入，平时没有双向账号同步任务。 |
+| 角色和角色成员 | Casdoor 管自定义角色及其成员；Nexent 保留内置租户角色 | Casdoor → Nexent：Config 周期性更新已分配角色；只有符合条件的 Casdoor 注册账号会改写 Nexent 租户角色。 |
+| 功能权限 | Casdoor 管已接入的动作；其他动作沿用 Nexent 本地规则 | Casdoor → Nexent：周期性判权并生成每用户的授权快照，前端和后端读取同一类结果。 |
+| 群组、父子关系和直接成员 | 同步组以 Casdoor 目录为准；Nexent 保留本地组 ID | 从 Casdoor 修改靠轮询读回；从 Nexent 修改由 Config 先写 Casdoor，再读回更新本地。同步组只能在 Casdoor 删除。 |
+| 具体资源的权限 | Nexent | 知识库和智能体保存「资源 → 本地组 ID → 只读/编辑」，结合最新已同步的直接成员鉴权。资源共享规则不会写到 Casdoor。 |
+
+#### 用户：首次登录建号，停用和删除分别处理
+
+| 操作 | 当前同步行为 |
+| --- | --- |
+| 在 Casdoor 注册、单独创建或批量创建用户 | 只创建 Casdoor 身份。用户通过 Nexent 首次完成 OAuth 回调时，才创建 Nexent 无密码账号、目标租户成员关系和 Casdoor 绑定，初始角色是 `USER`。账号已存在但尚未绑定时，不会因邮箱相同而自动合并。 |
+| 在 Nexent 已有或新建本地账号 | 不自动创建 Casdoor 用户。存量导入脚本可创建或复用经核验的身份，并绑定到原 Nexent `user_id`，保留租户、角色和资源。脚本不复制本地密码。 |
+| 在 Casdoor 修改密码、手机号、邮箱或用户名 | 修改密码和手机号不会写回 Nexent；Nexent 账号邮箱也不会随 Casdoor 邮箱变化自动修改。已绑定用户再次 OAuth 登录时，回调会刷新绑定记录中的用户名。若改了内部用户名，角色和功能轮询可能在此之前无法按旧名称读取该用户；群组匹配使用稳定身份标识。 |
+| 在 Casdoor 停用或删除用户 | 不会级联删除 Nexent 账号或立刻撤销已签发的 Nexent 会话、API Key。角色任务对禁用或找不到的身份停止刷新；受管动作的旧快照到期后拒绝。远端已删除的成员在下一次成功目录对账后退出本地同步组；仅停用账号时，当前群组投影没有按禁用状态自动清退成员。 |
+| 在 Nexent 删除或解绑用户 | 删除账号走本地清理：移除租户和本地组关系，软删除 OAuth 绑定，撤销本地 API Key，并禁用账号，使旧会话失效。不会代替管理员删除 Casdoor 用户。仅解绑则只处理绑定，Casdoor 注册的账号不能解绑其唯一登录方式。 |
+
+身份绑定使用 `CASDOOR_ENDPOINT` 和 Casdoor `sub` 计算稳定键。登录后通过该键找回原用户；域名更换或删号重建使标识变化时，要先核对绑定并迁移，不能靠同名、同邮箱继承权限。[OAuth 建号与绑定](../backend/management/services/permission/identity/oauth.py) · [身份键](../backend/management/services/permission/identity/casdoor.py) · [Nexent 账号清理](../backend/management/services/permission/identity/users.py)
+
+#### 角色：同步成员和角色名称，按需映射内置角色
+
+| 操作 | 当前同步行为 |
+| --- | --- |
+| 在 Casdoor 创建角色 | 创建一个空角色不会改变现有用户。启用后把用户加入角色，Config 才会在该用户的角色快照中记录内部名称和显示名称。自定义角色可以关联已接入的功能策略，无须为每个角色改配置；要让它映射成 Nexent `DEV` 或 `ADMIN`，须配置 `CASDOOR_ROLE_MAP_JSON`。 |
+| 修改角色显示名称或成员 | 显示名称更新到用户资料。角色映射使用内部名称；增加或移除成员后，适用用户按 `ADMIN` → `DEV` → `USER` 的顺序重新选择当前最高映射角色。同一用户仍在 `nexent-admin` 时，只加 `nexent-developer` 不会降权。 |
+| 停用、删除角色或移除成员 | 在下一次成功读取的新角色列表中移除对应角色；仍有其他映射时取最高角色，无映射时目标为 `USER`。若会移除租户最后一位管理员，Nexent 会拦截；提升管理员也受租户额度限制。删除角色后还要核对该用户是否通过其他角色或策略保有动作。 |
+| 在 Nexent 修改角色 | 修改的是 Nexent 的本地角色，不会反写 Casdoor 角色成员。通过 Casdoor 注册且受角色同步管理的账号，其 `USER`、`DEV`、`ADMIN` 映射结果可能在下一轮覆盖本地改动。迁移或后绑定的账号保留本地角色，但符合条件时仍可使用 Casdoor 的功能策略。 |
+
+后台通过 `get-user` 核对组织、用户名与稳定 ID，并只处理具备有效绑定和单一有效租户关系、主角色为 `USER`、`DEV` 或 `ADMIN` 的记录。`SU` 和 `ASSET_OWNER` 继续由 Nexent 管理。普通首次登录只建本地 `USER`；存量导入和历史邀请码待回写是单独的角色写入路径。[角色同步](../backend/management/services/permission/identity/casdoor_roles.py) · [同步范围和本地角色写入](../backend/management/db/identity/casdoor_roles.py)
+
+#### 功能权限：重新计算动作快照，撤权也要同步
+
+| 操作 | 当前同步行为 |
+| --- | --- |
+| 新增功能权限策略 | 在 `CASDOOR_PERMISSION_MODEL` 指定的模型中，启用并批准 `Allow` 策略，配置正确的资源键、动作键和主体。Config 只计算 Nexent 已接入的动作；仅在目录里增加动作不会让新接口受到控制。 |
+| 修改角色关联、资源或动作列表 | 下一轮从最新策略与成员关系重新判权。Config 对候选「用户、资源、动作」调用 Casdoor 的 [`batch-enforce`](https://casdoor.ai/docs/permission/exposed-casbin-apis/#batch-enforce)，把各项允许结果合并到当前用户的 `casdoor_feature_grants`。例如保留 `model:read`、删除 `model:create`，用户可以读模型，但创建接口会返回 `403`；模型菜单还需要 `menu:models`。 |
+| 删除、停用或使策略过期 | 成功判权后，用当轮结果替换旧快照；即使没有任何允许动作，也会写入空集合。若另一条有效策略仍授予同一动作，权限仍在。当前同步仅接纳有效 `Allow` 策略，不靠新增 `Deny` 策略撤销其他策略的允许结果。 |
+| 在 Nexent 调整资源共享或本地权限 | 只影响 Nexent 自己的规则。受管动作按当前 Casdoor 快照判断，同时保留接口原有的租户、资源归属和业务状态检查。 |
+
+快照记录模型范围、绑定标识、角色和观测时间，校验不匹配、缺失或超过 60 秒时拒绝受管动作，不回退到本地角色放行。Casdoor 查询失败时不会把失败当成「没有策略」写入空快照；未过期的旧结果可能短暂继续使用。[策略读取与判权](../backend/management/services/permission/identity/casdoor_feature_sync.py) · [快照校验](../backend/permissions/casdoor_policy.py) · [API 权限依赖](../backend/permissions/depends.py)
+
+#### 用户组：Casdoor 保存目录，Nexent 保留组 ID
+
+| 操作 | 当前同步行为 |
+| --- | --- |
+| 在 Casdoor 新建组，或在 Nexent 为同步租户新建组 | Casdoor 新组在下轮对账时创建本地映射；Nexent 新建先调用 Casdoor `add-group`，回读确认后才保存并返回本地组 ID。原有本地业务组应通过导入脚本建立映射，以保留已有共享引用。系统默认组仍留在 Nexent。 |
+| 修改组显示名称、描述或父组 | Casdoor 变更在下轮投影；Nexent 变更先更新远端再回读。显示名称变化保留本地组 ID。父组必须来自同一组织，并通过层级校验，不能成环；不因父子关系自动继承资源权限。 |
+| 添加、移除或替换成员 | Casdoor 从用户的直接 `groups` 读取；在 Nexent 修改时，Config 更新 Casdoor 对应用户的直接群组字段，再回读核对本地成员结果。只映射到同一 Nexent 租户内有有效绑定的用户；替换成员不会移除该用户在 Casdoor 的其他群组。 |
+| 禁用、删除或重建组 | 禁用组仍保留目录记录，但成功对账后不再投影其成员。同步组在 Casdoor 删除；校验通过的目录中缺少该组时，Nexent 软删除本地组及成员关系，并按远端结果更新层级。删除和同名重建会产生新的映射，旧资源授权不会自动转到新组。删除前先检查知识库和智能体的共享引用，并处理子组。 |
+
+群组由 Casdoor 实例地址、组织、内部组名及创建时间共同识别；成员通过稳定身份绑定匹配。每次应用完整目录前会检查返回结构和父子关系，并使用 Nexent 租户组锁协调本地写入。这个锁不会锁住 Casdoor 管理台。远端已写入但回读失败时，本地会保留上次确认的目录并重试；批量改成员可能只完成一部分，重试前应先刷新两边状态。[群组与成员读写](../backend/management/services/permission/identity/casdoor_groups.py) · [本地群组投影](../backend/management/db/identity/casdoor_groups.py) · [资源组授权](../backend/permissions/group_sharing.py)
+
+#### 生效时间和验证方法
+
+- **登录建号**：OAuth 回调成功时完成；角色、权限和组成员分别在各自下一轮成功同步后更新。
+- **角色、功能和群组**：后台任务每轮结束后等待约 15 秒，已登录页面的授权信息另有约 15 秒刷新。实际延迟包括本轮耗时和页面刷新；功能快照的 60 秒有效期不适用于会话、角色显示或组成员。
+- **变更验收**：用同一个已登录账号，依次添加、移除角色成员和 `model:create`，观察 Nexent 用户信息与真实创建接口；再把用户加入知识库只读组、切到可编辑组并移出两组，分别实测读取与编辑。对账号停用单独验证新登录、旧会话和 API Key，不能用界面变更代替会话撤销验证。
+
+若上线要求用户停用后立即在 Nexent 失效，需要另建账号生命周期同步，验证远端事件并用周期对账兜底，再按原 `user_id` 执行本地停用和会话撤销。设计和回退要求见[统一登录策略和全量范围](#统一登录策略和全量范围)。
 
 ### 新增受 Casdoor 管理的功能动作
 
@@ -556,24 +807,55 @@ Casdoor 的「大语言模型 AI」菜单用于管理 AI 智能体的身份、MC
 
 ## 12. 三种身份管理方案对比
 
-这里区分三个方案：**A. Nexent 原生**，继续使用自身账号和业务授权；**B. Casdoor 托管**，使用 Casdoor 登录页和管理台；**C. Casdoor + Nexent 自建管理页**，认证仍由 Casdoor 托管，Nexent 为常用管理操作提供自己的界面，经后端调用 Casdoor API。
+**当前选型是 Casdoor 托管认证、Nexent 本地授权。** 下表保留早期三个方案的逐项估算，其中 B、C 的授权部分属于历史备选。当前选型的工作量以[下方对比图](#企业身份与权限能力明细)为准。
 
-| 能力 | A. Nexent 原生 | B. Casdoor 托管 | C. Casdoor + Nexent 自建页 |
+**A. Nexent 原生**：只使用 Nexent 的账号、认证和授权。**B. Casdoor 托管**：使用 Casdoor 的登录页和管理台。**C. Casdoor + Nexent 自建管理页**：登录、注册和找回密码仍使用 Casdoor 托管页；管理员在 Nexent 页面操作，由 Nexent 后端调用 Casdoor API。
+
+工作量按**当前分支已有能力到目标能力的增量**估算，三列用同一标准。**✓ 无需改动**表示直接复用该方案已有的代码或页面；如果仍要开通部署配置，会单列。**低**为配置或小范围改动和验证；**中**为新增或修改一项页面、接口或工作流及配套测试；**高**为跨页面、服务或数据的实现，需要联调、迁移、安全测试或恢复演练。等级用于方案比较，不等同于工期承诺。
+
+| 工作项与差异点 | A. Nexent 原生 | B. Casdoor 托管 | C. Casdoor + Nexent 自建管理页 |
 | --- | --- | --- | --- |
-| 用户注册 / 登录 | 已有本地邮箱密码和邀请码流程，入口一致，只有一套会话及账号数据 | Casdoor 登记、验证凭据，Nexent 首次回调自动加入目标租户；可接多种身份源和 SSO | 用户仍走 Casdoor 托管页。自建管理页不要求重写登录；若必须自建认证界面，需要另外维护验证码、MFA、回跳和会话错误等流程 |
-| 手机号 / 邮箱验证 | 本地邮箱字段和密码登录不等于邮件所有权验证。完整的短信/邮件发码、限流、失效和验证流程需要补建或接第三方身份服务 | 配置 Email 和 SMS 提供商，可分别用于注册、验证码登录和找回密码；仍需提供商账号、模板及可用发送通道 | 复用同一套 Casdoor 发码、验证与密码策略；自建页若接触验证码，仍要正确处理重发、过期、错误和风控，不把服务密钥交给浏览器 |
-| 用户修改密码 / 忘记密码 | 已有登录后持旧密码修改；要覆盖忘记密码后的自助恢复，还需身份验证和恢复流程 | 在 Casdoor 用户页改密，或从「忘记密码？」验证后重设。Nexent 的 Casdoor 专用账号无本地密码 | 优先从 Nexent 跳到 Casdoor 的自助流程。涉及改密的自建页面不要代理或保存用户密码 |
-| 管理员批量创建、重置密码、删除 | 已有租户用户管理和删除；批量建号和管理员自助重置不属于当前这一套 UI 的完整能力，需要另建工作流 | 用户页支持 XLSX 导入，管理员可重设密码、停用和删除。Casdoor 账号、Nexent 账号和各自会话仍有独立生命周期 | 管理员可在同一页面执行；需要自建批量预检、部分失败重试、审计，以及 Nexent 会话撤销和资源交接，避免删除一侧后另一侧仍可访问 |
-| 修改角色和权限 | Nexent 管理本地角色和租户权限；统一可编辑动作策略需要额外管理界面和机制 | Casdoor 管理角色成员和功能策略，Nexent 同步已适配的角色与动作。仅登记的目录项不会自动成为接口权限 | 后端经租户和管理员校验再更新 Casdoor。只允许操作授权范围内的角色、模型和已接入动作，显示同步中或已生效 |
-| 不同组访问同一知识库 / 智能体 | 当前分支已有本地组级资源授权，可给组 A、B 只读，给组 C 编辑；此能力无需 Casdoor | Casdoor 提供同步后的组及成员；具体资源的只读、编辑、私有仍由 Nexent 保存和校验 | 在 Nexent 同页配置组和具体资源授权，Casdoor 管成员，Nexent 保留资源规则和稳定组 ID |
-| 树状管理用户 | 当前分支有父组字段和成员表；要做展开式目录以及按组浏览成员，需在 Nexent 补树形视图 | Casdoor 组织树支持浏览父子组及成员。目录层级不默认意味着父子组权限继承 | 复用 Casdoor 层级或 Nexent 镜像构建树形 UI，额外实现分页搜索、跨组用户显示和变更保护 |
-| 成本与边界 | 依赖少，适合单应用且只需基础登录、租户和资源权限；完整身份运营能力需自己维护 | 身份功能上线最快，需要维护 Casdoor 服务、备份升级、外部发送渠道和同步监控；管理员会切换界面 | 管理体验一致、能贴合租户语义；开发和测试成本最高，需维护 API 版本适配、最小权限、审计、幂等及撤销 |
+| 基础注册、邮箱密码登录、Nexent 会话 | **✓ 无需改动**：复用现有邮箱密码、邀请码注册及 Nexent 会话。 | **低**：配置 Casdoor 应用、回调、目标租户和登录入口；复用现有 OAuth 及无邀请码建号流程。 | **低**：同 B，配置后直接使用 Casdoor 登录、注册页；Nexent 管理页不收集登录凭据。 |
+| 邮箱和手机号验证、验证码登录 | **高**：补手机号绑定和唯一性校验，接邮件及短信通道，实现验证码签发、限流、重发、过期与一次性消费，改造注册及登录页。 | **低**：配置 Email、SMS 提供商、模板和应用验证规则，联调注册及验证码登录。 | **低**：同 B，用户继续在托管页收发与提交验证码，无须新增 Nexent 验证码接口。 |
+| 接入 QQ、微信、GitHub 等第三方登录 | **中**：复用已有 GitHub、微信直连能力；新增未接入的提供商，例如 QQ，需要适配授权、回调、身份绑定及测试，并分别维护应用凭证。 | **低**：在第三方平台登记 Casdoor 回调，配置已支持的提供商及应用入口，逐家验收。 | **低**：同 B，在 Casdoor 配置第三方提供商，Nexent 登录链路复用已有回调。 |
+| 用户已登录时修改密码 | **✓ 无需改动**：当前分支保留个人信息里的本地改密页面和接口，仅适用于启用了 Nexent 本地密码的账号，且必须知道旧密码。 | **✓ 无需改动**：使用 Casdoor 自带改密功能；Casdoor 专用账号不设 Nexent 密码。 | **✓ 无需改动**：复用 Casdoor 改密入口，Nexent 管理页不处理用户密码。 |
+| 用户忘记密码后自助找回 | **高**：在发送通道之上新增找回页面、身份核验、一次性重置凭据、重设密码及旧会话撤销。 | **低**：启用 Casdoor 找回入口和对应发送规则，验证邮件或短信通道及重设流程。 | **低**：同 B，配置并复用 Casdoor 找回页。 |
+| 管理员批量创建用户 | **高**：新增导入页面和批量接口，补模板、预检、重复检测、租户和角色校验、初始凭据交付及部分失败处理。 | **✓ 无需改动**：使用 Casdoor 管理台的 XLSX 导入；这些用户在首次登录后进入 Nexent。 | **高**：自建导入页面和后台批任务，在 Casdoor API 之上实现预检、逐条结果、重试和审计。 |
+| 管理员重置用户密码 | **中**：新增管理员重置入口和后端接口，校验目标租户、记录审计，并处理临时凭据和旧会话。 | **✓ 无需改动**：使用 Casdoor 用户管理操作；Nexent 会话联动单列。 | **中**：新增管理入口和后端 API 封装，校验操作者与目标用户，记录审计并处理重置结果。 |
+| 管理员删除用户 | **✓ 无需改动**：复用 Nexent 的用户删除、绑定清理和业务数据处理。 | **✓ 无需改动**：Casdoor 身份在其管理台处理，Nexent 业务账号在 Nexent 处理；跨系统联动单列。 | **中**：在 Nexent 增加 Casdoor 账号删除入口，封装远端调用、目标确认及审计；跨系统联动单列。 |
+| 跨系统停用、删除与撤销旧会话 | **✓ 无需改动**：只有 Nexent 一套账号和会话，复用本地账号禁用及会话失效机制。 | **高**：补账号状态同步或事件加对账，联动 Nexent 停用、会话撤销和 API Key 处理；验证故障和恢复。 | **高**：同 B；自建页还要显示两侧状态、部分失败结果及重试入口。 |
+| 修改用户角色和角色成员 | **✓ 无需改动**：复用 Nexent 内置租户角色的分配。 | **低**：配置 Nexent 角色映射和同步，使用 Casdoor 角色页更新成员；存量绑定账号的本地角色仍按现有边界管理。 | **中**：新增角色和成员管理界面及后端接口，校验租户、可授角色和管理员限制；底层复用角色同步。 |
+| 自定义角色下的功能动作，可新增或撤销 | **高**：新增可编辑的角色、动作目录和策略存储，提供管理页面及接口，接入菜单和后端判权，验收撤权效果。 | **低**：在 Casdoor 配置角色、策略和已接入的动作，复用 Nexent 快照鉴权。未接入的动作若纳入范围，仍需逐项改 Nexent 接口。 | **高**：在 B 的基础上自建策略编辑页、动作选择、授权边界校验、审计和生效反馈；可复用 Casdoor 判权和已有动作接入。 |
+| 父子组、直接成员与可展开的组织树 | **中**：现有组、父组字段及成员管理可复用；补可展开树、按组查用户及换父组后的交互。 | **低**：使用 Casdoor [组织树](https://casdoor.ai/docs/organization/organization-tree/)；配置组织与 Nexent 租户映射、验证现有群组及成员同步。 | **中**：复用现有 Nexent 组和成员编辑能力，补树形浏览、成员查询及同步错误反馈。 |
+| 同一知识库或智能体为不同组配置只读、编辑或私有 | **✓ 无需改动**：复用现有多组授权，私有表示取消组共享。 | **✓ 无需改动**：复用 Nexent 多组授权，直接选择已同步的组；具体资源规则仍在 Nexent。 | **✓ 无需改动**：保留现有资源权限页面和鉴权；组目录改由自建管理页维护，不重做资源权限。 |
+| 存量账号切换、部署和运维 | **✓ 无需改动**：继续使用现有 Nexent 账号、组 ID 和部署，无跨系统迁移。 | **高**：部署并备份 Casdoor，迁移账号（含 `SU`）和组，验证历史资源访问、会话及旧入口关闭，监控同步并演练回退。 | **高**：同 B，还需维护 Nexent 管理页、后端凭证和 Casdoor API 版本兼容，并覆盖管理操作回归。 |
 
-**为什么当前 Nexent 项目值得引入 Casdoor？** 单看邮箱密码登录、租户分组或知识库读写规则，Nexent 可以独立运行，Casdoor 并非硬依赖。此次需求同时包括短信和邮箱验证码、多种登录方式、密码恢复、批量账号治理以及可配置功能策略，这些通用身份能力若全部在 Nexent 重建，会扩大安全维护范围，也难以供其他应用共用。Casdoor 把认证、账号生命周期和组织目录集中起来；Nexent 专注于租户隔离、知识库与智能体授权和业务审计。
+### 企业身份与权限能力明细
 
-建议先用 **B** 落地和验证，再按管理员的真实操作量补 **C**：先做用户查询、批量预检、组成员和角色维护，再接停用与 Nexent 会话撤销。登录、注册和找回密码继续使用托管页。单一组织的部署若只需本地邮箱密码和资源授权，可以保留 **A**。[登录方式](https://casdoor.ai/docs/application/signin-methods/) · [邮件](https://casdoor.ai/docs/provider/email/overview/) · [短信](https://casdoor.ai/docs/provider/sms/overview/) · [用户管理](https://casdoor.ai/docs/user/overview/) · [组织树](https://casdoor.ai/docs/organization/organization-tree/) · [管理 API](https://casdoor.ai/docs/basic/public-api/)
+对比以同等企业能力为目标。图的上半部分对比身份侧的增量工作，下半部分列出两种方案都留在 Nexent 的业务管理工作。工作量从现有功能估算，可复用的能力不重复计入。
+
+![方案一工作量对比：引入与不引入 Casdoor 都分别估算第三方登录和多应用单点登录](./assets/casdoor/casdoor-scheme1-login-effort-breakdown.png)
+
+当前方案的完整交付中，知识库／智能体的多组只读与编辑按**中**等工作量估算，涵盖配置、展示和鉴权。上表的「无需改动」仅表示可沿用已有的多组授权规则。
+
+| 功能点 | 引入 Casdoor 后还需做 | 不引入 Casdoor 的额外工作 |
+| --- | --- | --- |
+| 多应用单点登录 | 在 Casdoor 注册各应用，联调回调和会话。 | **高**：对接已有企业 IdP；没有 IdP 时，需补统一身份服务、客户端和密钥管理。 |
+| 企业第三方登录（Link App、Uniportal） | 在 Casdoor 配置提供商和上游回调，核验接口兼容性。 | **中**：逐个适配未接入的身份源、回调和身份字段；已支持的直连可复用。 |
+| 邮箱、手机号验证与验证码登录 | 配置发送渠道和验证规则。 | **高**：补绑定验证、发码和登录页面、验证码失效和限流。 |
+| 忘记密码、自助找回 | 配置验证渠道，联调托管页与恢复流程。 | **高**：补找回页、一次性恢复凭据和重置后的会话处理。 |
+| TOTP、Passkey 等强认证 | 在 Casdoor 启用并验证注册、登录和恢复。 | **高**：补注册、挑战验证、凭据管理和恢复。 |
+| 入职建号、批量导入、用户删除 | 身份在 Casdoor 管理；Nexent 首次登录建号，存量需绑定。离职时仍要处理 Nexent 会话与资源。 | **高**：批量建号仍需补预检、去重和失败重试；已有本地删除可复用。 |
+| 会话管理和登录日志 | 使用 Casdoor 身份侧记录；Nexent 保留业务会话，补停用后的本地撤销。 | **中**：按需新增会话与登录日志查询页面，补缺失记录。 |
+| 角色、权限、树状用户组 | **Nexent 自建**：补角色管理页、权限管理页和树状用户组管理；动态动作仍需接入后端鉴权。 | **同左**：复用现有内置角色、父组字段、成员管理和资源多组授权。 |
+
+**当前方案的取舍**：复用 Casdoor 的登录、验证码、找回密码和身份管理；Nexent 继续扩展业务授权。无需为角色、功能权限和用户组建立双向同步，但仍要完成存量身份绑定、旧登录入口收口和离职撤权联动。
+
+能力与改造边界可对照[同步设计](#同步设计用户角色功能权限与用户组)、[上线全量切换](#13-上线全量切换与安装初始化)、[Casdoor 登录方式](https://casdoor.ai/docs/application/signin-methods/)、[用户管理与 XLSX 导入](https://casdoor.ai/docs/user/overview/#importing-users-from-xlsx)和[管理 API](https://casdoor.ai/docs/basic/public-api/)。
 
 ## 13. 上线全量切换与安装初始化
+
+> 当前方案只迁移登录身份及绑定，保留原 Nexent 用户 ID、租户、角色、组 ID 和资源授权。下文的 Casdoor 角色、策略、群组导入与同步步骤仅供备选模式参考；现有包含业务组的导入脚本不能直接作为纯身份迁移步骤。
 
 ### 当前实现与上线目标
 
@@ -585,7 +867,7 @@ Casdoor 的「大语言模型 AI」菜单用于管理 AI 智能体的身份、MC
 | --- | --- |
 | `OAUTH_LOGIN_MODE=force` 自动跳转到 Casdoor | 为本地密码登录、注册、密码修改和找回、其他直连提供方及解绑入口执行统一后端规则 |
 | 导入脚本生成独立临时密码，要求首次改密 | 按密码格式选择迁移方案，明确哪些用户能继续用原密码，哪些要激活账号 |
-| 角色和功能权限同步覆盖 `USER`、`DEV`、`ADMIN`，并要求单一有效租户关系 | 盘点超级管理员、资产管理员、多租户用户、历史第三方账号和机器账号，确定各自的迁移路径 |
+| 角色和功能权限同步覆盖 `USER`、`DEV`、`ADMIN`，并要求单一有效租户关系 | 为已有 `SU` 导入 Casdoor 登录身份并校验原角色。资产管理员、多租户用户、历史第三方账号和机器账号按各自路径迁移 |
 | 群组同步配置指定一个组织和一个租户 | 全租户部署需要可遍历的租户与组织映射，以及按映射运行的同步任务 |
 | 生效模型只接管已经接入的动作 | 核对上线需要保留的每个菜单和 API，标明仍由 Nexent 判断的功能 |
 | 通用就绪检查反映进程和工作线程状态 | 安装程序另行核对用户、绑定、组、策略和有效权限，全部满足后才宣布切换完成 |
@@ -648,6 +930,8 @@ Casdoor 新实例可以挂载固定版本的 `init_data.json` 创建组织、应
 `initDataNewOnly` 会重新创建文件中仍声明但数据库已删除的对象。日常需要人工编辑或删除的权限种子，应由一次性任务执行并记录版本，或在首轮完成后从后续启动加载的种子清单移交给运行配置。安装器先用部署 Secret 提供首轮管理凭证，创建业务应用后再持久化其客户端凭证，运行时使用已确认的业务配置。
 
 ### 安装时的自动执行顺序
+
+下图是后台同步权限快照的安装流程。Gateway 在线判权的业务请求见[方案二时序图](#方案二casdoor-登录与-gateway-在线判权)。
 
 首次安装先创建本地初始租户、默认组和必要管理身份，再初始化 Casdoor。已有部署按下列顺序处理存量数据。建议增加独立的一次性初始化任务，Docker 部署由安装脚本运行，Kubernetes 部署使用 Job；成功后启动业务服务并切换入口。已有环境在控制写入的窗口完成最终增量，防止同时修改角色、组成员和密码。
 

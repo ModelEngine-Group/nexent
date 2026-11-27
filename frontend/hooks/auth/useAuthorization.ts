@@ -133,14 +133,19 @@ export function useAuthorization(): AuthorizationContextType {
       });
   }, [refetch, applyAuthzData]);
 
+  const refreshCasdoorAuthorization =
+    user?.casdoorRoleSync ||
+    user?.casdoorFeaturePolicy ||
+    user?.casdoorRoles !== undefined;
+
   useEffect(() => {
-    if (!user?.casdoorRoleSync && !user?.casdoorFeaturePolicy) return;
+    if (!refreshCasdoorAuthorization) return;
 
     const timer = window.setInterval(() => {
       if (checkSessionValid()) void fetchAuthzData();
     }, CASDOOR_AUTHORIZATION_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [user?.casdoorRoleSync, user?.casdoorFeaturePolicy, fetchAuthzData]);
+  }, [refreshCasdoorAuthorization, fetchAuthzData]);
 
   // Initialize authorization on mount
   useEffect(() => {

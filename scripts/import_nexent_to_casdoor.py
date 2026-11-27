@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Import one Nexent tenant's existing users and business groups into Casdoor."""
+"""Import a Nexent tenant's users and groups plus platform administrators into Casdoor."""
 
 import argparse
 import json
@@ -10,6 +10,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -18,6 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 ACTOR = "casdoor-account-import"
 DEFAULT_ROLES = {"USER": "nexent-user", "DEV": "nexent-developer", "ADMIN": "nexent-admin"}
+
+
+class ImportAccount(NamedTuple):
+    email: str
+    role: str
+    tenant_id: str
 
 
 class ImportConflict(Exception):
@@ -56,10 +63,11 @@ def read_journal(path, scope):
 def create_journal(path, scope, accounts, groups, role_names):
     """Store random credentials durably before making any Casdoor request that writes."""
     journal = {"scope": scope, "batch": uuid4().hex, "users": {}, "groups": groups, "roles": role_names}
-    for user_id, (email, role) in accounts.items():
+    for user_id, account in accounts.items():
         identity = uuid4()
         journal["users"][user_id] = {
-            "email": email, "role": role, "username": f"nexent-{identity.hex}", "id": str(identity),
+            "email": account.email, "role": account.role, "tenant_id": account.tenant_id,
+            "username": f"nexent-{identity.hex}", "id": str(identity),
             "temporary_password": secrets.token_urlsafe(15) + "aA1!",
         }
     with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as handle:
@@ -101,8 +109,8 @@ def mapped_role_name(role, mapping):
     raise ImportConflict(f"Configure an unambiguous Casdoor role mapping for Nexent {role}")
 
 
-def plan_import(session, tenant, organization, directory, client, journal):
-    from sqlalchemy import func
+def plan_import(session, tenant, organization, directory, client, journal, *, lock_accounts=False):
+    from sqlalchemy import or_, select
 
     from contracts.roles import normalize_roles
     from management.db.configuration.models import TenantConfig
@@ -120,24 +128,43 @@ def plan_import(session, tenant, organization, directory, client, journal):
     default_id = int(default[0])
     if default_id not in groups:
         raise ImportConflict("The configured default group is missing")
-    rows = session.query(UserAccount).join(UserTenant, UserTenant.user_id == UserAccount.user_id).filter(
-        UserAccount.delete_flag == "N", UserTenant.tenant_id == tenant, UserTenant.delete_flag == "N",
-    ).all()
-    if not rows:
+    tenant_users = select(UserTenant.user_id).where(UserTenant.tenant_id == tenant, UserTenant.delete_flag == "N")
+    candidates = session.query(UserAccount).filter(
+        UserAccount.delete_flag == "N",
+        or_(UserAccount.user_id.in_(tenant_users), UserAccount.user_roles.any("SU")),
+    ).order_by(UserAccount.user_id)
+    rows = (candidates.with_for_update(of=UserAccount) if lock_accounts else candidates).all()
+    local_ids = [row.user_id for row in rows]
+    memberships = defaultdict(list)
+    for user_id, tenant_id in session.query(UserTenant.user_id, UserTenant.tenant_id).filter(
+        UserTenant.user_id.in_(local_ids), UserTenant.delete_flag == "N",
+    ):
+        memberships[user_id].append(tenant_id)
+    if not any(tenant in tenant_ids for tenant_ids in memberships.values()):
         raise ImportConflict("The Nexent tenant has no active accounts")
+
+    local_roles = {row.user_id: normalize_roles(row.user_roles, allow_empty=True) for row in rows}
+    platform_tenants = {}
+    for row in rows:
+        if local_roles[row.user_id] == ("SU",):
+            tenant_ids = memberships[row.user_id]
+            if len(tenant_ids) != 1 or not tenant_ids[0]:
+                raise ImportConflict("A Nexent super administrator must have one active tenant relationship")
+            platform_tenants[row.user_id] = tenant_ids[0]
 
     remote_users = directory._directory_list(client, "get-users", organization)
     bound = directory._bound_users(session, tenant, remote_users)
+    for tenant_id in sorted(set(platform_tenants.values()) - {tenant}):
+        bound.update({
+            user_id: user for user_id, user in directory._bound_users(session, tenant_id, remote_users).items()
+            if platform_tenants.get(user_id) == tenant_id
+        })
     by_email = defaultdict(list)
     by_name = {row["name"]: row for row in remote_users}
     for row in remote_users:
         if row.get("email"):
             by_email[row["email"].strip().casefold()].append(row)
 
-    local_ids = [row.user_id for row in rows]
-    membership_counts = dict(session.query(UserTenant.user_id, func.count(UserTenant.user_tenant_id)).filter(
-        UserTenant.user_id.in_(local_ids), UserTenant.delete_flag == "N",
-    ).group_by(UserTenant.user_id).all())
     binding_ids = {user_id for user_id, in session.query(UserOAuthAccount.user_id).filter(
         UserOAuthAccount.user_id.in_(local_ids), UserOAuthAccount.provider == "casdoor",
         UserOAuthAccount.delete_flag == "N",
@@ -147,28 +174,36 @@ def plan_import(session, tenant, organization, directory, client, journal):
     staged = (journal or {}).get("users", {})
     for row in rows:
         if row.user_id in bound:
+            if row.user_id in platform_tenants:
+                user = bound[row.user_id]
+                if any(user.get(flag) is True for flag in ("isForbidden", "isAdmin", "isGlobalAdmin")):
+                    raise ImportConflict("A Nexent super administrator has an unusable Casdoor binding")
             continue
         if row.user_id in binding_ids:
             raise ImportConflict("An active Casdoor binding does not resolve in the target organization")
         email = (row.user_email or "").strip()
-        roles = normalize_roles(row.user_roles, allow_empty=True)
+        roles = local_roles[row.user_id]
         role = roles[0] if roles else None
-        if (not email or not row.password_login_enabled or role not in DEFAULT_ROLES
-                or membership_counts.get(row.user_id) != 1 or (row.source_metadata or {}).get("api_only")):
+        source_tenant = platform_tenants.get(row.user_id, tenant)
+        if role == "SU":
+            if not email or (row.source_metadata or {}).get("api_only"):
+                raise ImportConflict("A Nexent super administrator lacks an interactive account email")
+        elif (not email or not row.password_login_enabled or role not in DEFAULT_ROLES
+              or len(memberships[row.user_id]) != 1 or (row.source_metadata or {}).get("api_only")):
             skipped += 1
             continue
         saved = staged.get(row.user_id)
         existing = by_name.get(saved["username"]) if saved else None
-        if saved and (saved["email"], saved["role"]) != (email, role):
+        if saved and (saved["email"], saved["role"], saved.get("tenant_id", tenant)) != (email, role, source_tenant):
             raise ImportConflict("A staged Nexent account changed since the first run")
         if existing:
             detail = directory._request(client, "get-user", params={"id": f"{organization}/{saved['username']}"})
             check_recovery_account(detail, saved, organization)
         if any(not existing or found["id"] != existing["id"] for found in by_email[email.casefold()]):
             raise ImportConflict("A Casdoor email conflict requires explicit account linking before import")
-        accounts[row.user_id] = (email, role)
-    if len({email.casefold() for email, _ in accounts.values()}) != len(accounts):
-        raise ImportConflict("The Nexent tenant has duplicate account emails")
+        accounts[row.user_id] = ImportAccount(email, role, source_tenant)
+    if len({account.email.casefold() for account in accounts.values()}) != len(accounts):
+        raise ImportConflict("The Nexent import contains duplicate account emails")
 
     records = directory._parse_groups(directory._directory_list(client, "get-groups", organization), organization)
     scope = directory._scope(organization)
@@ -191,7 +226,7 @@ def plan_import(session, tenant, organization, directory, client, journal):
     for group_id, user_id in session.query(TenantGroupUser.group_id, TenantGroupUser.user_id).filter(
         TenantGroupUser.group_id.in_([group.group_id for group in pending]), TenantGroupUser.delete_flag == "N",
     ):
-        if user_id not in bound and user_id not in accounts:
+        if tenant not in memberships.get(user_id, ()) or (user_id not in bound and user_id not in accounts):
             raise ImportConflict(f"Nexent group {group_id} contains a member who cannot be migrated")
         members[group_id].add(user_id)
     for group in pending:
@@ -207,11 +242,11 @@ def snapshot_groups(groups, members):
             for group in groups}
 
 
-def import_users(session, client, organization, tenant, accounts, users, journal, directory, role_names):
+def import_users(session, client, organization, accounts, users, journal, directory, role_names):
     from management.db.identity.models import UserOAuthAccount
     from management.services.permission.identity.casdoor import subject_key
 
-    for user_id, (email, role) in accounts.items():
+    for user_id, (email, role, tenant_id) in accounts.items():
         saved = journal["users"][user_id]
         name = saved["username"]
         key = f"{organization}/{name}"
@@ -224,21 +259,22 @@ def import_users(session, client, organization, tenant, accounts, users, journal
             })
             user = directory._request(client, "get-user", params={"id": key})
         check_recovery_account(user or {}, saved, organization)
-        role_name = role_names[role]
-        role_id = f"{organization}/{role_name}"
-        remote_role = directory._request(client, "get-role", params={"id": role_id})
-        verify_role(remote_role, organization, role_name)
-        members = remote_role.get("users") or []
-        if key not in members:
-            directory._request(client, "update-role", params={"id": role_id, "columns": "users"},
-                               payload={**remote_role, "users": [*members, key]})
-            updated = directory._request(client, "get-role", params={"id": role_id})
-            verify_role(updated, organization, role_name)
-            if set(updated.get("users") or []) != set(members) | {key}:
-                raise ImportConflict("Casdoor role membership was not confirmed")
+        if role != "SU":
+            role_name = role_names[role]
+            role_id = f"{organization}/{role_name}"
+            remote_role = directory._request(client, "get-role", params={"id": role_id})
+            verify_role(remote_role, organization, role_name)
+            members = remote_role.get("users") or []
+            if key not in members:
+                directory._request(client, "update-role", params={"id": role_id, "columns": "users"},
+                                   payload={**remote_role, "users": [*members, key]})
+                updated = directory._request(client, "get-role", params={"id": role_id})
+                verify_role(updated, organization, role_name)
+                if set(updated.get("users") or []) != set(members) | {key}:
+                    raise ImportConflict("Casdoor role membership was not confirmed")
         session.add(UserOAuthAccount(
             user_id=user_id, provider="casdoor", provider_user_id=subject_key(user["id"]),
-            provider_email=email, provider_username=name, tenant_id=tenant, created_by=ACTOR, updated_by=ACTOR,
+            provider_email=email, provider_username=name, tenant_id=tenant_id, created_by=ACTOR, updated_by=ACTOR,
         ))
         users[user_id] = user
     session.flush()
@@ -298,16 +334,19 @@ def run(args):
     with directory._directory(args.tenant) as (client, session, organization):
         journal = read_journal(args.credentials_file, scope)
         accounts, bound, groups, parents, members, skipped = plan_import(
-            session, args.tenant, organization, directory, client, journal,
+            session, args.tenant, organization, directory, client, journal, lock_accounts=args.apply,
         )
-        role_names = {role: mapped_role_name(role, role_map) for role in sorted({role for _, role in accounts.values()})}
+        roles = {account.role for account in accounts.values() if account.role != "SU"}
+        role_names = {role: mapped_role_name(role, role_map) for role in sorted(roles)}
         for name in role_names.values():
             remote = directory._request(client, "get-role", params={"id": f"{organization}/{name}"})
             verify_role(remote, organization, name)
 
-        admins = sum(role == "ADMIN" for _, role in accounts.values())
+        admins = sum(account.role == "ADMIN" for account in accounts.values())
+        super_admins = sum(account.role == "SU" for account in accounts.values())
         print(f"{'Apply' if args.apply else 'Dry run'} | tenant={args.tenant} organization={organization}")
         print(f"New users: {len(accounts)} ({admins} tenant administrators). Already linked: {len(bound)}. Skipped: {skipped}.")
+        print(f"Nexent super administrators to link as regular Casdoor users: {super_admins}.")
         print(f"Business groups to import: {len(groups)}. Direct memberships: {sum(map(len, members.values()))}.")
         group_snapshot = snapshot_groups(groups, members)
         if journal and (accounts or groups) and (
@@ -320,7 +359,7 @@ def run(args):
         load_system_configuration()
         if journal is None:
             journal = create_journal(args.credentials_file, scope, accounts, group_snapshot, role_names)
-        import_users(session, client, organization, args.tenant, accounts, bound, journal, directory, role_names)
+        import_users(session, client, organization, accounts, bound, journal, directory, role_names)
         import_groups(client, organization, groups, parents, members, bound, journal, directory)
     print("Import committed. Distribute the temporary passwords privately from the credentials file.")
 

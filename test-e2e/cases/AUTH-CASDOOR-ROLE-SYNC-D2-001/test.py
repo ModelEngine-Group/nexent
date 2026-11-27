@@ -58,11 +58,11 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
         assert response.status_code == 200
         return response.json()["data"]["user"]
 
-    def list_users():
-        return client.post("/api/users/list", headers=session_headers, json={"tenant_id": tenant})
+    def assignable_roles():
+        return client.get("/api/users/local/assignable_roles", headers=session_headers)
 
     assert user_info(session_headers)["user_role"] == "USER"
-    assert list_users().status_code == 403
+    assert assignable_roles().status_code == 403
 
     directory = {"id": "member-subject", "owner": "business", "name": "member", "roles": [
         {"owner": "business", "name": "tenant-admin", "isEnabled": True},
@@ -72,6 +72,11 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
 
     def respond(request):
         requested.append(request.url.params["id"])
+        if requested[-1] == "business/local":
+            return httpx.Response(200, json={"status": "ok", "data": {
+                "id": "local-subject", "owner": "business", "name": "local",
+                "roles": [{"owner": "business", "name": "tenant-admin", "isEnabled": True}],
+            }})
         return httpx.Response(status, json={"status": "ok", "data": directory})
 
     manager = ThreadManager(service_name="casdoor-role-test", lane_policies={
@@ -89,7 +94,7 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
             assert promoted["roles"] == ["ADMIN", "OPS"]
             assert promoted["casdoor_role_sync"] is True
             assert "user.role:read" in promoted["permissions"]
-            assert list_users().status_code == 200
+            assert assignable_roles().status_code == 200
 
             status = 503
             assert await sync() == 0
@@ -102,7 +107,7 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
             assert demoted["user_role"] == "USER"
             assert demoted["roles"] == ["USER", "OPS"]
             assert "user.role:read" not in demoted["permissions"]
-            assert list_users().status_code == 403
+            assert assignable_roles().status_code == 403
 
             directory["id"] = "replacement-subject"
             directory["roles"] = [{"owner": "business", "name": "tenant-admin", "isEnabled": True}]
@@ -110,7 +115,35 @@ async def test_role_changes_apply_to_the_same_session(runtime, monkeypatch):
             assert user_info(session_headers)["user_role"] == "USER"
             assert user_info(local_headers)["user_role"] == "USER"
             assert "casdoor_role_sync" not in user_info(local_headers)
-            assert requested == ["business/member"] * 4
+            assert user_info(local_headers)["casdoor_roles"] == [{"name": "tenant-admin", "display_name": "tenant-admin"}]
+            assert requested.count("business/member") == 4
+            assert "business/secondary" not in requested
+
+            custom = {"owner": "business", "name": "qa-reviewer", "displayName": "QA reviewer", "isEnabled": True}
+            directory["id"] = "member-subject"
+            directory["roles"] = [custom]
+            assert await sync() == 0
+            assert user_info(session_headers)["casdoor_roles"] == [
+                {"name": "qa-reviewer", "display_name": "QA reviewer"},
+            ]
+            assert user_info(session_headers)["roles"] == ["USER", "OPS"]
+            assert assignable_roles().status_code == 403
+
+            custom["displayName"] = "Quality reviewer"
+            await sync()
+            assert user_info(session_headers)["casdoor_roles"][0]["display_name"] == "Quality reviewer"
+            directory["roles"] = []
+            status = 503
+            await sync()
+            assert user_info(session_headers)["casdoor_roles"][0]["name"] == "qa-reviewer"
+            status = 200
+            directory["id"] = "replacement-subject"
+            await sync()
+            assert user_info(session_headers)["casdoor_roles"][0]["name"] == "qa-reviewer"
+            directory["id"] = "member-subject"
+            await sync()
+            assert user_info(session_headers)["casdoor_roles"] == []
+            assert assignable_roles().status_code == 403
     finally:
         await manager.shutdown(timeout=5)
 
