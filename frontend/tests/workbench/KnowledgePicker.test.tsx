@@ -244,8 +244,11 @@ it("closing the drawer discards knowledge edits on reopening", async () => {
     "aria-selected",
     "false"
   );
+  const footer = screen
+    .getByRole("dialog")
+    .querySelector<HTMLElement>('[data-picker-part="footer"]')!;
   await userEvent.click(
-    screen.getByText("resourcePicker.close", { selector: "button" })
+    within(footer).getByRole("button", { name: "resourcePicker.close" })
   );
   expect(cancel).toHaveBeenCalledOnce();
   expect(confirm).not.toHaveBeenCalled();
@@ -536,8 +539,11 @@ it("uses text-only knowledge rows in the Workbench drawer and preserves cancella
   ).not.toBeInTheDocument();
   await userEvent.click(row);
   expect(row).toHaveAttribute("aria-selected", "false");
+  const footer = screen
+    .getByRole("dialog")
+    .querySelector<HTMLElement>('[data-picker-part="footer"]')!;
   await userEvent.click(
-    screen.getByText("resourcePicker.close", { selector: "button" })
+    within(footer).getByRole("button", { name: "resourcePicker.close" })
   );
   expect(cancel).toHaveBeenCalledOnce();
   expect(confirm).not.toHaveBeenCalled();

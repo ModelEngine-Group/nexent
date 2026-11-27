@@ -7,11 +7,22 @@ import { useTranslation } from "react-i18next";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import type { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
 
+type ResourceTagFilterState = ReturnType<typeof useResourceTagFilter>;
+
 export function ResourceTagFilterControl({
   filter,
   onChange,
 }: {
-  filter: ReturnType<typeof useResourceTagFilter>;
+  filter: Pick<
+    ResourceTagFilterState,
+    | "definitions"
+    | "predicates"
+    | "setPredicates"
+    | "loading"
+    | "error"
+    | "retry"
+  > &
+    Partial<Pick<ResourceTagFilterState, "filtering">>;
   onChange: () => void;
 }) {
   const { t } = useTranslation("common");
