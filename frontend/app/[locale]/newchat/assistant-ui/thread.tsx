@@ -33,6 +33,7 @@ import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
+import { ReadAloudButton, ReadAloudProvider } from "./read-aloud";
 import { Composer, type ChatMode, type ComposerInputTools } from "./composer";
 import { AgentWelcome } from "@/components/agent/agent-welcome";
 import { TextSuggestion } from "@/components/agent/agent-suggestion";
@@ -1299,6 +1300,7 @@ export const ThreadMessages: FC<{
   onSkillFileSelect,
 }) => {
   const { t } = useTranslation();
+  const readAloudThreadId = useAuiState((s) => s.threads.mainThreadId);
   const messages = useAuiState((s) => s.thread.messages);
   const shareMessageGroups = useMemo(() => {
     const groups: {
@@ -1388,7 +1390,13 @@ export const ThreadMessages: FC<{
 
   return (
     <ThreadMessageRenderProvider {...renderState}>
-      <ThreadPrimitive.Messages components={messageComponents} />
+      {readOnly ? (
+        <ThreadPrimitive.Messages components={messageComponents} />
+      ) : (
+        <ReadAloudProvider key={readAloudThreadId}>
+          <ThreadPrimitive.Messages components={messageComponents} />
+        </ReadAloudProvider>
+      )}
     </ThreadMessageRenderProvider>
   );
 };
@@ -2071,6 +2079,7 @@ const AssistantActionBar: FC = () => {
             </AuiIf>
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
+        <ReadAloudButton />
         <TooltipIconButton
           tooltip={t("chat.thread.refresh")}
           onClick={reloadMessage}

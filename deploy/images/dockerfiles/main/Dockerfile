@@ -157,7 +157,7 @@ COPY backend/runtime /opt/backend/runtime
 COPY backend/tool_collection/langchain /opt/backend/tool_collection/langchain
 COPY backend/contracts /opt/backend/contracts
 COPY backend/configs /opt/backend/configs
-COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/
+COPY backend/assets/baidu_stopwords.txt backend/assets/test_voice.pcm /opt/backend/assets/
 COPY backend/permissions/__init__.py backend/permissions/dac.py backend/permissions/models.py /opt/backend/permissions/
 COPY backend/ext_components/__init__.py /opt/backend/ext_components/
 COPY backend/ext_components/aidp/__init__.py /opt/backend/ext_components/aidp/
