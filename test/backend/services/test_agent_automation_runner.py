@@ -36,6 +36,7 @@ def _load_runner_with_stubs(monkeypatch):
     monkeypatch.setitem(sys.modules, "management.services.conversation.service", conversation_service)
     sys.modules.pop("management.services.automation.runner", None)
     runner_module = importlib.import_module("management.services.automation.runner")
+    monkeypatch.setattr(runner_module, "get_conversation", lambda *args, **kwargs: {})
     monkeypatch.setattr(runner_module, "prepare_conversation_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module, "forward_tracked_background", fail_run_agent_background)
     monkeypatch.setattr(runner_module, "forward_scoped_stop", AsyncMock())

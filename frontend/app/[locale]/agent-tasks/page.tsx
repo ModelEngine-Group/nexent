@@ -48,6 +48,7 @@ import {
 import { agentAutomationService } from "@/services/agentAutomationService";
 import { conversationService } from "@/services/conversationService";
 import AutomationDateTimePicker from "@/features/agentAutomation/components/AutomationDateTimePicker";
+import { AUTOMATION_LIST_UPDATED_EVENT } from "@/features/agentAutomation/confirmationEvent";
 import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
 import { formatDateTimeLocale } from "@/lib/date";
 import type { ApiMessage } from "@/types/conversation";
@@ -398,11 +399,14 @@ export default function AgentTasksPage() {
 
   useEffect(() => {
     let active = true;
-    void Promise.resolve().then(() => {
+    const refresh = () => {
       if (active) void loadTasks();
-    });
+    };
+    window.addEventListener(AUTOMATION_LIST_UPDATED_EVENT, refresh);
+    void Promise.resolve().then(refresh);
     return () => {
       active = false;
+      window.removeEventListener(AUTOMATION_LIST_UPDATED_EVENT, refresh);
     };
   }, [loadTasks]);
 

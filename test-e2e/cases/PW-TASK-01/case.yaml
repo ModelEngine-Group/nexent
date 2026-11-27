@@ -6,6 +6,7 @@ case:
   feature_id: V5-PW-TASK-01
   business_rule_ids:
   - V5-PW-TASK-01-RULE-01
+  - V5-PW-TASK-01-RULE-02
   title: Agent Tasks→Create in Chat→提案→Run/History/Edit/Pause/Resume/Delete
   type: E2E
   priority: P0
@@ -30,8 +31,8 @@ case:
     action: 输入固定自然语言任务需求。
     expected: 会话请求携带 automation 入口，进入定时任务提案流程。
   - order: 4
-    action: 等待任务proposal并检查title/instruction/schedule后确认创建。
-    expected: 准时触发/锁/misfire由API/REL。
+    action: 检查草稿与确认提问，先发送无关问题再发送「好」，确认无任务绑定后点击卡片创建。
+    expected: 聊过别的话题后，「好」不创建任务，卡片按钮仍可创建。
   - order: 5
     action: 回/agent-tasks搜索run_id任务。
     expected: 准时触发/锁/misfire由API/REL。
@@ -53,15 +54,23 @@ case:
   - order: 11
     action: 最后【Delete】任务并确认。
     expected: 准时触发/锁/misfire由API/REL。
+  - order: 12
+    action: 从自动任务入口开启另一个会话，确认唯一草稿的提问已出现，直接回复「好」，再发送「确认创建」。
+    expected: 相邻的短回复创建任务，显式重试返回同一编号，原卡片和刷新后的卡片均显示该编号。
+  - order: 13
+    action: 前往任务列表，核对新增任务并删除。
+    expected: 列表只出现一条匹配该确认回执的任务，清理后消失。
   expected_results:
   - Create in Chat真实创建任务。
   - Run/History/Edit/Pause/Resume/Delete可达且状态正确。
   - 准时触发/锁/misfire由API/REL。
+  - 文字确认和重复确认均返回持久化的同一任务编号，任务列表仅出现一条任务。
   forbidden_side_effects:
   - 点击确认前不发送任务确认请求。
+  - 文字确认不得触发前端按钮的确认请求，也不得创建重复任务。
   acceptance:
   - id: AC-01
-    description: 从会话创建入口提交定时需求，提案卡片存在且只有点击确认后才提交创建请求。
+    description: 从会话创建入口提交定时需求。聊过别的话题后，「好」不绑定任务，点击原卡片仍能创建一次。
     steps: [1, 2, 3, 4, 5]
     expected_results: [1]
     forbidden_side_effects: [1]
@@ -69,6 +78,11 @@ case:
     description: 确认后的任务支持手动运行、查历史、编辑、暂停、恢复和删除。准时调度和锁由对应 API/REL 用例验收。
     steps: [6, 7, 8, 9, 10, 11]
     expected_results: [2, 3]
+  - id: AC-03
+    description: 「好」紧接唯一草稿的确认提问时创建原草稿。显式重试、刷新后原卡片与任务列表均显示同一编号。
+    steps: [12, 13]
+    expected_results: [4]
+    forbidden_side_effects: [2]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 03_Playwright_Journey
@@ -78,7 +92,7 @@ case:
   - 打开/agent-tasks。
   - 点击【Create in Chat】，确认跳/newchat?entry=automation。
   - 输入固定自然语言任务需求。
-  - 等待任务proposal并检查title/instruction/schedule后确认创建。
+  - 核对草稿与提问，聊过别的话题后验证「好」不会创建，再点击卡片。
   - 回/agent-tasks搜索run_id任务。
   - 点击【Run】立即执行。
   - More→【History】查看status/trigger/scheduled/error。
@@ -86,6 +100,8 @@ case:
   - 点击【Pause】后再【Resume】。
   - History中按当前UI测试active cancel或已完成run删除之一。
   - 最后【Delete】任务并确认。
+  - 在另一会话紧接草稿提问回复「好」，显式重试后刷新并核对原卡片。
+  - 在任务列表确认唯一匹配的任务并删除。
   final_business_result:
   - Create in Chat真实创建任务。
   - Run/History/Edit/Pause/Resume/Delete可达且状态正确。

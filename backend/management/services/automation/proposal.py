@@ -27,7 +27,7 @@ from infrastructure.agent_tool_config import build_automation_proposal_tool
 from contracts.errors.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationScheduleInvalidError
 from management.services.automation.service import agent_automation_facade
 from contracts.automation import AutomationProposalCreateRequest
-from management.services.automation.prompt import detect_instruction_language
+from management.services.automation.prompt import PROPOSAL_CONFIRMATION_QUESTIONS, detect_instruction_language
 
 
 logger = logging.getLogger("agent_automation.tool_adapter")
@@ -70,6 +70,10 @@ class AutomationToolRuntimeContext:
     tool_params: Optional[Dict[str, Any]] = None
     timezone: str = DEFAULT_AUTOMATION_TIMEZONE
     has_attachments: bool = False
+    confirm_from_chat: bool = False
+    confirmation_proposal_id: int | None = None
+    confirmation_action: str | None = None
+    confirmation_before_index: int | None = None
 
 
 class AgentLoopAutomationToolAdapter:
@@ -215,6 +219,8 @@ class AgentLoopAutomationToolAdapter:
             if language == "zh"
             else "The scheduled-task proposal is ready. Review its task and schedule, then confirm it."
         )
+        if proposal.get("executable"):
+            message = PROPOSAL_CONFIRMATION_QUESTIONS[language]
         return {
             "status": "proposal_ready",
             "proposal": proposal,

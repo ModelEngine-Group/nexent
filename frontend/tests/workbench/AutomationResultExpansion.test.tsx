@@ -10,6 +10,7 @@ import {
 import { beforeEach, expect, it, vi } from "vitest";
 import { message } from "antd";
 import AgentTasksPage from "@/app/agent-tasks/page";
+import { publishAutomationConfirmation } from "@/features/agentAutomation/confirmationEvent";
 import { agentAutomationService } from "@/services/agentAutomationService";
 import { conversationService } from "@/services/conversationService";
 import type { AgentAutomationTask } from "@/types/agentAutomation";
@@ -107,6 +108,15 @@ it("keeps only the Recent Result control and removes the empty expansion column"
   expect(eye()).toBeVisible();
   expect(agentAutomationService.runs).not.toHaveBeenCalled();
   expect(conversationService.getDetail).not.toHaveBeenCalled();
+});
+
+it("refreshes a mounted task list when chat confirms a task", async () => {
+  await openPage();
+  const initialRequests = vi.mocked(agentAutomationService.list).mock.calls.length;
+  act(() => publishAutomationConfirmation('{"proposal_id":11,"task_id":12}'));
+  await waitFor(() => {
+    expect(agentAutomationService.list).toHaveBeenCalledTimes(initialRequests + 1);
+  });
 });
 
 it("reuses loaded output when Recent Result is reopened", async () => {

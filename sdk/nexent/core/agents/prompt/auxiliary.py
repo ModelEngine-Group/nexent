@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Compose standalone model requests from SDK-owned prompt resources."""
 
 from collections.abc import Mapping
@@ -20,6 +21,7 @@ _OPERATIONS: dict[str, tuple[str, str, str | None]] = {
     "greeting": ("meta/generate_greeting", "GREETING_SYSTEM_PROMPT", "USER_PROMPT"),
     "guardrail_regex": ("safety/guardrail_regex", "GUARDRAIL_SYSTEM_PROMPT", "GUARDRAIL_USER_PROMPT"),
     "automation_intent": ("automation/agent", "INTENT_ANALYSIS_SYSTEM_PROMPT", "INTENT_ANALYSIS_USER_PROMPT"),
+    "automation_confirmation": ("automation/agent", "CONFIRMATION_SYSTEM_PROMPT", "CONFIRMATION_USER_PROMPT"),
     "automation_task_content": ("automation/agent", "TASK_CONTENT_SYSTEM_PROMPT", "TASK_CONTENT_USER_PROMPT"),
     "evaluation_error": ("evaluation/error_explain", "SYSTEM_PROMPT", "USER_PROMPT"),
     "evaluation_cases": ("evaluation/generate_cases", "SYSTEM_PROMPT", "AGENT_QUERY_USER_PROMPT"),

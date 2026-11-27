@@ -18,6 +18,8 @@ acceptance_bindings:
   - test_user_cancel_returns_http_result_and_preparation_cancel_survives
   - test_actual_caller_cancellation_still_propagates
   - test_regression_detects_reuse_of_a_canceled_run
+  AC-04:
+  - test_workbench_execution_prepares_owned_scope_and_projects_result
 preparation:
   families: []
   anchors: false

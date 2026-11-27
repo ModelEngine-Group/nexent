@@ -1,27 +1,31 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
+from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-from contracts.agent import AgentRequest
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import AgentRunLookup, AgentRunReference, AgentStop
 from contracts.automation import AutomationRunStatus, ScheduleTrigger
 from contracts.constants.environment import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS
 from contracts.conversation import MessageSource
 from contracts.errors.exceptions import (
     AgentRunAlreadyActiveError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError,
+    WorkbenchError,
 )
 from management.db.automation import repository as agent_automation_db
-from management.db.conversation.repository import get_prepared_projection_receipt
+from management.db.conversation.repository import get_conversation, get_prepared_projection_receipt
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot
 from management.services.agent.prepared_projection import ProjectedRun, acknowledge_projection, resume_assistant_projection
 from management.services.agent.runtime_client import (
     _agentos_client, forward_active_run, forward_scoped_stop, forward_tracked_background,
 )
+from management.services.agent.workbench import prepare_portable_workbench
 from management.services.automation.capabilities import validate_bindings_available
 from management.services.automation.conversation import automation_conversation_adapter
 from nexent.core.concurrency import run_blocking
@@ -213,10 +217,55 @@ class AgentAutomationRunner:
             enable_automation_tool=False,
         )
         reference = AgentRunReference(run_id=run["runtime_run_id"], conversation_id=run["conversation_id"])
-        snapshot = await prepare_conversation_snapshot(
-            agent_request, reference, run["user_id"], run["tenant_id"],
-            current_user_message_id=turn["user_message_id"],
+        conversation = await run_blocking(
+            "automation-conversation", get_conversation, reference.conversation_id,
+            user_id=run["user_id"], tenant_id=run["tenant_id"], lane="control-io", owner="management",
         )
+        if conversation is None:
+            return self._fail_run(run, task, "AUTOMATION_CONVERSATION_UNAVAILABLE",
+                                  "The conversation bound to this task is unavailable.")
+        execution = agent_automation_db.workbench_execution_config(
+            stored_snapshot, conversation.get("workbench_config"), conversation.get("workbench_config_version"),
+        )
+        workbench = None
+        try:
+            if execution is not None:
+                version = execution["version"]
+                if type(version) is not int or version < 1 or conversation.get("workbench_config") is None:
+                    raise WorkbenchError("WORKBENCH_CONFIG_UNAVAILABLE")
+                agent_request = agent_request.model_copy(update={
+                    "entrypoint": "workbench",
+                    "workbench": WorkbenchSessionConfig.model_validate(execution["config"]),
+                    "expected_workbench_config_version": conversation["workbench_config_version"],
+                })
+                workbench = await run_blocking(
+                    "automation-workbench", prepare_portable_workbench, agent_request, conversation,
+                    run["user_id"], run["tenant_id"], lane="control-io", owner="management",
+                )
+                if workbench is None:
+                    raise WorkbenchError("WORKBENCH_CONFIG_UNAVAILABLE")
+                if workbench.knowledge is not None and any(
+                    warning["code"] == "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE"
+                    for warning in workbench.knowledge.warnings
+                ):
+                    raise WorkbenchError("WORKBENCH_KNOWLEDGE_UNAVAILABLE")
+                # This run uses the task configuration without editing the chat settings.
+                workbench = replace(workbench, version=version)
+            snapshot = await prepare_conversation_snapshot(
+                agent_request, reference, run["user_id"], run["tenant_id"],
+                current_user_message_id=turn["user_message_id"], owned_conversation=conversation,
+                workbench=workbench,
+            )
+        except WorkbenchError as exc:
+            return self._fail_run(run, task, exc.code, f"Workbench execution setup failed: {exc.code}.")
+        except ValidationError:
+            if execution is None:
+                raise
+            return self._fail_run(run, task, "WORKBENCH_CONFIG_INVALID",
+                                  "The configuration saved for this Workbench task is invalid.")
+        if snapshot is None and execution is not None:
+            return self._fail_run(run, task, "WORKBENCH_CONFIG_UNAVAILABLE",
+                                  "The Workbench configuration could not be prepared for this run.")
         if snapshot is None:
             try:
                 result = await forward_tracked_background(

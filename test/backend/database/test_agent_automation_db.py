@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateIndex
 
 from management.db.automation import repository as agent_automation_db
 from management.db.models import AgentAutomationProposal, AgentAutomationRun, AgentAutomationTask
@@ -60,6 +61,9 @@ class _RecordingResult:
         return self
 
     def all(self):
+        return self.rows
+
+    def mappings(self):
         return self.rows
 
     def fetchall(self):
@@ -379,9 +383,32 @@ def test_proposal_crud_helpers_cover_pending_and_accepted_updates(monkeypatch):
             "user",
             {"title": "task"},
             {"executable": True},
+            "PENDING",
         )
         is True
     )
+
+
+def test_confirmation_lookup_reads_only_metadata_with_a_conversation_index(monkeypatch):
+    receipt = {"proposal_id": 13, "status": "ACCEPTED", "expires_at": None, "confirmed_task_id": 21}
+    session = _install_recording_session(monkeypatch, _RecordingResult(rows=[receipt]))
+
+    assert agent_automation_db.list_confirmation_proposals(42, "tenant", "owner") == [receipt]
+    query = session.calls[0][0]
+    assert list(query.selected_columns.keys()) == list(receipt)
+    parameters = query.compile().params
+    assert parameters["conversation_id_1"] == 42
+    assert parameters["tenant_id_1"] == parameters["tenant_id_2"] == "tenant"
+    assert parameters["user_id_1"] == parameters["user_id_2"] == "owner"
+    assert parameters["delete_flag_1"] == parameters["delete_flag_2"] == "N"
+
+    index = next(
+        index for index in AgentAutomationProposal.__table__.indexes
+        if index.name == "idx_agent_automation_proposal_conversation"
+    )
+    index_sql = str(CreateIndex(index).compile(dialect=postgresql.dialect()))
+    assert "(tenant_id, user_id, conversation_id, proposal_id DESC)" in index_sql
+    assert "WHERE delete_flag = 'N'" in index_sql
 
 
 def test_link_proposal_message_unit_updates_private_card_references(monkeypatch):
