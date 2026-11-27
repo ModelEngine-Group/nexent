@@ -3943,6 +3943,7 @@
   "agentAutomation.triggerType.MANUAL": "手动",
   "agentAutomation.triggerType.SCHEDULED": "计划触发",
   "agentAutomation.errors.generic": "自动任务操作失败",
+  "agentAutomation.errors.modelUnavailable": "原会话没有可用模型，请选择模型后重试。",
   "agentAutomation.errors.capabilityNotReady": "智能体缺少执行该任务所需的能力，请先完成配置。",
   "agentAutomation.errors.capabilityUnavailable": "任务所需能力当前不可用，请检查智能体配置。",
   "agentAutomation.errors.capabilityBindingInvalid": "任务能力绑定无效，请重新配置。",

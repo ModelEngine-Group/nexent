@@ -49,7 +49,10 @@ import { agentAutomationService } from "@/services/agentAutomationService";
 import { conversationService } from "@/services/conversationService";
 import AutomationDateTimePicker from "@/features/agentAutomation/components/AutomationDateTimePicker";
 import { AUTOMATION_LIST_UPDATED_EVENT } from "@/features/agentAutomation/confirmationEvent";
-import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
+import {
+  getAutomationErrorMessage,
+  translateAutomationErrorCode,
+} from "@/features/agentAutomation/errorMessage";
 import { formatDateTimeLocale } from "@/lib/date";
 import type { ApiMessage } from "@/types/conversation";
 import type {
@@ -575,7 +578,10 @@ export default function AgentTasksPage() {
       if (result.status === "SUCCEEDED") {
         message.success(t("agentAutomation.page.runSuccess"));
       } else if (result.status === "FAILED" || result.status === "TIMEOUT") {
-        message.error(t(`agentAutomation.runStatus.${result.status}`));
+        message.error(
+          translateAutomationErrorCode(result.error_code, t) ??
+            t(`agentAutomation.runStatus.${result.status}`)
+        );
       } else {
         message.info(t(`agentAutomation.runStatus.${result.status}`));
       }
@@ -1184,7 +1190,9 @@ export default function AgentTasksPage() {
             {
               title: t("agentAutomation.page.errorLog"),
               dataIndex: "error_message",
-              render: (value) => value || "-",
+              render: (value, run) =>
+                translateAutomationErrorCode(run.error_code, t) ??
+                (value || "-"),
             },
             {
               title: t("agentAutomation.page.actions"),
@@ -1281,6 +1289,8 @@ function RunResultPanel({
     run.duration_ms != null ? (run.duration_ms / 1000).toFixed(2) : null;
 
   const isFailed = run.status === "FAILED";
+  const errorMessage =
+    translateAutomationErrorCode(run.error_code, t) ?? run.error_message;
 
   return (
     <div className="px-2 py-3 space-y-3 text-sm">
@@ -1359,10 +1369,8 @@ function RunResultPanel({
               {t("agentAutomation.page.errorCode")}: {run.error_code}
             </div>
           )}
-          {run.error_message && (
-            <div className="text-red-500 mt-1 break-words">
-              {run.error_message}
-            </div>
+          {errorMessage && (
+            <div className="text-red-500 mt-1 break-words">{errorMessage}</div>
           )}
         </div>
       )}

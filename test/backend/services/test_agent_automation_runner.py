@@ -36,7 +36,8 @@ def _load_runner_with_stubs(monkeypatch):
     monkeypatch.setitem(sys.modules, "management.services.conversation.service", conversation_service)
     sys.modules.pop("management.services.automation.runner", None)
     runner_module = importlib.import_module("management.services.automation.runner")
-    monkeypatch.setattr(runner_module, "get_conversation", lambda *args, **kwargs: {})
+    monkeypatch.setattr(runner_module, "get_conversation", lambda *args, **kwargs: {"selected_model_id": 102})
+    monkeypatch.setattr(runner_module, "validate_selected_model", Mock())
     monkeypatch.setattr(runner_module, "prepare_conversation_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module, "forward_tracked_background", fail_run_agent_background)
     monkeypatch.setattr(runner_module, "forward_scoped_stop", AsyncMock())
@@ -269,7 +270,7 @@ async def test_runner_passes_model_and_tool_params_to_background_agent(monkeypat
     run = await runner_module.AgentAutomationRunner().execute_task(task)
 
     assert run["status"] == "SUCCEEDED"
-    assert captured["agent_request"].model_id == 55
+    assert captured["agent_request"].model_id == 102
     assert captured["agent_request"].tool_params == {"tools": {"search": {"top_k": 5}}}
     assert captured["agent_request"].conversation_id == 100
 
@@ -421,7 +422,7 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
 
     assert run["status"] == "SUCCEEDED"
     assert captured["agent_request"].query == task["instruction"]
-    assert captured["agent_request"].model_id == 55
+    assert captured["agent_request"].model_id == 102
     assert captured["agent_request"].tool_params == {"tools": {"search": {"top_k": 5}}}
 
 

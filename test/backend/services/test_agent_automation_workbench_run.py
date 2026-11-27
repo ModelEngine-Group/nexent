@@ -16,6 +16,7 @@ async def test_workbench_runner_uses_task_configuration_and_surfaces_denials(moc
     conversation = {
         "workbench_config": {"mode": "generic_chat", "skill_mounts": [{"skill_id": 7}]},
         "workbench_config_version": 3,
+        "selected_model_id": 102,
     }
     snapshot = {"model_id": 17}
     if saved:
@@ -29,6 +30,7 @@ async def test_workbench_runner_uses_task_configuration_and_surfaces_denials(moc
     run = {**task, "run_id": 3, "runtime_run_id": "b" * 32}
     mocker.patch.object(runner, "validate_bindings_available", AsyncMock(return_value={"available": True}))
     mocker.patch.object(runner, "get_conversation", return_value=conversation)
+    mocker.patch.object(runner, "validate_selected_model")
     mocker.patch.object(runner.automation_conversation_adapter, "append_run_prompt", return_value={
         "user_message_id": 5, "assistant_message_index": 7, "history": [],
     })
@@ -39,7 +41,7 @@ async def test_workbench_runner_uses_task_configuration_and_surfaces_denials(moc
         assert (saved_conversation, user_id, tenant_id) == (conversation, "owner", "tenant")
         assert request.entrypoint == "workbench" and request.expected_workbench_config_version == 3
         assert request.workbench.skill_mounts[0].skill_id == expected_skill
-        assert request.model_id == 17 and request.enable_automation_tool is False
+        assert request.model_id == 102 and request.enable_automation_tool is False
         if error == "RUNTIME_SKILL_FORBIDDEN":
             raise WorkbenchError(error, status_code=403)
         from management.services.agent.workbench import PreparedWorkbench
@@ -90,6 +92,7 @@ async def test_unavailable_workbench_cannot_launch_an_ordinary_background_run(mo
     conversation = {
         "workbench_config": None if problem == "missing_workbench_config" else config,
         "workbench_config_version": 3,
+        "selected_model_id": 102,
     }
     task = {
         "task_id": 9, "conversation_id": 12, "agent_id": 4, "user_id": "owner", "tenant_id": "tenant",
@@ -102,6 +105,7 @@ async def test_unavailable_workbench_cannot_launch_an_ordinary_background_run(mo
     run = {**task, "run_id": 3, "runtime_run_id": "b" * 32}
     mocker.patch.object(runner, "validate_bindings_available", return_value={"available": True})
     mocker.patch.object(runner, "get_conversation", return_value=None if problem == "missing_conversation" else conversation)
+    mocker.patch.object(runner, "validate_selected_model")
     mocker.patch.object(runner.automation_conversation_adapter, "append_run_prompt", return_value={
         "user_message_id": 5, "assistant_message_index": 7, "history": [],
     })

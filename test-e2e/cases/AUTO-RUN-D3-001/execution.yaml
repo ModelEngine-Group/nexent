@@ -20,6 +20,8 @@ acceptance_bindings:
   - test_regression_detects_reuse_of_a_canceled_run
   AC-04:
   - test_workbench_execution_prepares_owned_scope_and_projects_result
+  AC-05:
+  - test_automation_uses_current_saved_model
 preparation:
   families: []
   anchors: false

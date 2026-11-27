@@ -22,6 +22,10 @@ feature:
       turns isolate cancellation, scheduled cancellation consumes one occurrence atomically,
       manual requests return the actual terminal result, and recent results use actual
       execution time and refresh safely.
+  - rule_id: F-126-RULE-04
+    description: Manual and scheduled runs in ordinary chat and Workbench use the
+      source conversation's currently saved model. A missing or unavailable
+      selection fails with a model-specific reason before adding a chat prompt.
   required_test_stages:
   - D2
   - D3

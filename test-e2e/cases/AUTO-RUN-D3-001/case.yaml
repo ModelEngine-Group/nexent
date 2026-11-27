@@ -7,8 +7,10 @@ case:
   requirement_ids:
   - AUTO-RUN-OUTCOME-20261027
   - AUTO-WORKBENCH-RUN-20261127
+  - AUTO-CURRENT-MODEL-20261127
   business_rule_ids:
   - F-126-RULE-03
+  - F-126-RULE-04
   title: Automation run messages and outcomes through real persistence and streaming
   type: INTEGRATION
   priority: P1
@@ -50,6 +52,14 @@ case:
     expected: The owned Workbench configuration is used for admission and the assistant
       result is linked to the run in the original conversation. Only the scheduled
       trigger consumes an occurrence.
+  - order: 5
+    action: Switch the conversation to another model and remove the model saved
+      when the task was created. Run manually and through a claimed schedule
+      in ordinary chat and Workbench. Repeat with an unset or deleted selection
+      while the model saved on the task is still available.
+    expected: Both triggers use the saved current model and write to the source
+      conversation. Invalid selections save a model-specific failure without
+      dispatching Runtime or adding a conversation message.
   expected_results:
   - Committed prompt and assistant messages are linked to their own run with AUTOMATION
     source; failed execution is FAILED and cannot reuse a previous assistant.
@@ -61,6 +71,8 @@ case:
     propagates.
   - Workbench manual and scheduled executions persist scoped results; only the scheduled
     execution advances the schedule.
+  - Current selections override stale task models. Missing or deleted selections
+    fail with AUTOMATION_MODEL_UNAVAILABLE and leave conversation history intact.
   forbidden_side_effects:
   - No business-data mutation, schema migration, ordinary quota bypass, false success
     or association with another run/conversation.
@@ -113,6 +125,12 @@ case:
     - 4
     forbidden_side_effects:
     - 1
+  - id: AC-05
+    description: Ordinary chat and Workbench use the source conversation's current
+      model for manual and scheduled execution and reject missing or deleted selections.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]
   integration_boundary:
   - Real automation runner, adapter, background orchestration, stream finalizer and
     PostgreSQL; AgentOS journal and replay are real and model output is controlled.

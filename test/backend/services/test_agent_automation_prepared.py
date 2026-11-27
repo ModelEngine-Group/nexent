@@ -8,7 +8,7 @@ import pytest
 
 from contracts.agentos import AgentRunLookup, AgentRunReference, AgentStop
 from contracts.agentos import TrackedBackgroundResult
-from contracts.errors.exceptions import RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.errors.exceptions import RunModelControlsError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from management.services.agent.prepared_projection import ProjectedRun
 from management.services.automation import runner
 
@@ -25,7 +25,8 @@ def automation(mocker):
         "task_id": 1, "user_id": ACTOR[0], "tenant_id": ACTOR[1],
         "started_at": datetime.now(timezone.utc),
     }
-    task = {**run, "agent_id": 2, "instruction": "question", "status": "ACTIVE"}
+    task = {**run, "agent_id": 2, "instruction": "question", "status": "ACTIVE",
+            "runtime_snapshot": {"model_id": 101}}
     client = SimpleNamespace(
         start_prepared_run=AsyncMock(return_value=REFERENCE), inspect_run=AsyncMock(),
         acknowledge_projection=AsyncMock(),
@@ -37,8 +38,9 @@ def automation(mocker):
 
     mocker.patch.object(runner, "run_blocking", side_effect=inline)
     mocker.patch.object(runner, "get_conversation", return_value={
-        "conversation_id": REFERENCE.conversation_id, "workbench_config": None,
+        "conversation_id": REFERENCE.conversation_id, "workbench_config": None, "selected_model_id": 102,
     })
+    mocker.patch.object(runner, "validate_selected_model")
     mocker.patch.object(runner, "validate_bindings_available", return_value={"available": True})
     mocker.patch.object(runner.automation_conversation_adapter, "append_run_prompt", return_value={
         "user_message_id": 31, "history": [], "assistant_message_index": 9,
@@ -72,11 +74,30 @@ async def test_automation_records_projection_before_dispatch_and_keeps_uncertain
     client.start_prepared_run.side_effect = lose_ack
     result = await executor._execute_active_run(run, task)
     assert result["status"] == "RUNNING" and result["projection_message_index"] == 9
+    runner.validate_selected_model.assert_called_once_with(102, ACTOR[1])
+    assert runner.validate_bindings_available.await_args.kwargs["model_id"] == 102
+    assert compile_snapshot.await_args.args[0].model_id == 102
     assert compile_snapshot.await_args.args[1:] == (REFERENCE, *ACTOR)
     assert compile_snapshot.await_args.kwargs["current_user_message_id"] == 31
     assert compile_snapshot.await_args.kwargs["owned_conversation"] == runner.get_conversation.return_value
     runner.get_conversation.assert_called_once_with(REFERENCE.conversation_id, user_id=ACTOR[0], tenant_id=ACTOR[1])
     legacy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected_model_id", [None, 102])
+async def test_unavailable_conversation_model_stops_before_prompt(automation, selected_model_id):
+    executor, run, task, client = automation
+    runner.get_conversation.return_value["selected_model_id"] = selected_model_id
+    runner.validate_selected_model.side_effect = RunModelControlsError("model_not_available")
+
+    with pytest.raises(RunModelControlsError, match="model_not_available"):
+        await executor._execute_active_run(run, task)
+
+    assert runner.validate_selected_model.call_count == int(selected_model_id is not None)
+    runner.validate_bindings_available.assert_not_awaited()
+    runner.automation_conversation_adapter.append_run_prompt.assert_not_called()
+    client.start_prepared_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio

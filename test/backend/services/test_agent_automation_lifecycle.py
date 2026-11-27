@@ -231,7 +231,8 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
         return tasks[task_id]
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "get_conversation", lambda *args, **kwargs: {})
+    monkeypatch.setattr(runner_module, "get_conversation", lambda *args, **kwargs: {"selected_model_id": 102})
+    monkeypatch.setattr(runner_module, "validate_selected_model", lambda *args: {})
     monkeypatch.setattr(runner_module, "prepare_conversation_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value=None))

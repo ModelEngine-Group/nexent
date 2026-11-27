@@ -16,7 +16,7 @@ from contracts.constants.environment import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SEC
 from contracts.conversation import MessageSource
 from contracts.errors.exceptions import (
     AgentRunAlreadyActiveError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError,
-    WorkbenchError,
+    RunModelControlsError, WorkbenchError,
 )
 from management.db.automation import repository as agent_automation_db
 from management.db.conversation.repository import get_conversation, get_prepared_projection_receipt
@@ -28,6 +28,7 @@ from management.services.agent.runtime_client import (
 from management.services.agent.workbench import prepare_portable_workbench
 from management.services.automation.capabilities import validate_bindings_available
 from management.services.automation.conversation import automation_conversation_adapter
+from management.services.model.run_controls import validate_selected_model
 from nexent.core.concurrency import run_blocking
 
 
@@ -144,6 +145,13 @@ class AgentAutomationRunner:
             if run.get("projection_message_index") is not None or run.get("_background_outcome_unknown"):
                 logger.warning("Deferred automation projection run_id=%s error=%s", run["run_id"], type(exc).__name__)
                 return run
+            if isinstance(exc, RunModelControlsError) and exc.code in {
+                "model_not_available", "model_unavailable", "model_type_invalid",
+            }:
+                return self._fail_run(
+                    run, task, "AUTOMATION_MODEL_UNAVAILABLE",
+                    "No usable model is selected in the source conversation. Select a model and try again.",
+                )
             return self._fail_run(run, task, "AUTOMATION_RUN_FAILED", str(exc))
         finally:
             self._local_runs.discard(run["run_id"])
@@ -157,6 +165,21 @@ class AgentAutomationRunner:
         generated_prompt = run.get("generated_prompt") if source_id is not None else None
         if generated_prompt is None:
             generated_prompt = task["instruction"].strip()
+        reference = AgentRunReference(run_id=run["runtime_run_id"], conversation_id=run["conversation_id"])
+        conversation = await run_blocking(
+            "automation-conversation", get_conversation, reference.conversation_id,
+            user_id=run["user_id"], tenant_id=run["tenant_id"], lane="control-io", owner="management",
+        )
+        if conversation is None:
+            return self._fail_run(run, task, "AUTOMATION_CONVERSATION_UNAVAILABLE",
+                                  "The conversation bound to this task is unavailable.")
+        model_id = conversation.get("selected_model_id")
+        if model_id is None:
+            raise RunModelControlsError("model_not_available")
+        await run_blocking(
+            "automation-model", validate_selected_model, model_id, run["tenant_id"],
+            lane="control-io", owner="management",
+        )
         capability_status = await validate_bindings_available(
             agent_id=task["agent_id"],
             tenant_id=task["tenant_id"],
@@ -164,6 +187,7 @@ class AgentAutomationRunner:
             instruction=generated_prompt if source_id is not None else task["instruction"],
             bindings=task.get("capability_bindings") or [],
             version_no=task.get("agent_version_no") or 0,
+            model_id=model_id,
         )
         if not capability_status["available"]:
             return self._fail_run(
@@ -173,19 +197,7 @@ class AgentAutomationRunner:
                 "Required automation capability is unavailable.",
             )
 
-        stored_snapshot = task.get("runtime_snapshot") or {"agent_id": task["agent_id"]}
-        current_resolution = capability_status.get("resolution") or {}
-        current_agent_snapshot = current_resolution.get("agent_snapshot") or {}
-        runtime_snapshot = {
-            **stored_snapshot,
-            **current_agent_snapshot,
-            # Runtime selections belong to the task even when the Agent metadata changes.
-            "model_id": stored_snapshot.get("model_id"),
-            "tool_params": stored_snapshot.get("tool_params"),
-            "original_instruction": (
-                stored_snapshot.get("original_instruction") or task["instruction"]
-            ),
-        }
+        stored_snapshot = task.get("runtime_snapshot") or {}
         if source_id is None:
             lease_owner = run.get("_lease_owner")
             turn = automation_conversation_adapter.append_run_prompt(
@@ -211,19 +223,11 @@ class AgentAutomationRunner:
             conversation_id=task["conversation_id"],
             history=turn["history"],
             agent_id=task["agent_id"],
-            model_id=runtime_snapshot.get("model_id"),
+            model_id=model_id,
             version_no=task.get("agent_version_no"),
-            tool_params=runtime_snapshot.get("tool_params"),
+            tool_params=stored_snapshot.get("tool_params"),
             enable_automation_tool=False,
         )
-        reference = AgentRunReference(run_id=run["runtime_run_id"], conversation_id=run["conversation_id"])
-        conversation = await run_blocking(
-            "automation-conversation", get_conversation, reference.conversation_id,
-            user_id=run["user_id"], tenant_id=run["tenant_id"], lane="control-io", owner="management",
-        )
-        if conversation is None:
-            return self._fail_run(run, task, "AUTOMATION_CONVERSATION_UNAVAILABLE",
-                                  "The conversation bound to this task is unavailable.")
         execution = agent_automation_db.workbench_execution_config(
             stored_snapshot, conversation.get("workbench_config"), conversation.get("workbench_config_version"),
         )

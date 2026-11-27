@@ -263,3 +263,44 @@ it.each(["CANCELED", "FAILED", "TIMEOUT", "SKIPPED"])(
     expect(success).not.toHaveBeenCalled();
   }
 );
+
+it("explains how to fix a missing source model after a manual run", async () => {
+  const report = vi
+    .spyOn(message, "error")
+    .mockImplementation(() => ({}) as never);
+  vi.mocked(agentAutomationService.run).mockResolvedValue({
+    ...runs.items[0],
+    status: "FAILED",
+    error_code: "AUTOMATION_MODEL_UNAVAILABLE",
+  } as never);
+  await openPage();
+  fireEvent.click(
+    screen.getByRole("button", { name: "agentAutomation.page.run" })
+  );
+  await waitFor(() =>
+    expect(report).toHaveBeenCalledWith(
+      "agentAutomation.errors.modelUnavailable"
+    )
+  );
+});
+
+it("explains a scheduled run's missing source model in Recent Result", async () => {
+  vi.mocked(agentAutomationService.runs).mockResolvedValue({
+    ...runs,
+    items: [
+      {
+        ...runs.items[0],
+        status: "FAILED",
+        trigger_type: "SCHEDULED",
+        assistant_message_id: null,
+        error_code: "AUTOMATION_MODEL_UNAVAILABLE",
+        error_message: "Select a model and try again.",
+      },
+    ],
+  } as never);
+  await openPage();
+  fireEvent.click(eye());
+  expect(
+    await screen.findByText("agentAutomation.errors.modelUnavailable")
+  ).toBeVisible();
+});
