@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D3 evaluation-set, evaluator, run, result, annotation and report scenarios."""
 
 from __future__ import annotations
@@ -233,22 +235,25 @@ async def _evaluation_run(identity, mode: str) -> None:
             return
         assert_status(created, 200)
 
-        # Assertion 6: the run executes inside the runtime process. The only
-        # legal way into the runtime dispatch endpoint is the internal JWT, so
-        # user-token and anonymous probes must fail closed at that boundary
-        # while the background dispatch already performed PENDING->RUNNING.
+        # Assertion 6: evaluation dispatch has no externally reachable HTTP
+        # endpoint. Orchestration runs inside the Management process through
+        # management.services.evaluation.dispatch, the former runtime internal
+        # endpoint no longer exists, and the Gateway exposure never opens any
+        # "internal" path segment. User-token and anonymous probes must
+        # therefore fail closed with 404 while the background dispatch
+        # performs PENDING->RUNNING.
         async with client("runtime", token=identity.access_token) as api:
             user_token_dispatch = await api.post(
                 "/agent-evaluations/internal/run",
                 json={"agent_evaluation_id": run_id},
             )
-        assert_status(user_token_dispatch, 401)
+        assert_status(user_token_dispatch, 404)
         async with client("runtime") as api:
             anonymous_dispatch = await api.post(
                 "/agent-evaluations/internal/run",
                 json={"agent_evaluation_id": run_id},
             )
-        assert_status(anonymous_dispatch, 401)
+        assert_status(anonymous_dispatch, 404)
 
         detail = None
         observed: list[str] = []

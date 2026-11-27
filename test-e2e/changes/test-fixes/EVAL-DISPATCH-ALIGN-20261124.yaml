@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: EVAL-DISPATCH-ALIGN-20261124
+  change_type: test-fix
+  title: Align evaluation test assets with in-Management dispatch architecture
+  description: >-
+    Repair the evaluation-related failures collected from the
+    deployment-2026-11-23T032234 batch. Product commit a55e7989f moved
+    evaluation orchestration into the Management process and deleted the
+    runtime internal HTTP endpoints, but three test assets still assumed the
+    old architecture. Fix the D3 boundary probes, the REL-AUTO D5 monkeypatch
+    target, the PW-EVAL-RUN-01 assertion count drift, and the PW-EVAL-SET-01
+    delete confirmation interception.
+  affected_features:
+    existing: [F-137, F-138, F-140, V5-PW-EVAL-RUN-01, V5-PW-EVAL-SET-01, V5-REL-AUTO-CCF3D3CB5D0FC268]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGT-059, AGT-062, AGT-063, API-140, PW-EVAL-RUN-01, PW-EVAL-SET-01, REL-AUTO-CCF3D3CB5D0FC268]
+    added: []
+    modified: [AGT-059, PW-EVAL-RUN-01, PW-EVAL-SET-01, REL-AUTO-CCF3D3CB5D0FC268]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Existing UT pins dispatch_agent_evaluation_run in management.services.evaluation.dispatch with durable claim, idempotent re-dispatch and finished-run short-circuit.
+    - Existing UT pins pending-run redispatch and stale-run reaping in the evaluation maintenance scheduler.
+    reason: >-
+      No product code changes in this fix; every edit lives under test-e2e.
+      Existing unit coverage of management.services.evaluation.dispatch and
+      evaluation maintenance already pins the dispatch function location and
+      the pending redispatch behavior the repaired assets rely on.
+    test_selectors:
+    - test/backend/services/test_evaluation_dispatch.py
+    - test/backend/services/test_evaluation_maintenance.py
+  notes: >-
+    AGT-059 scenario: the user-token and anonymous probes of
+    /agent-evaluations/internal/run now expect 404 because the endpoint was
+    removed with the Management-side dispatcher and the Gateway exposure
+    never opens "internal" path segments; AGT-060/AGT-061 return before the
+    probes and are unaffected. AGT-062/AGT-063/API-140 stay unmodified and
+    unblock automatically once the AGT-059 producer completes. REL-AUTO
+    patches management.services.evaluation.dispatch (the module
+    _dispatch_pending_runs imports at call time) instead of the stale
+    runtime_client alias. PW-EVAL-RUN-01 adds the fifth assertion required by
+    the five expected_results (AC-AGENT-NAME), recorded from step 9 evidence.
+    PW-EVAL-SET-01 step 09 parks the pointer and waits for the trash-button
+    Tooltip to hide before clicking the Popconfirm OK button, matching real
+    user behavior; the optional product-side Tooltip/Popconfirm coordination
+    remains a separate product UX improvement, not part of this fix.
+    Execution evidence for the repaired selectors must come from a full-stack
+    Daily run; static validation alone is not execution proof.
