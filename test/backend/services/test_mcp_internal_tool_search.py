@@ -1339,6 +1339,6 @@ async def test_public_mcp_scanner_skips_internal_tools(mocker):
         "http://mcp.example/sse",
     )
 
-    transport.assert_called_once_with("http://mcp.example/sse", None, None)
+    transport.assert_called_once_with("http://mcp.example/sse", None, None, ssl_verify=True)
     client_class.assert_called_once()
     assert [tool.name for tool in result] == ["public_weather"]

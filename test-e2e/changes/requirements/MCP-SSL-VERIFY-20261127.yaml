@@ -30,5 +30,7 @@ change:
     - test/backend/database/test_remote_mcp_db.py
     - test/backend/app/test_remote_mcp_app.py
     - test/backend/services/test_remote_mcp_service.py
+    - test/backend/services/test_tool_configuration_service.py
+    - test/backend/services/test_mcp_internal_tool_search.py
     - test/backend/app/test_agentos_prepared_evaluation.py
   notes: The sibling documentation checkout is absent; this record carries the acceptance obligations. Default true aligns with A2A agents, CAS and OAuth switches. Management-side checks change from never-verify to verify-by-default; self-signed servers must disable the switch once, surfaced at registration time.
