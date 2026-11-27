@@ -88,7 +88,9 @@ def list_skills(
         service = SkillService(tenant_id=effective_tenant_id)
         list_options = {"for_mount": True} if view == "mount" else {}
         if inventory_tenant:
-            fields = ("skill_id", "name", "description", "source", "tags", "update_time", "group_ids")
+            fields = ("skill_id", "name", "description", "source", "tags", "update_time")
+            if view == "mount":
+                fields += ("group_ids",)
             skills = [
                 {field: skill.get(field) for field in fields}
                 for skill in service.list_skills(include_content=False, **list_options)
