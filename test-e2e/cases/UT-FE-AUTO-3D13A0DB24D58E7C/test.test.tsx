@@ -37,12 +37,16 @@ vi.mock('@/hooks/agent/useAgentReadOnly', () => ({
   useAgentReadOnly: () => hoisted.isReadOnly,
 }));
 
-vi.mock('@/hooks/agent/useSaveGuard', () => ({
-  AGENT_NAME_MAX_LENGTH: 60,
-  AGENT_DESCRIPTION_MAX_LENGTH: 500,
-  isValidAgentName: () => true,
-  createAgentNameConflictValidator: () => ({ validator: async () => {} }),
-}));
+vi.mock('@/hooks/agent/useSaveGuard', async () => {
+  const { AGENT_DISPLAY_NAME_MAX_LENGTH, AGENT_NAME_MAX_LENGTH } = await import('@/lib/agentName');
+  return {
+    AGENT_DISPLAY_NAME_MAX_LENGTH,
+    AGENT_NAME_MAX_LENGTH,
+    AGENT_DESCRIPTION_MAX_LENGTH: 500,
+    isValidAgentName: () => true,
+    createAgentNameConflictValidator: () => ({ validator: async () => {} }),
+  };
+});
 
 vi.mock('@/services/api', () => ({
   API_ENDPOINTS: { agent: { icon: (id: number) => '/api/agent/' + id + '/icon' } },

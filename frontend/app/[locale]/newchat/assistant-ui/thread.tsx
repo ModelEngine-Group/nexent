@@ -235,6 +235,7 @@ export interface ThreadProps {
   welcomeSuggestions?: readonly WelcomeSuggestion[];
   welcomeContent?: ReactNode;
   conversationId?: number;
+  modelPreferenceConversationId?: number;
   newChatDesign?: boolean;
   onBack?: () => void;
   selectedModelId?: string;
@@ -296,6 +297,7 @@ export const Thread: FC<ThreadProps> = ({
   welcomeSuggestions,
   welcomeContent,
   conversationId,
+  modelPreferenceConversationId = conversationId,
   newChatDesign = false,
   onBack,
   selectedModelId,
@@ -349,7 +351,7 @@ export const Thread: FC<ThreadProps> = ({
     `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${modelThreadKey}`,
     selectedModelId,
     onModelChange ? (selectedModelId ?? "") : undefined,
-    conversationId
+    modelPreferenceConversationId
   );
   const effectiveSelectedModelId = onModelChange
     ? (selectedModelId ?? "")
@@ -611,6 +613,7 @@ export const Thread: FC<ThreadProps> = ({
               displayName={displayName}
               conversationTitle={conversationTitle}
               conversationId={conversationId}
+              modelPreferenceConversationId={modelPreferenceConversationId}
               newChatDesign={newChatDesign}
               isRunning={isRunning}
               isShareMode={isShareMode}
@@ -719,6 +722,7 @@ interface ThreadViewProps {
   displayName: string;
   conversationTitle: string;
   conversationId?: number;
+  modelPreferenceConversationId?: number;
   newChatDesign?: boolean;
   isRunning: boolean;
   isShareMode: boolean;
@@ -780,6 +784,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   displayName,
   conversationTitle,
   conversationId,
+  modelPreferenceConversationId,
   newChatDesign = false,
   isRunning,
   isShareMode,
@@ -1103,7 +1108,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
-              conversationId={conversationId}
+              conversationId={modelPreferenceConversationId}
               inputTools={inputTools}
               knowledgeAgent={
                 onKnowledgeScopeChange &&

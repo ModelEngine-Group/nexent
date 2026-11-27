@@ -22,6 +22,13 @@ export function label(key: string): string {
 }
 
 export async function installEditor(page: Page, permission = "EDIT", role = "SPEED") {
+  await page.context().addCookies([
+    {
+      name: "nexent_token_expires_at",
+      value: String(Math.floor(Date.now() / 1000) + 3600),
+      url: baseUrl,
+    },
+  ]);
   const state = {
     draft: makeDraft(permission),
     creationAttempts: [] as Record<string, any>[],
