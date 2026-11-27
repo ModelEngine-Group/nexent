@@ -8,7 +8,15 @@ import sys
 import os
 
 # Import exception classes and models
-from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
+from contracts.errors.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    TenantResourceLimitError,
+    ValidationError,
+    UnauthorizedError,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -612,6 +620,8 @@ class TestTenantEndpointMappings:
             (NotFoundException("missing"), 404),
             (ValidationError("invalid"), 400),
             (UnauthorizedError("bad token"), 401),
+            (RuntimeServiceUnavailableError("runtime down"), 503),
+            (RuntimeServiceTimeoutError("runtime slow"), 504),
             (RuntimeError("database down"), 500),
         ):
             tenant_service_module.delete_tenant.reset_mock(side_effect=True)

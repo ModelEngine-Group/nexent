@@ -94,6 +94,26 @@ def get_tenant_config_info(tenant_id: str, user_id: str, select_key: str):
         return record_info
 
 
+def tenant_exists(tenant_id: str) -> bool:
+    """Return whether a real tenant identity row (TENANT_ID config) exists.
+
+    The identity row is written atomically with tenant creation and soft-deleted
+    by the cascade delete, so it is the authoritative existence signal. A
+    stale TENANT_NAME-only row does not make a tenant exist.
+    """
+    with get_db_session() as session:
+        result = (
+            session.query(TenantConfig.tenant_id)
+            .filter(
+                TenantConfig.tenant_id == tenant_id,
+                TenantConfig.config_key == TENANT_ID,
+                TenantConfig.delete_flag == "N",
+            )
+            .first()
+        )
+        return result is not None
+
+
 def get_single_config_info(tenant_id: str, select_key: str):
     with get_db_session() as session:
         result = (

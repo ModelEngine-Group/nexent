@@ -30,6 +30,8 @@ from contracts.constants.environment import CONTAINER_SKILLS_PATH
 from contracts.errors.exceptions import (
     ForbiddenError,
     NotFoundException,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
     TenantResourceLimitError,
     UserRegistrationException,
     ValidationError,
@@ -47,6 +49,7 @@ from management.db.configuration.tenant import (
     get_all_tenant_ids,
     get_single_config_info,
     insert_config,
+    tenant_exists,
     update_config_by_tenant_config_id,
 )
 from management.db.identity.group import query_groups_by_tenant, remove_group
@@ -98,6 +101,11 @@ def get_tenant_info(tenant_id: str, *, initialize_name: bool = True) -> Dict[str
     """
     if not _is_displayable_tenant_id(tenant_id):
         return {}
+
+    # A missing identity row means the tenant does not exist (or was deleted).
+    # Never resurrect it by auto-backfilling its name config below.
+    if not tenant_exists(tenant_id):
+        raise NotFoundException(f"Tenant {tenant_id} does not exist")
 
     # Get tenant name
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
@@ -211,7 +219,10 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
         tid for tid in get_all_tenant_ids()
         if _is_displayable_tenant_id(tid)
     ]
-    total = len(all_tenant_ids)
+    # Exclude ids whose identity row is gone (e.g. stale rows left behind by
+    # the earlier deleted-tenant read-backfill bug) from both data and totals.
+    existing_tenant_ids = [tid for tid in all_tenant_ids if tenant_exists(tid)]
+    total = len(existing_tenant_ids)
 
     # Calculate pagination
     total_pages = (total + page_size - 1) // page_size if total > 0 else 1
@@ -219,7 +230,7 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     end_idx = start_idx + page_size
 
     # Get tenant IDs for current page
-    page_tenant_ids = all_tenant_ids[start_idx:end_idx]
+    page_tenant_ids = existing_tenant_ids[start_idx:end_idx]
 
     tenants = []
     for tenant_id in page_tenant_ids:
@@ -478,9 +489,9 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         NotFoundException: When tenant does not exist
         ValidationError: When deletion fails
     """
-    # Validate tenant exists
-    name_config = get_single_config_info(tenant_id, TENANT_NAME)
-    if not name_config:
+    # Validate tenant exists via its identity row; a stale name-only config row
+    # (e.g. left behind by an earlier read-backfill bug) must not make deletion pass.
+    if not tenant_exists(tenant_id):
         raise NotFoundException(f"Tenant {tenant_id} does not exist")
 
     logger.info(
@@ -589,7 +600,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                     f"Failed to delete published agent {agent.get('agent_id')}: {str(e)}")
 
         # 5b. Delete all skills, skill instances, and local skill files for the tenant
-        _delete_skills_for_tenant(tenant_id, deleted_by or "system")
+        await _delete_skills_for_tenant(tenant_id, deleted_by or "system")
 
         # 5. Delete all MCP configurations in the tenant
         logger.info(f"Deleting MCP records for tenant {tenant_id}")
@@ -631,6 +642,11 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
             f"Successfully deleted tenant {tenant_id} and all associated resources")
         return True
 
+    # Runtime availability failures must reach the API layer unmapped so the
+    # endpoint can answer 503/504 instead of a misleading 400.
+    except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError):
+        logger.error(f"Runtime service unavailable during tenant deletion {tenant_id}")
+        raise
     except Exception as e:
         logger.error(f"Failed to delete tenant {tenant_id}: {str(e)}")
         raise ValidationError(f"Failed to delete tenant: {str(e)}")

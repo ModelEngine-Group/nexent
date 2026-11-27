@@ -19,7 +19,6 @@ import {
   Modal,
   Form,
   Input,
-  message,
   Switch,
   Spin,
   Pagination,
@@ -87,7 +86,7 @@ const DEFAULT_PAGE_SIZE = 20;
 
 // Removed mockTenants - now using real data from API
 
-function TenantList({
+export function TenantList({
   selected,
   onSelect,
   tenants,
@@ -130,6 +129,13 @@ function TenantList({
   const [deletingTenant, setDeletingTenant] = useState<Tenant | null>(null);
   const [tenantUsers, setTenantUsers] = useState<any[]>([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  // Tracks the delete confirmation request itself so the OK button shows
+  // feedback and cannot be double-submitted while the request is in flight.
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  // Inline failure feedback; the modal stays open so the user can retry.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const { message } = App.useApp();
 
   // State for auto-install official skills feature
   const [installOfficialSkills, setInstallOfficialSkills] = useState(false);
@@ -235,6 +241,8 @@ function TenantList({
   const handleDeleteConfirm = async () => {
     if (!deletingTenant) return;
 
+    setDeleteError(null);
+    setDeleteConfirming(true);
     try {
       await deleteTenant(deletingTenant.tenant_id);
       message.success(t("tenantResources.tenants.deleted"));
@@ -254,15 +262,20 @@ function TenantList({
           onSelect("");
         }
       }
+
+      // Only a successful delete closes the modal.
+      setDeleteModalVisible(false);
+      setDeletingTenant(null);
+      setTenantUsers([]);
     } catch (error) {
-      message.error(
+      // Keep the modal open with inline feedback so the failure is visible
+      // and the user can retry or cancel instead of a silent dismiss.
+      setDeleteError(
         getTenantResourceLimitMessage(error, t) ||
           t("tenantResources.tenantDeleteFailed")
       );
     } finally {
-      setDeleteModalVisible(false);
-      setDeletingTenant(null);
-      setTenantUsers([]);
+      setDeleteConfirming(false);
     }
   };
 
@@ -271,6 +284,7 @@ function TenantList({
     setDeleteModalVisible(false);
     setDeletingTenant(null);
     setTenantUsers([]);
+    setDeleteError(null);
   };
 
   // Handle admin password input change
@@ -542,6 +556,7 @@ function TenantList({
                       type="text"
                       size="small"
                       icon={<Trash2 className="h-3 w-3" />}
+                      aria-label={t("tenantResources.tenants.deleteTenant")}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDeleteClick(tenant);
@@ -988,7 +1003,7 @@ function TenantList({
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         okButtonProps={{ danger: true }}
-        confirmLoading={deleteLoading}
+        confirmLoading={deleteConfirming}
         width={500}
       >
         <Alert
@@ -1063,6 +1078,11 @@ function TenantList({
             {t("tenantResources.tenants.noUsers")}
           </div>
         )}
+
+        {/* Inline failure feedback; the modal stays open for retry */}
+        {deleteError ? (
+          <Alert type="error" showIcon className="mt-4" title={deleteError} />
+        ) : null}
       </Modal>
     </div>
   );

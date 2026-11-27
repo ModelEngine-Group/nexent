@@ -3,7 +3,7 @@
 Tenant management API endpoints
 """
 
-from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 import logging
 from typing import Optional
 
@@ -14,7 +14,6 @@ from starlette.responses import JSONResponse
 from contracts.roles import has_any_role
 from contracts.constants.constants import SU_ROLES
 from contracts.identity import PaginationRequest, TenantCreateRequest, TenantUpdateRequest
-from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.tenants import (
     create_tenant,
@@ -273,6 +272,12 @@ async def delete_tenant_endpoint(
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized tenant deletion attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except RuntimeServiceTimeoutError as exc:
+        logger.error(f"Runtime service timed out during tenant deletion {tenant_id}")
+        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail="Runtime service timed out") from exc
+    except RuntimeServiceUnavailableError as exc:
+        logger.error(f"Runtime service unavailable during tenant deletion {tenant_id}")
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Runtime service is unavailable") from exc
     except Exception as exc:
         logger.error(f"Unexpected error during tenant deletion: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to delete tenant")
