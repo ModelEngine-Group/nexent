@@ -2158,6 +2158,8 @@
   "mcpConfig.addServer.button.updating": "Updating...",
   "mcpConfig.addServer.customHeaders": "Custom Headers",
   "mcpConfig.addServer.customHeadersPlaceholder": "Custom HTTP Headers (JSON format, e.g., {\"X-Custom-Header\": \"value\"})",
+  "mcpConfig.addServer.sslVerify": "Verify SSL certificate",
+  "mcpConfig.addServer.sslVerifyHelp": "Enabled by default. Disable for remote MCP servers with self-signed or internal CA certificates; this setting applies to discovery, health checks and agent invocation.",
   "mcpConfig.serverList.title": "Configured MCP Servers",
   "mcpConfig.serverList.column.name": "Server Name",
   "mcpConfig.serverList.column.url": "URL",

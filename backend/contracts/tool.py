@@ -161,6 +161,9 @@ class AddMcpServiceRequest(BaseModel):
     enabled: Optional[bool] = Field(
         default=False, description="Whether the MCP is enabled after creation"
     )
+    ssl_verify: bool = Field(
+        default=True, description="Verify the remote MCP server TLS certificate"
+    )
     group_ids: Optional[str] = Field(
         None, description="Comma-separated group IDs that can access this MCP"
     )
@@ -248,6 +251,9 @@ class UpdateMcpServiceRequest(BaseModel):
     shared_fields: Optional[Dict[str, Any]] = Field(
         None, description="JSON object of field-level sharing flags"
     )
+    ssl_verify: Optional[bool] = Field(
+        None, description="Verify the remote MCP server TLS certificate; None keeps the stored value"
+    )
 
     @field_validator(
         "name", "description", "authorization_token", "version", mode="before"
@@ -286,6 +292,9 @@ class TestMcpConnectionRequest(BaseModel):
     )
     custom_headers: Optional[Dict[str, Any]] = Field(
         None, description="Custom HTTP headers as JSON object"
+    )
+    ssl_verify: bool = Field(
+        default=True, description="Verify the remote MCP server TLS certificate"
     )
 
 

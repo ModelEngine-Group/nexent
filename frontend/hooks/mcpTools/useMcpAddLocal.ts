@@ -170,6 +170,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted, enableOnCreate }
           group_ids: draft.groupIds?.join(",") ?? undefined,
           ingroup_permission: draft.ingroupPermission ?? undefined,
           shared_fields: draft.sharedFields ?? undefined,
+          ssl_verify: draft.sslVerify ?? true,
         });
         mcpId = result.mcpId;
       }

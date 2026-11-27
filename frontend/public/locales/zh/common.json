@@ -2050,6 +2050,8 @@
   "mcpConfig.addServer.button.updating": "更新中...",
   "mcpConfig.addServer.customHeaders": "自定义 Headers",
   "mcpConfig.addServer.customHeadersPlaceholder": "自定义 HTTP Headers（JSON格式，如：{\"X-Custom-Header\": \"value\"}）",
+  "mcpConfig.addServer.sslVerify": "校验 SSL 证书",
+  "mcpConfig.addServer.sslVerifyHelp": "默认开启。远程 MCP 使用自签名或内部 CA 证书时可取消勾选；该设置同时用于服务发现、健康检查及 Agent 调用。",
   "mcpConfig.serverList.title": "已配置的MCP服务器",
   "mcpConfig.serverList.column.name": "服务器名称",
   "mcpConfig.serverList.column.url": "URL",
