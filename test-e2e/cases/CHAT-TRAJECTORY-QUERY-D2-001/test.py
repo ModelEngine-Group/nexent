@@ -566,14 +566,25 @@ def test_trj_query_facets_and_only_declared_trajectory_routes(harness):
     assert {r["id"] for r in users["items"]} == {"u1", "u2"}
     models = data(get(harness, "/trajectory/records", facet="models", search="OTHER"))
     assert [m["id"] for m in models["items"]] == ["other-model"]
-    routes = [
-        (route.path, route.methods)
-        for route in harness.app.routes
-        if route.path.startswith("/trajectory/")
-    ]
-    assert sum("GET" in methods for _, methods in routes) == 5
-    assert sum("POST" in methods for _, methods in routes) == 1
-    assert sum("PUT" in methods for _, methods in routes) == 1
+    paths = harness.app.openapi()["paths"]
+    routes = {
+        path: set(operations)
+        for path, operations in paths.items()
+        if path.startswith("/trajectory/")
+    }
+    assert routes == {
+        "/trajectory/records": {"get"},
+        "/trajectory/conversations/{conversation_id}": {"get"},
+        "/trajectory/conversations/{conversation_id}/snapshot": {"get"},
+        "/trajectory/conversations/{conversation_id}/contents/{content_id}": {"get"},
+        "/trajectory/cleanup": {"post"},
+        "/trajectory/cleanup/schedule": {"get", "put"},
+        # Archive exchange has its own contract on the same router.
+        "/trajectory/conversations/{conversation_id}/export": {"post"},
+        "/trajectory/import": {"post"},
+        "/trajectory/imports": {"get", "post"},
+        "/trajectory/imports/{import_id}": {"get", "delete"},
+    }
 
 
 def test_trj_query_existing_directory_admin_branch_and_user_reuse(harness):

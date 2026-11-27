@@ -30,6 +30,7 @@ from infrastructure.trace.trajectory_store import (
 )
 from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
 from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 
 IDENTITY = CaptureIdentity("fixture-tenant", "fixture-owner", "123", "42")
 REPO = Path(__file__).resolve().parents[3]
@@ -37,7 +38,7 @@ pytestmark = [pytest.mark.case_id("CHAT-TRAJECTORY-RECOVERY-D5-001"), pytest.mar
 
 
 def request(run_id, text):
-    provider = TracerProvider(shutdown_on_exit=False)
+    provider = TracerProvider(sampler=ALWAYS_ON, shutdown_on_exit=False)
     span = provider.get_tracer("risk-fixture").start_span(
         "model.attempt",
         attributes={
@@ -57,7 +58,8 @@ def request(run_id, text):
 
 
 def environment():
-    return {**os.environ, "PYTHONPATH": os.pathsep.join([str(REPO / "backend"), str(REPO / "sdk")])}
+    sources = (REPO, REPO / "backend", REPO / "sdk")
+    return {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, sources))}
 
 
 def open_store(root):
@@ -248,7 +250,7 @@ def test_trj_recovery_queue_and_disk_failures_keep_business_independent(tmp_path
         manager = ThreadManager("recovery-risk", {"background-service": LanePolicy("background-service", 1, 0)})
         manager.start()
         processor.start(manager, ManagedThreadSpec("file-writer", "risk-fixture", close_hook=processor.request_stop))
-        provider = TracerProvider(shutdown_on_exit=False)
+        provider = TracerProvider(sampler=ALWAYS_ON, shutdown_on_exit=False)
         provider.add_span_processor(processor)
         tracer = provider.get_tracer("risk-fixture")
         try:
@@ -336,7 +338,7 @@ def child_active(root):
     manager = ThreadManager("active-fragment-risk", {"background-service": LanePolicy("background-service", 1, 0)})
     manager.start()
     processor.start(manager, ManagedThreadSpec("writer", "risk-fixture", close_hook=processor.request_stop))
-    provider = TracerProvider(shutdown_on_exit=False)
+    provider = TracerProvider(sampler=ALWAYS_ON, shutdown_on_exit=False)
     provider.add_span_processor(processor)
     try:
         with provider.get_tracer("risk-fixture").start_as_current_span("agent.run") as root_span:
@@ -374,8 +376,21 @@ def test_trj_recovery_active_fragments_and_abandoned_temporaries(tmp_path):
         directory = tmp_path / "fixture-tenant/fixture-owner/42/123"
         raw = (directory / f"{before['trajectory_id']}.otlp.jsonl").read_bytes()
         assert len(raw) >= before["confirmed_bytes"] > 0
-        assert b"active-input" in raw and b"partial-output" in raw
-        assert b"nexent.trajectory.snapshot" in raw
+        assert b"partial-output" not in raw
+        snapshots = [
+            event
+            for line in raw.splitlines()
+            for resource in json.loads(line)["resourceSpans"]
+            for scope in resource["scopeSpans"]
+            for span in scope["spans"]
+            if span["name"] == "nexent.trajectory.fragment"
+            for event in span["events"]
+            if event["name"] == "nexent.trajectory.snapshot"
+        ]
+        assert any(
+            {"key": "input.value", "value": {"stringValue": "active-input"}} in event["attributes"]
+            for event in snapshots
+        )
         assert run["business_status"] == "interrupted" and run["capture_state"] == "incomplete"
         temporary = directory / f".tmp-{uuid4()}"
         temporary.write_text("partial metadata")
@@ -410,7 +425,7 @@ def test_trj_recovery_publication_retries_after_repeated_metadata_failure(tmp_pa
     manager = ThreadManager("publication-risk", {"background-service": LanePolicy("background-service", 1, 0)})
     manager.start()
     processor.start(manager, ManagedThreadSpec("writer", "risk-fixture", close_hook=processor.request_stop))
-    provider = TracerProvider(shutdown_on_exit=False)
+    provider = TracerProvider(sampler=ALWAYS_ON, shutdown_on_exit=False)
     provider.add_span_processor(processor)
     attempts = []
     retried = threading.Event()
