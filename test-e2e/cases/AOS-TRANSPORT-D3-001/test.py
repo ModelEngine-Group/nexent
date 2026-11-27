@@ -345,6 +345,7 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_evaluation_router())
     runtime.include_router(prepared_run.create_prepared_run_router())
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
     monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "shared-aidp-runs"))
     monkeypatch.setattr(prepared_evaluation, "agent_run_manager", LocalExecutionRegistry())
     monkeypatch.setattr(prepared_evaluation, "agent_run", run)
@@ -374,13 +375,22 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
         monkeypatch.setattr(module, "read_shared_aidp_catalog_tool",
                             lambda tool_id, tenant: row if (tool_id, tenant) == (10, "tenant-a") else None)
     scoped_runs = []
+    admitted_snapshots = []
+
+    def aidp_http_client(**kwargs):
+        kwargs["timeout"] = httpx.Timeout(15.0, connect=2.0)
+        return httpx.AsyncClient(trust_env=False, **kwargs)
 
     async def start_scoped(payload, actor):
-        assert payload.workbench_config_version == 3
+        assert payload.workbench_config_version == (1 if payload.conversation_id == 63 else 3)
+        admitted_snapshots.append(payload)
         expected_version = "1" if payload.conversation_id == 62 else "3"
         assert payload.resource.tools[0].version == expected_version
         info = await asyncio.to_thread(prepared_evaluation.prepare_run_snapshot, payload, actor)
-        scoped_runs.append([json.loads(chunk) async for chunk in run(info, None)])
+        try:
+            scoped_runs.append([json.loads(chunk) async for chunk in run(info, None)])
+        finally:
+            prepared_evaluation.discard_prepared_workspace(info)
         return AgentRunReference(conversation_id=payload.conversation_id, run_id=payload.run_id)
 
     monkeypatch.setattr(prepared_run, "start_prepared_run", start_scoped)
@@ -404,7 +414,7 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
         monkeypatch.setattr(environment, "AIDP_API_KEY", "synthetic-shared-aidp-key")
         monkeypatch.setattr(environment, "AIDP_TENANT_ID", "shared-provider")
         monkeypatch.setattr(aidp_service, "AIDP_TENANT_ID", "shared-provider")
-        client = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
+        client = AgentOSClient(runtime_url, aidp_http_client)
         result = await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
         assert result.events == [
             {"type": "thought", "content": "scope checked"}, {"type": "final_answer", "content": "done"},
@@ -443,7 +453,7 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
             "graph_reranking_enable": True, "query_expansion_enable": False, "kwargs": None,
         }
         platform_row = {
-            **row, "tool_id": 110,
+            **row, "tool_id": 110, "inputs": '{"query":{"type":"string"}}',
             "params": [param for param in row["params"] if param["name"] not in migrated]
             + [{"name": name, "default": value} for name, value in migrated.items()],
         }
@@ -468,25 +478,16 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
                 groups.clear()
                 assert await client.start_prepared_run(default, "user-a", "tenant-a") == default_ref
 
-                scoped_platform_tool = build_local_tool(platform_row, "en", None, None)
-                scoped_platform_tool.params["kds_list"] = ["group-kb"]
-                scoped_platform_tool.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: platform_row["tool_id"]}
-                scoped_platform_agent = default_agent.model_copy(update={"tools": [scoped_platform_tool]})
-                scoped_platform_ref = AgentRunReference(conversation_id=63, run_id="f" * 32)
-                scoped_platform = evaluation_snapshot.compile_snapshot(
-                    scoped_platform_agent, [create_model_config_from_record(model)], "question", None,
-                    tenant_id="tenant-a", conversation_id=63, language="en",
-                    prepared_conversation=PreparedConversationScope(
-                        **scoped_platform_ref.model_dump(), workbench_config_version=3,
-                    ),
+                groups.append(17)
+                await _assert_public_workbench_aidp_turn(
+                    catalog_patches, session_factory, client, model, scoped_runs,
                 )
+                scoped_platform = admitted_snapshots[-1]
                 assert scoped_platform.resource.tools[0].parameters["catalog_tool_id"] == platform_row["tool_id"]
                 assert scoped_platform.resource.tools[0].parameters["options"] == {
                     **{name: value for name, value in migrated.items() if name != "kwargs"},
                     "kds_list": ["group-kb"], "top_k": 10,
                 }
-                groups.append(17)
-                assert await client.start_prepared_run(scoped_platform, "user-a", "tenant-a") == scoped_platform_ref
 
     assert observed_whitelists == [["group-kb"], []] * 3 + [["group-kb"]]
     assert catalog_calls == ["Bearer synthetic-shared-aidp-key"]
@@ -504,6 +505,99 @@ async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     }
     assert retrieval_payloads[-1]["query_expansion_enable"] is False
     assert len(scoped_runs) == 5 and all(events[-1]["content"] == "done" for events in scoped_runs)
+
+
+async def _assert_public_workbench_aidp_turn(monkeypatch, session_factory, runtime_client_instance, model, runs):
+    from contracts.agent import SystemAgentRef
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+    from infrastructure import memory_io
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from management.api.agent import conversation_run
+    from management.db.tool import repository
+    from management.services.agent import conversation_submission, prepared_turn, runtime_client, tool_identity, workbench
+    from management.services.agent.preparation import run as preparation, tools
+    from management.services.knowledge_base import mount, scope
+    from management.services.model import run_controls
+    from nexent.core.agents.contracts.config import AgentConfig
+
+    async def inline(_name, function, *args, lane=None, owner=None, **kwargs):
+        return function(*args, **kwargs)
+
+    async def claim(payload, user, tenant, dispatch, **_kwargs):
+        claimed = payload.model_copy(update={"claimed_run_id": "f" * 32})
+        return await dispatch(claimed, user, tenant)
+
+    async def memory_disabled(*_args, **_kwargs):
+        return False
+
+    async def model_catalog(_tenant, *, versions):
+        config = create_model_config_from_record(model)
+        versions[config.cite_name] = (model["model_id"], model["update_time"])
+        return [config]
+
+    async def compile_agent(**kwargs):
+        knowledge_tools = kwargs["runtime_knowledge_tools"]
+        assert knowledge_tools[0]["description_zh"]
+        localized_inputs = json.loads(knowledge_tools[0]["inputs"])
+        assert localized_inputs["query"]["description_zh"]
+        selected_tools = await tools.create_tool_config_list(
+            kwargs["agent_id"], kwargs["tenant_id"], kwargs["user_id"], version_no=kwargs["version_no"],
+            tool_params=kwargs["tool_params"], runtime_skill_snapshot=kwargs["runtime_skill_snapshot"],
+            runtime_knowledge_tools=knowledge_tools, language=kwargs["language"], portable_evaluation=True,
+        )
+        return AgentConfig(agent_id=81, version_no=3, name="workbench_main", description="", model_name="eval_llm",
+                           tools=selected_tools)
+
+    async def stream(_turn, _client, **_kwargs):
+        return StreamingResponse(
+            (f"data: {json.dumps(event)}\n\n" for event in runs[-1]), media_type="text/event-stream",
+        )
+
+    root_info = {"name": "workbench_main", "enabled": True, "model_params_override": {}}
+    monkeypatch.setattr(repository, "get_db_session", session_factory)
+    monkeypatch.setattr(workbench, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(workbench.system_agent_provider, "get_workbench_main_ref",
+                        lambda _tenant: SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 81, 3))
+    monkeypatch.setattr(workbench.skill_db, "search_skills_for_agent", lambda **_kwargs: [])
+    monkeypatch.setattr(workbench, "search_agent_info_by_agent_id", lambda *_args, **_kwargs: root_info)
+    monkeypatch.setattr(scope, "search_agent_info_by_agent_id", lambda *_args, **_kwargs: root_info)
+    monkeypatch.setattr(scope, "query_sub_agent_relations", lambda *_args: [])
+    monkeypatch.setattr(scope, "_resolve_aidp_access_snapshot", lambda *_args: SimpleNamespace(
+        accessible_id_set={"group-kb"}, name_to_id={"Allowed": "group-kb"},
+    ))
+    monkeypatch.setattr(mount, "ENABLE_AIDP_KNOWLEDGE", True)
+    monkeypatch.setattr(tools, "search_agent_info_by_agent_id", lambda **_kwargs: root_info)
+    monkeypatch.setattr(run_controls, "validate_agent_model_selection", lambda *_args: None)
+    monkeypatch.setattr(run_controls, "preflight_agent_turn_controls", lambda *_args: None)
+    monkeypatch.setattr(memory_io, "optional_memory_io", memory_disabled)
+    monkeypatch.setattr(preparation, "_ensure_agent_reasoning_snapshot", lambda **_kwargs: None)
+    monkeypatch.setattr(preparation, "create_model_config_list", model_catalog)
+    monkeypatch.setattr(preparation, "create_agent_config", compile_agent)
+    monkeypatch.setattr(preparation, "search_agent_info_by_agent_id", lambda **_kwargs: root_info)
+    monkeypatch.setattr(tool_identity, "resolve_tool_user_context", lambda *_args: {})
+    monkeypatch.setattr(conversation_submission, "submit_conversation", claim)
+    monkeypatch.setattr(prepared_turn, "run_blocking", inline)
+    monkeypatch.setattr(prepared_turn, "set_conversation_admission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(prepared_turn.store, "allocate_conversation_id", lambda: 63)
+    monkeypatch.setattr(prepared_turn.store, "stage_turn", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(prepared_turn.store, "confirm_turn", lambda turn: turn)
+    monkeypatch.setattr(prepared_turn, "_stream_turn", stream)
+    monkeypatch.setattr(runtime_client, "_agentos_client", lambda: runtime_client_instance)
+    monkeypatch.setattr(conversation_run, "get_current_user_id", lambda _: ("user-a", "tenant-a"))
+
+    management = FastAPI()
+    management.include_router(conversation_run.router, prefix="/api")
+    with serve(management) as management_url:
+        async with httpx.AsyncClient(trust_env=False, timeout=15) as caller:
+            response = await caller.post(management_url + "/api/agent/run", json={
+                "query": "What does the knowledge base say?", "entrypoint": "workbench",
+                "workbench": {"mode": "generic_chat", "knowledge_scope": {
+                    "local": {"mode": "disabled"}, "aidp": {"mode": "override", "kds_ids": ["group-kb"]},
+                }},
+            })
+    assert response.status_code == 200, response.text
+    assert '"type": "final_answer", "content": "done"' in response.text
 
 
 @contextmanager
@@ -524,23 +618,29 @@ def _published_workbench_aidp_catalog(row):
             )
             connection.exec_driver_sql(
                 "CREATE TABLE nexent.ag_tool_instance_t (tool_instance_id INT, agent_id INT, version_no INT, "
-                "tenant_id TEXT, enabled BOOLEAN, delete_flag TEXT, tool_id INT, params JSON)"
+                "tenant_id TEXT, enabled BOOLEAN, delete_flag TEXT, tool_id INT, params JSON, "
+                "user_id TEXT, create_time TIMESTAMP, update_time TIMESTAMP, created_by TEXT, updated_by TEXT)"
             )
             connection.exec_driver_sql(
                 "CREATE TABLE nexent.ag_tool_info_t (tool_id INT, name TEXT, class_name TEXT, source TEXT, "
                 "usage TEXT, params JSON, description TEXT, inputs TEXT, output_type TEXT, "
-                "delete_flag TEXT, is_available BOOLEAN, author TEXT)"
+                "delete_flag TEXT, is_available BOOLEAN, author TEXT, origin_name TEXT, category TEXT, "
+                "labels JSON, is_user_selectable BOOLEAN, create_time TIMESTAMP, update_time TIMESTAMP, "
+                "created_by TEXT, updated_by TEXT)"
             )
             connection.execute(text(
                 "INSERT INTO nexent.ag_tenant_agent_t VALUES "
                 "(81, 3, :owner, 'workbench_main', 'SYSTEM', 'N', true)"
             ), {"owner": ASSET_OWNER_TENANT_ID})
             connection.execute(text(
-                "INSERT INTO nexent.ag_tool_instance_t VALUES "
+                "INSERT INTO nexent.ag_tool_instance_t "
+                "(tool_instance_id, agent_id, version_no, tenant_id, enabled, delete_flag, tool_id, params) VALUES "
                 "(:tool_instance_id, 81, 3, :owner, true, 'N', :tool_id, '{}')"
             ), {**row, "owner": ASSET_OWNER_TENANT_ID})
             connection.execute(text(
-                "INSERT INTO nexent.ag_tool_info_t VALUES "
+                "INSERT INTO nexent.ag_tool_info_t "
+                "(tool_id, name, class_name, source, usage, params, description, inputs, output_type, "
+                "delete_flag, is_available, author) VALUES "
                 "(:tool_id, :name, :class_name, :source, :usage, :params, :description, :inputs, "
                 ":output_type, 'N', true, :owner)"
             ), {**row, "params": json.dumps(row["params"]), "owner": ASSET_OWNER_TENANT_ID})

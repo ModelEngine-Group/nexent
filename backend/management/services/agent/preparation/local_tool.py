@@ -12,7 +12,9 @@ from infrastructure.local_tool_execution import (
 from infrastructure.local_tool_overrides import seal_tool_overrides
 from infrastructure.rdb.local_tool_records import read_shared_aidp_catalog_tool, read_workbench_scoped_aidp_tool
 from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, scoped_shared_aidp_revision
+from management.db.tool.repository import apply_local_tool_descriptions
 from management.services.agent.preparation.knowledge_search import _rerank_bindings
+from management.services.tool.catalog import get_local_tools_description_zh
 from nexent.core.agents.contracts.config import ToolConfig
 
 
@@ -34,10 +36,16 @@ def export_scoped_shared_aidp(
         params.pop("kwargs", None)
     options = ScopedSharedAidpOptions.model_validate(params)
     base = build_local_tool(row, language, None, row["inputs"])
-    if base.model_copy(update={"params": options.model_dump(), "metadata": tool.metadata}) != tool.model_copy(
-        update={"params": params},
-    ):
-        raise ValueError("Scoped shared AIDP differs from its catalog tool")
+    expected = base.model_copy(update={"params": options.model_dump(), "metadata": tool.metadata})
+    actual = tool.model_copy(update={"params": params})
+    if expected != actual:
+        sdk_info = get_local_tools_description_zh().get(row["name"])
+        if sdk_info is not None:
+            localized = {"inputs": row["inputs"]}
+            apply_local_tool_descriptions(localized, sdk_info)
+            expected = expected.model_copy(update=localized)
+        if expected != actual:
+            raise ValueError("Scoped shared AIDP differs from its catalog tool")
     binding = ScopedSharedAidpBinding(
         catalog_tool_id=catalog_id, revision=scoped_shared_aidp_revision(tenant_id, agent_id, version_no, row),
         options=options,

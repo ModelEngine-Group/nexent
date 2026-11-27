@@ -374,3 +374,40 @@ def test_scoped_shared_aidp_rejects_invalid_retrieval_options(invalid):
 
     with pytest.raises(ValidationError):
         ScopedSharedAidpOptions.model_validate({"kds_list": [], **invalid})
+
+
+@pytest.mark.asyncio
+async def test_scoped_aidp_accepts_catalog_localization_only(mocker):
+    from contextlib import nullcontext
+
+    from management.db.tool import repository
+    from management.services.agent.preparation import local_tool, tools
+
+    mocker.patch.object(environment, "JWT_SECRET", "fixture-signing-key")
+    row = {
+        "tool_id": 7, "name": "aidp_search", "class_name": "AidpSearchTool", "source": "local",
+        "description": "AIDP search", "usage": None, "output_type": "string",
+        "inputs": '{"query":{"type":"string"}}', "params": [{"name": "top_k", "default": 10}],
+        "instance_params": {},
+    }
+    session = mocker.Mock()
+    session.query.return_value.filter.return_value.first.return_value = SimpleNamespace(params=row["params"])
+    mocker.patch.object(repository, "get_db_session", return_value=nullcontext(session))
+    mocker.patch.object(repository, "as_dict", return_value=dict(row))
+    decorated = repository.add_tool_field({"tool_id": 7, "params": {}})
+    assert decorated["description_zh"]
+    assert decorated["inputs"] != '{"query":{"type":"string"}}'
+    mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[])
+    mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={})
+    tool, = await tools.create_tool_config_list(
+        8, "tenant-a", "user-a", language="zh", version_no=3,
+        runtime_knowledge_tools=[decorated], portable_evaluation=True,
+    )
+    mocker.patch.object(local_tool, "read_shared_aidp_catalog_tool", return_value=row)
+    binding = local_tool.export_scoped_shared_aidp(tool, 8, 3, "tenant-a", "zh")
+    assert binding.parameters["options"] == {"top_k": 10, "kds_list": []}
+    assert binding.parameters["catalog_tool_id"] == 7
+    assert "description_zh" not in binding.parameters
+    for change in ({"description_zh": "tampered"}, {"inputs": "{}"}, {"usage": "tampered"}):
+        with pytest.raises(ValueError, match="differs from its catalog"):
+            local_tool.export_scoped_shared_aidp(tool.model_copy(update=change), 8, 3, "tenant-a", "zh")
