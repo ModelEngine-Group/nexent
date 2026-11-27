@@ -653,7 +653,7 @@ get_compose_version() {
   # Function to get the version of docker compose
   if command -v docker &> /dev/null; then
       version_output=$(docker compose version 2>/dev/null)
-      if [[ $version_output =~ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+      if [[ $version_output =~ v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
           echo "v2 ${BASH_REMATCH[1]}"
           return 0
       fi
@@ -732,7 +732,7 @@ stop_monitoring_services() {
   docker_monitoring_containers_exist || return 0
 
   echo "🔭 Stopping monitoring services..."
-  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" down --remove-orphans; then
+  if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" down --remove-orphans; then
     echo "   ❌ ERROR Failed to stop monitoring services"
     return 1
   fi
@@ -755,8 +755,8 @@ cleanup_stale_monitoring_services() {
   [ "${#stale_services[@]}" -gt 0 ] || return 0
 
   echo "   🧹 Removing stale monitoring provider services..."
-  ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" stop "${stale_services[@]}" >/dev/null 2>&1 || true
-  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" rm -f "${stale_services[@]}"; then
+  deployment_run_compose --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" stop "${stale_services[@]}" || true
+  if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" rm -f "${stale_services[@]}"; then
     echo "   ❌ ERROR Failed to remove stale monitoring services"
     return 1
   fi
@@ -787,7 +787,7 @@ pull_mcp_image() {
     echo "   💡 Skipping pull, using existing image"
   else
     echo "   📥 MCP image not found locally, pulling..."
-    if deployment_run_logged docker pull "${MCP_IMAGE_NAME}"; then
+    if deployment_run_visible docker pull "${MCP_IMAGE_NAME}"; then
       echo "   ✅ MCP image pulled successfully"
       echo "   💡 The image will be available when you need to start MCP services"
     else
@@ -828,7 +828,7 @@ pull_sandbox_image() {
     echo "   💡 Skipping pull, using existing image"
   else
     echo "   📥 Sandbox image not found locally, pulling..."
-    if deployment_run_logged docker pull "${SANDBOX_IMAGE_NAME}"; then
+    if deployment_run_visible docker pull "${SANDBOX_IMAGE_NAME}"; then
       echo "   ✅ Sandbox image pulled successfully"
       echo "   💡 The image will be available when agent sandbox runs are executed"
     else
@@ -860,7 +860,7 @@ reconcile_sandbox_container() {
   else
     echo "🔄 Sandbox mode or image changed; recreating the fixed Sandbox container (workspace volume is preserved)..."
   fi
-  docker rm -f "$container_name" >/dev/null || {
+  deployment_run_visible docker rm -f "$container_name" || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "❌ 无法移除旧的固定沙箱容器：$container_name"
     else
@@ -1138,15 +1138,15 @@ retire_legacy_northbound_container() {
     echo "ERROR: nexent-northbound is not the expected legacy Compose service; inspect it before upgrading."
     return 1
   fi
-  docker update --restart=no nexent-northbound >/dev/null || return 1
-  docker stop --time 30 nexent-northbound >/dev/null || return 1
-  docker rm nexent-northbound >/dev/null || return 1
+  deployment_run_visible docker update --restart=no nexent-northbound || return 1
+  deployment_run_visible docker stop --time 30 nexent-northbound || return 1
+  deployment_run_visible docker rm nexent-northbound || return 1
 }
 
 prepare_core_service_deployment() {
   local service image
   local prepared_images=" "
-  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
+  if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
     echo "Error: invalid Compose configuration; existing business services remain running." >&2
     return 1
   fi
@@ -1171,7 +1171,7 @@ prepare_core_service_deployment() {
         echo "Error: local image $image is missing; build it before deploying." >&2
         return 1
       fi
-      deployment_run_logged docker pull "$image" || return 1
+      deployment_run_visible docker pull "$image" || return 1
     fi
     prepared_images="$prepared_images$image "
   done
@@ -1180,7 +1180,7 @@ prepare_core_service_deployment() {
     *" nexent-config "*)
       # Override the SQL entrypoint: this preflight must not modify the database.
       if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
-        deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+        deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
         run --rm --no-deps --workdir /opt/backend --entrypoint sh nexent-config \
         -c 'test -r management/services/agent/system_initialize.py && test -r management/services/agent/system_release.py'; then
         echo "Error: the backend image cannot initialize/publish Workbench; rebuild the image before deploying." >&2
@@ -1235,7 +1235,7 @@ stop_legacy_workbench_writers() {
     *) echo "Error: unexpected shared Workbench migration state." >&2; return 1 ;;
   esac
   echo "Stopping legacy Config writers for the pending shared Workbench migration..."
-  if ! docker stop --time 60 "${writers[@]}"; then
+  if ! deployment_run_visible docker stop --time 60 "${writers[@]}"; then
     echo "Error: legacy Config writers could not be stopped; migration will not run." >&2
     return 1
   fi
@@ -1249,6 +1249,7 @@ publish_shared_workbench() {
   esac
 
   deployment_log "Applying database migrations and publishing shared Workbench..."
+  # Keep the attached container's SQL and Python output in the deployment log.
   # Keep container paths literal in Git Bash while retaining host-path conversion.
   if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
     deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
@@ -1298,13 +1299,13 @@ deploy_core_services() {
   deployment_log "Starting core services: ${core_services[*]}"
   if [[ " ${core_services[*]} " == *" nexent-gateway "* ]]; then
     # Validate required secrets and the full composition before retiring a live entry.
-    if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
+    if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
       echo "ERROR: Invalid Gateway deployment configuration; the legacy container was left unchanged."
       return 1
     fi
     retire_legacy_northbound_container || return 1
   fi
-  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
+  if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
     echo "   ❌ ERROR Failed to start core services"
     return 1
   fi
@@ -1317,7 +1318,7 @@ deploy_https_nginx() {
     # previously enabled deployment does not keep the proxy running.
     if ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" ps -q nexent-nginx 2>/dev/null | grep -q .; then
       echo "Stopping Nginx HTTPS reverse proxy (HTTPS disabled)..."
-      if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" rm -sf nexent-nginx 2>/dev/null; then
+      if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" rm -sf nexent-nginx; then
         docker rm -f nexent-nginx 2>/dev/null || true
       fi
     fi
@@ -1328,7 +1329,7 @@ deploy_https_nginx() {
   deployment_https_prepare || return 1
 
   deployment_log "Starting Nginx HTTPS reverse proxy..."
-  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then
+  if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then
     echo "   ❌ ERROR Failed to start nexent-nginx"
     return 1
   fi
@@ -1342,8 +1343,8 @@ stop_unselected_data_process_service() {
   [ -f "$compose_file" ] || return 0
 
   echo "data-process is not selected; stopping existing Docker container if present..."
-  ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$compose_file" stop nexent-data-process >/dev/null 2>&1 || true
-  ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$compose_file" rm -f nexent-data-process >/dev/null 2>&1 || true
+  deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent -f "$compose_file" stop nexent-data-process || true
+  deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent -f "$compose_file" rm -f nexent-data-process || true
 }
 
 deploy_infrastructure() {
@@ -1362,7 +1363,7 @@ deploy_infrastructure() {
   fi
 
   if [ -n "$INFRA_SERVICES" ]; then
-    if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
+    if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
       echo "   ❌ ERROR Failed to start infrastructure services"
       return 1
     fi
@@ -1403,7 +1404,7 @@ deploy_monitoring() {
 
   deployment_log "Starting monitoring services..."
   cleanup_stale_monitoring_services || return 1
-  if ! deployment_run_logged ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
+  if ! deployment_run_compose --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
     echo "   ❌ ERROR Failed to start monitoring services"
     return 1
   fi
