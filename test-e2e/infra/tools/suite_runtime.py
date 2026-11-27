@@ -16,6 +16,7 @@ import subprocess
 
 from report_ownership import git_label, responsibility_label
 from suite_terminal import beijing_time, notification_text, terminal_context, write_report
+from validation_policy import affects_batch_result
 
 
 def now():
@@ -207,10 +208,12 @@ def finalize(directory, plan, rows, error=None, *, environment=None):
     validation_path = directory / "asset-validation.json"
     validation = json.loads(validation_path.read_text(encoding="utf-8")) if validation_path.is_file() else None
     asset_incomplete = validation is not None and validation.get("status") != "VALID"
+    if affects_batch_result(validation):
+        failures = True
     summary = {"schema_version": 1, "finished_at": now(), "planned": len(plan),
                "recorded": len(rows), "counts": summary_counts,
                "execution_complete": not (incomplete or error or duplicates or unexpected),
-               "status": "INCOMPLETE" if incomplete or error or duplicates or unexpected else "FAILED" if failures or asset_incomplete else "PASSED",
+               "status": "INCOMPLETE" if incomplete or error or duplicates or unexpected else "FAILED" if failures else "PASSED",
                "error": error, "duplicate_case_ids": duplicates, "unexpected_case_ids": unexpected,
                "d6_complete": True,
                "acceptance_counts": dict(Counter(row.get("acceptance_status", "UNREVIEWED") for row in rows))}
@@ -325,7 +328,7 @@ def render_report(directory, plan, rows, summary, *, metadata_directory=None, ev
         lines += ["", "## Asset validation / coverage integrity", "",
                   f"Asset validation: {validation['status']}; issues: {validation['issue_count']}.",
                   "Details: asset-validation.json. Missing traditional UT is not a formal Case failure or a UT pass.",
-                  "Every planned Case remains accounted for; asset warnings prevent an all-green batch."]
+                  "Every planned Case remains accounted for. Missing Change UT selectors are advisory for the batch result."]
     lines += ["", "## Stage summary", "",
               "| Stage | Planned | PASS | Not passed | Retired / policy skipped | Overall pass rate |",
               "| --- | ---: | ---: | ---: | ---: | ---: |"]

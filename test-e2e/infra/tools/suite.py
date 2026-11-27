@@ -34,10 +34,12 @@ from static_assets import entries as static_entries, inventory as static_invento
 from suite_runtime import BatchLock, config_fingerprint, finalize, fingerprint, logged, now, render_report, save
 from suite_resume import prepare_resume
 from suite_services import controlled_services
+from suite_terminal import notification_text
 from test_asset_lib import repository_root
 from validate_execution import inspect
 
 STAGES = [f"D{i}" for i in range(1, 6)]
+BLOCKED_RESULTS = {"BLOCKED", "BLOCKED_BY_DEPENDENCY"}
 D4_DEFAULT_CASE_TIMEOUT_SECONDS = 600
 D4_WORKER_GRACE_SECONDS = 60
 
@@ -267,6 +269,41 @@ def registered_cleanup(repo, directory, env, timeout, run_logged, *, force=False
     return run_logged(command, repo, env, directory / "logs/cleanup.log", timeout)
 
 
+def record_block_diagnostic(directory, row, record, definition, phase, sources, env):
+    """Save a case-local decision receipt before publishing the result row."""
+    reason = row.get("reason")
+    if phase == "CASE_PLAN":
+        status = record.get("status")
+        explanations = []
+        if status == "blocked":
+            explanations.append("Case definition is marked blocked")
+        if status == "manual" or record.get("automation") == "manual":
+            explanations.append("Manual case is not run by this batch")
+        if not record.get("execution"):
+            explanations.append("Batch plan has no execution binding")
+        source = definition.get("source")
+        if status == "blocked" and isinstance(source, dict) and isinstance(source.get("blocked_reason"), str):
+            explanations.append(source["blocked_reason"])
+        reason = "; ".join(explanations) or "Case is not eligible for automatic execution"
+
+    path = Path("cases") / record["case_id"] / "block-diagnostic.json"
+    diagnostic = {
+        "schema_version": 1, "case_id": record["case_id"], "stage": record["stage"], "result": row["result"],
+        "recorded_at": now(), "phase": phase,
+        "worker_started": phase in {"CASE_PREPARATION", "TEST_EXECUTION", "CASE_WORKER"},
+        "case_status": record.get("status"), "automation": record.get("automation"),
+        "has_execution_binding": bool(record.get("execution")),
+        "reason": notification_text(result_reason(reason or "No more specific reason was recorded", env), env),
+        "related_records": [name for name in sources if (directory / name).is_file()],
+    }
+    try:
+        save(directory / path, diagnostic)
+    except OSError as exc:
+        print(f"{record['case_id']}: could not save block diagnostic ({type(exc).__name__})", flush=True)
+    else:
+        row["evidence"].append(path.as_posix())
+
+
 def worker(repo, home, record, directory, settings):
     """Run one Case with its own asset registry; never clean another run's assets."""
     case_started = time.monotonic()
@@ -287,12 +324,14 @@ def worker(repo, home, record, directory, settings):
     # Online preparation must not be guessed from names or run every factory.
     if record["stage"] != "D1" and review is None:
         save(directory / "receipt.json", {"case_id": record["case_id"], "stage": record["stage"],
-             "result": "BLOCKED", "reason": "Missing per-case preparation declaration", "evidence": []})
+             "result": "BLOCKED", "reason": "Missing per-case preparation declaration",
+             "blocked_phase": "CASE_PREPARATION", "evidence": []})
         return 1
     outcome = "AUTOMATION_ERROR"
     reason = None
     test_details = {}
     preparation_log = None
+    test_started = False
     def preparation_failed(code, log):
         nonlocal outcome, preparation_log
         preparation_log = log
@@ -357,6 +396,7 @@ def worker(repo, home, record, directory, settings):
             else:
                 env["D4_CASE_TIMEOUT_MS"] = str(remaining_ms)
         if outcome != "TIMEOUT":
+            test_started = True
             _, outcome, _ = run_one(record, repo, home, env, result_dir=directory, enforce_timeout=False)
             status_path = directory / "status.json"
             if status_path.is_file():
@@ -394,7 +434,7 @@ def worker(repo, home, record, directory, settings):
                 services.__exit__(None, None, None)
             except Exception:
                 cleanup_code = 2
-        save(directory / "receipt.json", {"case_id": record["case_id"], "stage": record["stage"],
+        receipt = {"case_id": record["case_id"], "stage": record["stage"],
              "result": "CLEANUP_FAILED" if cleanup_code else outcome, "test_result": outcome,
              "cleanup_exit_code": cleanup_code, "reason": reason,
              "cleanup_reason": "Case cleanup failed; inspect runtime/cleanup-results.jsonl and logs/cleanup.log"
@@ -402,7 +442,10 @@ def worker(repo, home, record, directory, settings):
              "test_evidence": test_details.get("evidence", []), "evidence": [directory.name],
              "execution_status": test_details.get("execution_status", outcome),
              "acceptance_status": test_details.get("acceptance_status", "UNREVIEWED"),
-             "acceptance_semantic_review": test_details.get("acceptance_semantic_review", "UNREVIEWED")})
+             "acceptance_semantic_review": test_details.get("acceptance_semantic_review", "UNREVIEWED")}
+        if receipt["result"] in BLOCKED_RESULTS:
+            receipt["blocked_phase"] = "TEST_EXECUTION" if test_started else "CASE_PREPARATION"
+        save(directory / "receipt.json", receipt)
     return 0 if outcome == "PASS" and not cleanup_code else 1
 
 
@@ -526,9 +569,16 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                 case_started_at = now()
                 case_started_clock = time.monotonic()
                 reused = reused_rows.get(case_id)
+                phase, sources = None, []
                 if record.get("asset_blocked"):
+                    phase, sources = "ASSET_VALIDATION", ["asset-validation.json"]
+                    codes = [issue["code"] for issue in (validation_report or {}).get("issues", [])
+                             if issue.get("case_id") == case_id and issue.get("severity") == "CASE_BLOCKED"]
+                    reason = "Case execution asset is missing or invalid; inspect asset-validation.json"
+                    if codes:
+                        reason += " (" + ", ".join(sorted(set(codes))) + ")"
                     row = {"case_id": case_id, "stage": stage, "result": "BLOCKED",
-                           "reason": "Case execution asset is missing or invalid; inspect asset-validation.json",
+                           "reason": reason,
                            "acceptance_status": "INCOMPLETE", "evidence": ["asset-validation.json"]}
                     save(directory / "cases" / case_id / "receipt.json", row)
                 elif reused:
@@ -538,6 +588,10 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                             "case_id": case_id, "stage": record["stage"], "result": row["result"],
                             "cleanup_exit_code": 0, "reused_from": row["reused_from"]})
                 elif case_id in blocked_runtime:
+                    phase, sources = "RUNTIME_PREFLIGHT", ["d0/runtime-preflight.json"]
+                    if case_id in blocked_assets:
+                        phase = "STATIC_ASSET_PREFLIGHT"
+                        sources.insert(0, "d0/static-assets.json")
                     row = {"case_id": case_id, "stage": stage, "result": "BLOCKED",
                            "reason": "; ".join(blocked_runtime[case_id]),
                            "acceptance_status": "INCOMPLETE", "evidence": [f"cases/{case_id}/receipt.json"]}
@@ -545,6 +599,7 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                 elif record["status"] != "active" or not record["execution"]:
                     result = {"retired": "RETIRED", "skipped_by_policy": "SKIPPED_BY_POLICY"}.get(record["status"], "BLOCKED")
                     row = {"case_id": case_id, "stage": stage, "result": result, "reason": record["status"], "evidence": []}
+                    phase, sources = "CASE_PLAN", ["plan.json"]
                 else:
                     case_dir = directory / "cases" / case_id
                     worker_timeout = case_timeout_seconds(record, settings)
@@ -562,17 +617,31 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                     if code and row["result"] == "PASS":
                         row["result"] = "AUTOMATION_ERROR"
                     row["evidence"] = [f"cases/{case_id}", f"logs/{case_id}.log"]
+                    if row["result"] in BLOCKED_RESULTS:
+                        phase = row.get("blocked_phase")
+                        if phase not in ("CASE_PREPARATION", "TEST_EXECUTION"):
+                            phase = "CASE_WORKER"
+                        sources = [f"cases/{case_id}/receipt.json", f"cases/{case_id}/status.json",
+                                   f"cases/{case_id}/runtime/preparation-failure.json"]
+                        sources.extend(path.relative_to(directory).as_posix()
+                                       for path in sorted((case_dir / "logs").glob("prepare-*.log")))
+                        if phase == "TEST_EXECUTION":
+                            sources.extend(path.relative_to(directory).as_posix()
+                                           for path in sorted(case_dir.glob("step-*.log")))
                 rows.append(row)
                 attribution = ownership_by_case[case_id]
                 row.update(git_last_modifier=attribution["git_last_modifier"], responsibility=attribution["responsibility"])
                 row.setdefault("executed_at", case_started_at)
                 row.setdefault("duration_seconds", round(time.monotonic() - case_started_clock, 3))
                 definition_path = repo / "test-e2e/cases" / case_id / "case.yaml"
+                definition = {}
                 if definition_path.is_file():
                     case_definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
                     definition = case_definition.get("case", {})
                     row.update(title=definition.get("title", ""), feature_id=definition.get("feature_id", ""),
                                module=case_definition.get("module", ""))
+                if phase and row["result"] in BLOCKED_RESULTS:
+                    record_block_diagnostic(directory, row, record, definition, phase, sources, env)
                 save(directory / "progress.json", {"finished": len(rows), "planned": len(records), "last_case": case_id})
                 with (directory / "results.journal.jsonl").open("a", encoding="utf-8") as output:
                     output.write(json.dumps(row, ensure_ascii=False) + "\n")
