@@ -99,18 +99,26 @@ def test_AGENT_CORE_D5_001_cancellation_deadline_and_isolation(native_manager, n
         second.close()
 
     collection = JiuwenMCPCollection(
-        authorized_tools=[ToolConfig(name="multiply", class_name="multiply", source="mcp", params={})],
         observe=lambda *args: None, manager=native_manager, server_parameters=[native_provider + "/mcp"],
         cancellation_scope=RunCancellationScope(), tool_timeout_seconds=0.2, close_timeout_seconds=2,
         connect_timeout_seconds=5, user_context={"user_id": "fixture-user"},
     )
     with collection as connected:
+        # Lazy tools are built from the cached schema; the server is
+        # contacted on the first invocation below.
+        tool_config = ToolConfig(
+            name="multiply", class_name="multiply", source="mcp", params={},
+            inputs='{"a": {"type": "integer"}, "b": {"type": "integer"}}',
+            origin_name="multiply", usage="fixture",
+        )
+        tool = connected.create_tool(tool_config)
+
         async def timeout_call():
             with pytest.raises(Exception):
-                await connected.tools[0].invoke({"a": 2, "b": 2, "user_id": "forged-user"})
+                await tool.invoke({"a": 2, "b": 2, "user_id": "forged-user"})
             assert collection.terminal_error is None
             try:
-                await connected.tools[0].invoke({"a": 999, "b": 2})
+                await tool.invoke({"a": 999, "b": 2})
             except Exception:
                 assert isinstance(collection.terminal_error, MCPToolTimeoutError)
             else:

@@ -24,9 +24,23 @@ class TrajectoryCorrupt(RuntimeError):
 
 def lock_exclusive(fd: int, *, blocking: bool) -> None:
     """Acquire a file lock held until the descriptor is closed."""
-    import fcntl
+    try:
+        import fcntl
+    except ImportError:
+        # Windows: emulate fcntl.flock with a one-byte msvcrt lock
+        import errno
+        import msvcrt
 
-    fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK, 1)
+        except OSError as error:
+            if blocking:
+                raise
+            message = os.strerror(error.errno) if error.errno else "resource busy"
+            raise BlockingIOError(error.errno or errno.EAGAIN, message) from error
+    else:
+        fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
 
 
 def write_all(fd: int, data: bytes) -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import logging
-from copy import copy, deepcopy
 
 import nexent.core.tools as tool_types
 from nexent.core.agents.contracts.config import ToolConfig
@@ -220,18 +219,17 @@ class ToolResources:
         return from_langchain(tool_obj)
 
 
-    def create_mcp_tool(self, class_name):
+    def create_mcp_tool(self, tool_config: ToolConfig):
+        """Build a lazy MCP tool from the cached ToolConfig schema.
+
+        The MCP collection connects to the tool's server on first invocation,
+        so agent construction never opens MCP connections.
+        """
         if self.mcp_tool_collection is None:
             raise ValueError("MCP tool collection is not initialized")
-        tool_obj = next(
-            (tool for tool in self.mcp_tool_collection.tools if tool.name == class_name),
-            None
-        )
-        if tool_obj is None:
-            raise ValueError(f"{class_name} not found in MCP server")
-        # Collections may be shared by multiple runs; never wrap their template.
-        tool_obj = copy(tool_obj)
-        tool_obj.inputs = deepcopy(tool_obj.inputs)
+        tool_obj = self.mcp_tool_collection.create_tool(tool_config)
+        # Freshly built per call: no template sharing, so no defensive copy is
+        # needed. Keep identity-field hiding for MCP servers that declare them.
         return apply_user_context_to_mcp_tool(tool_obj, self.user_context)
 
 
@@ -356,7 +354,7 @@ class ToolResources:
         if source == "local":
             tool_obj = self.create_local_tool(tool_config)
         elif source == "mcp":
-            tool_obj = self.create_mcp_tool(class_name)
+            tool_obj = self.create_mcp_tool(tool_config)
             tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
             # Same metadata-driven builder wiring as built-in AIDP search
             # tools: the backend may inject an image URL builder so image

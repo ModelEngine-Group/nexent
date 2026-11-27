@@ -66,6 +66,9 @@ def initialize_system_agents(*, app_version=None):
 
 
 def main():
+    # Standalone command: load one database snapshot before official skill
+    # installation reads bounded configuration values.
+    load_system_configuration()
     print(json.dumps(initialize_system_agents()))
 
 

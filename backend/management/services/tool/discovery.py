@@ -506,7 +506,9 @@ async def get_tool_from_remote_mcp_server(
                     description=tool_description,
                     params=[],
                     source=ToolSourceEnum.MCP.value,
-                    inputs=str(input_schema["properties"]),
+                    # Standard JSON so the SDK can render lazy MCP tool schemas
+                    # from this DB cache without connecting to the server.
+                    inputs=json.dumps(input_schema["properties"], ensure_ascii=False),
                     # MCP results may contain text, structured data, images, audio, or files.
                     # "object" matches the runtime adapter and avoids advertising every result as text.
                     output_type="object",

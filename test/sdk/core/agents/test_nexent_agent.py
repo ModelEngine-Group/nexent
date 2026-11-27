@@ -1545,7 +1545,7 @@ def test_create_tool_with_mcp_source(nexent_agent_instance):
     ) as mock_create_mcp_tool:
         result = nexent_agent_instance.create_tool(tool_config)
 
-    mock_create_mcp_tool.assert_called_once_with("DummyTool")
+    mock_create_mcp_tool.assert_called_once_with(tool_config)
     assert result is mcp_tool
     assert result._nexent_execute_on_host is True
     assert nexent_agent._wrap_tool_with_monitoring(result, "test-agent")._nexent_execute_on_host is True
@@ -2613,36 +2613,6 @@ def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
 
-
-class TestCreateMcpTool:
-    """Tests for create_mcp_tool method."""
-
-    def test_create_mcp_tool_success(self, nexent_agent_instance):
-        """Test successful MCP tool creation."""
-        mock_tool = MagicMock()
-        mock_tool.name = "test_mcp_tool"
-        mock_collection = MagicMock()
-        mock_collection.tools = [mock_tool]
-
-        nexent_agent_instance.mcp_tool_collection = mock_collection
-
-        result = nexent_agent_instance.create_mcp_tool("test_mcp_tool")
-        assert result == mock_tool
-
-    def test_create_mcp_tool_collection_not_initialized(self, nexent_agent_instance):
-        """Test create_mcp_tool raises error when collection is None."""
-        nexent_agent_instance.mcp_tool_collection = None
-        with pytest.raises(ValueError, match="MCP tool collection is not initialized"):
-            nexent_agent_instance.create_mcp_tool("test_tool")
-
-    def test_create_mcp_tool_not_found(self, nexent_agent_instance):
-        """Test create_mcp_tool raises error when tool is not found."""
-        mock_collection = MagicMock()
-        mock_collection.tools = []
-        nexent_agent_instance.mcp_tool_collection = mock_collection
-
-        with pytest.raises(ValueError, match="test_tool not found in MCP server"):
-            nexent_agent_instance.create_mcp_tool("test_tool")
 
 class TestCreateBuiltinTool:
     """Tests for create_builtin_tool method."""
@@ -5521,33 +5491,45 @@ class TestCreateMcpTool:
     """Tests for create_mcp_tool method."""
 
     def test_create_mcp_tool_success(self, nexent_agent_instance):
-        """Test create_mcp_tool successfully finds and returns a tool."""
+        """Test create_mcp_tool builds a fresh tool from the config."""
+        tool_config = ToolConfig(
+            class_name="test_tool", name="test_tool", source="mcp",
+            inputs='{"a": {"type": "string"}}', usage="fixture-server",
+        )
         mock_tool = MagicMock()
         mock_tool.name = "test_tool"
 
         mock_collection = MagicMock()
-        mock_collection.tools = [mock_tool]
+        mock_collection.create_tool.return_value = mock_tool
         nexent_agent_instance.mcp_tool_collection = mock_collection
 
-        result = nexent_agent_instance.create_mcp_tool("test_tool")
-        assert result is not mock_tool
-        assert result.name == mock_tool.name
+        result = nexent_agent_instance.create_mcp_tool(tool_config)
+        assert result is mock_tool
+        mock_collection.create_tool.assert_called_once_with(tool_config)
 
     def test_create_mcp_tool_collection_not_initialized(self, nexent_agent_instance):
         """Test create_mcp_tool raises when MCP collection is None."""
+        tool_config = ToolConfig(
+            class_name="test_tool", name="test_tool", source="mcp", inputs="{}",
+        )
         nexent_agent_instance.mcp_tool_collection = None
 
         with pytest.raises(ValueError, match="MCP tool collection is not initialized"):
-            nexent_agent_instance.create_mcp_tool("test_tool")
+            nexent_agent_instance.create_mcp_tool(tool_config)
 
-    def test_create_mcp_tool_not_found(self, nexent_agent_instance):
-        """Test create_mcp_tool raises when tool is not found."""
+    def test_create_mcp_tool_missing_cached_schema(self, nexent_agent_instance):
+        """Test create_mcp_tool surfaces the collection's schema error."""
+        tool_config = ToolConfig(
+            class_name="test_tool", name="test_tool", source="mcp", inputs=None,
+        )
         mock_collection = MagicMock()
-        mock_collection.tools = []
+        mock_collection.create_tool.side_effect = ValueError(
+            "MCP tool 'test_tool' has no cached input schema; refresh the MCP tool list and try again"
+        )
         nexent_agent_instance.mcp_tool_collection = mock_collection
 
-        with pytest.raises(ValueError, match="test_tool not found in MCP server"):
-            nexent_agent_instance.create_mcp_tool("test_tool")
+        with pytest.raises(ValueError, match="no cached input schema"):
+            nexent_agent_instance.create_mcp_tool(tool_config)
 
 
 # ----------------------------------------------------------------------------

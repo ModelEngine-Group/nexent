@@ -1314,7 +1314,9 @@ class TestCreateToolConfigList:
                 output_type="string",
                 params={"param1": "value1"},
                 source="local",
-                usage=None
+                usage=None,
+                # Raw wire name for lazy MCP invocation; absent for local tools.
+                origin_name=None
             )
 
     @pytest.mark.asyncio

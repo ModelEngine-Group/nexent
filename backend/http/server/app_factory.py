@@ -60,8 +60,9 @@ def create_app(
         cors_methods: List of allowed CORS methods (default: ["*"])
         enable_monitoring: Whether to enable monitoring
         lifespan: Optional FastAPI lifespan context manager
-        gateway_identity_audience: Expected audience for signed Gateway identities
-        internal_runtime_request: Optional predicate for scoped Runtime service requests
+        gateway_identity_audience: Audience used to verify gateway identity headers
+        internal_runtime_request: Optional callable (method, path) -> bool marking
+            requests that bypass runtime identity verification
 
     Returns:
         Configured FastAPI application

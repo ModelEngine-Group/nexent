@@ -168,6 +168,9 @@ class ToolConfig(BaseModel):
     params: Dict[str, Any] = Field(description="Initialization parameters", default=None)
     source: str = Field(description="Tool source, can be local or mcp", default="local")
     usage: Optional[str] = Field(description="MCP server name", default=None)
+    # Raw wire name on the MCP server for MCP tools; the sanitized prompt name
+    # may differ, and lazy invocation calls the server with this raw name.
+    origin_name: Optional[str] = Field(description="Original tool name on the MCP server", default=None)
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
     labels: Optional[List[str]] = Field(description="Tool labels for filtering", default=None)
 

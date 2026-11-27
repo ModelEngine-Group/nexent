@@ -164,3 +164,12 @@ def test_missing_migrated_skill_files_abort_initialization(mocker, tmp_path):
     provider.release_manifest.official_skill_names = ("pdf",)
     with pytest.raises(ValueError, match="files are unavailable"):
         initialize.prepare_shared_resources(provider)
+
+
+def test_command_loads_configuration_before_initialization(mocker, capsys):
+    events = []
+    mocker.patch.object(initialize, "load_system_configuration", side_effect=lambda: events.append("config"))
+    mocker.patch.object(initialize, "initialize_system_agents", return_value={"workbench_main": 11})
+    initialize.main()
+    assert events == ["config"]
+    assert capsys.readouterr().out.strip() == '{"workbench_main": 11}'

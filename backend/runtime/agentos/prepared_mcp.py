@@ -82,7 +82,12 @@ class PreparedMCP:
                     from backend.http.client import create_httpx_client
 
                     host["httpx_client_factory"] = create_httpx_client
-                self.hosts[server_id] = {**host, "allowed_tools": {}}
+                # Carry the server's usage name so the SDK can route each tool
+                # (ToolConfig.usage) to its server lazily at first tool call
+                # instead of connecting to every server at run start. It must
+                # not enter select_mcp_server's host dict because that dict is
+                # part of the persisted binding revision hash.
+                self.hosts[server_id] = {**host, "name": tool.usage, "allowed_tools": {}}
             allowed = self.hosts[server_id]["allowed_tools"]
             if allowed.setdefault(origin_name, tool.class_name) != tool.class_name:
                 raise ValueError("Ambiguous MCP tool name")

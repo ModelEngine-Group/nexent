@@ -452,6 +452,9 @@ async def create_tool_config_list(
             params=param_dict,
             source=tool.get("source"),
             usage=tool.get("usage"),
+            # Raw wire name on the MCP server; used for lazy tool invocation
+            # where the prompt name (sanitized) differs from the live name.
+            origin_name=tool.get("origin_name"),
         )
         if portable_evaluation and tool_config.source == "mcp" and effective_override_params:
             tool_config.metadata = {MCP_ARGUMENT_OVERRIDES: effective_override_params}

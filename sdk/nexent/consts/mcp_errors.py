@@ -42,6 +42,23 @@ class MCPConnectionFailure(Exception):
         super().__init__(f"MCP server {url} (transport={transport}) failed")
 
 
+class MCPToolNotFoundError(Exception):
+    """The configured MCP tool is absent from the server's live tool list.
+
+    Raised lazily at first tool call when the DB-cached tool set has drifted
+    from the server (for example the tool was removed or renamed); callers
+    should refresh the MCP tool list.
+    """
+
+    def __init__(self, tool: str, server: str | None = None):
+        self.tool = tool
+        self.server = server
+        detail = f"{tool} on {server}" if server else tool
+        super().__init__(
+            f"MCP tool not found: {detail}. Refresh the MCP tool list and try again."
+        )
+
+
 class MCPToolResultError(Exception):
     """Protocol-level tool failure reported by ``CallToolResult.isError``.
 
