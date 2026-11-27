@@ -7530,6 +7530,7 @@
   "ops.monitoring.skill.search": "Search Skill names",
   "ops.monitoring.skill.usageColumn": "Usage",
   "ops.monitoring.skill.view": "View statistics",
+  "ops.monitoring.skill.details.total": "Total skills {{total}}",
   "ops.monitoring.agent.current": "Current agents",
   "ops.monitoring.agent.currentHint": "Independent of reporting dates and user group",
   "ops.monitoring.agent.inventoryFailed": "Agent directory could not be loaded",
