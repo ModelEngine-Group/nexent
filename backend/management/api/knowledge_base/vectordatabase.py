@@ -202,7 +202,7 @@ async def get_knowledge_base_bound_agents(
     if target_tenant_id != auth_tenant_id and not has_any_role(role, {'SU'}):
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Not authorized to access this tenant")
     try:
-        require_knowledge_base_read_permission(index_name, user_id, target_tenant_id)
+        require_knowledge_base_edit_permission(index_name, user_id, target_tenant_id)
     except HTTPException as exc:
         if exc.status_code != HTTPStatus.NOT_FOUND:
             raise

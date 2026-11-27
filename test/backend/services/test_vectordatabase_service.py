@@ -8320,7 +8320,7 @@ def test_resolve_knowledge_base_permission_unknown_role_is_rejected(monkeypatch)
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),
         ({"group_ids": "", "created_by": "user-1", "ingroup_permission": "READ_ONLY"}, [], "CREATOR"),
         ({"group_ids": "9", "created_by": "user-1", "ingroup_permission": "PRIVATE"}, [], "CREATOR"),
-        ({"group_ids": None, "created_by": "other"}, [], "READ_ONLY"),
+        ({"group_ids": None, "created_by": "other"}, [], None),
     ],
 )
 def test_resolve_knowledge_base_permission_user_group_rules(

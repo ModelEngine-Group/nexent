@@ -105,7 +105,11 @@ class ResourceAccessControl:
         )
         if is_user_role and access.can_read:
             # USER callers may read group-shared knowledge bases, but never
-            # gain edit rights from the group permission.
+            # gain edit rights from the group permission. Unlike DEV, USER
+            # must match a real group; the legacy empty/empty fallback is not
+            # a share.
+            if not matched_groups:
+                return ResourceAccess.deny()
             return ResourceAccess.read_only(matched_groups=matched_groups)
         return access
 

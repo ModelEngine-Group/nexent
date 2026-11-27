@@ -195,14 +195,14 @@ class TestGroupAndTenantRules:
         )
         assert access.permission_label is None
 
-    def test_user_empty_groups_legacy_intersection(self):
+    def test_user_empty_groups_legacy_fallback_denied(self):
         access = _check(
             _resource(ingroup_permission="READ_ONLY", group_ids=None),
             user_id="legacy-user",
             role="USER",
             groups=[],
         )
-        assert access.permission_label == "READ_ONLY"
+        assert access.permission_label is None
 
     def test_user_private_denied(self):
         access = _check(
