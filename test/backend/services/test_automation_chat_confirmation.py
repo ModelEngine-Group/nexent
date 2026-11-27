@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from contracts.errors.exceptions import (
+    AgentAutomationError,
     AutomationCapabilityNotReadyError,
     AutomationConversationAlreadyBoundError,
     AutomationNotFoundError,
@@ -176,3 +177,90 @@ async def test_confirmation_revalidates_latest_card_and_unique_pending_before_wr
     assert message in result["user_message"]
     assert "confirmation" not in result
     confirm.assert_not_awaited()
+
+
+@pytest.mark.parametrize("boundary", [None, 0])
+async def test_first_turn_does_not_search_for_an_invitation(owned_confirmation, boundary):
+    assert await confirmation.route_chat_confirmation("可以", 42, "tenant", "user", boundary, None) is None
+    confirmation.previous_automation_invitation.assert_not_called()
+
+
+@pytest.mark.parametrize("text", ["   ", "可以" * 501])
+async def test_blank_or_oversized_reply_is_not_sent_to_the_classifier(owned_confirmation, mocker, text):
+    classify = mocker.patch.object(confirmation, "_classify_reply")
+
+    assert await confirmation.route_chat_confirmation(text, 42, "tenant", "user", 8, None) is None
+
+    classify.assert_not_awaited()
+
+
+async def test_complex_reply_without_an_available_model_cannot_confirm(owned_confirmation, mocker):
+    mocker.patch.object(confirmation, "resolve_automation_model_id", return_value=None)
+    invoke = mocker.patch.object(confirmation, "invoke_chat_prompt")
+
+    assert await confirmation.route_chat_confirmation("按原计划吧", 42, "tenant", "user", 8, None) is None
+
+    invoke.assert_not_awaited()
+
+
+@pytest.mark.parametrize("context_change", [
+    {"has_attachments": True}, {"user_message": "请告诉我天气"}, {"confirmation_action": "confirm"},
+])
+async def test_untrusted_confirmation_does_not_look_up_or_write_proposals(owned_confirmation, context_change):
+    context, lookup, confirm = owned_confirmation
+
+    result = await confirmation.confirm_from_chat(replace(context, **context_change))
+
+    assert result["status"] == "needs_clarification"
+    assert "confirmation" not in result
+    lookup.assert_not_called()
+    confirm.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("action", "target"), [("edit", 7), ("confirm", 8)])
+async def test_accepted_receipt_cannot_be_reused_by_an_edit_or_another_draft(owned_confirmation, action, target):
+    context, lookup, confirm = owned_confirmation
+    lookup.return_value = [_proposal(status="ACCEPTED", task_id=71)]
+
+    result = await confirmation.confirm_from_chat(replace(
+        context, user_message="请按原计划执行", confirmation_action=action, confirmation_proposal_id=target,
+    ))
+
+    assert result["status"] == "needs_clarification"
+    assert "confirmation" not in result
+    confirm.assert_not_awaited()
+
+
+async def test_unexpected_automation_error_returns_retryable_feedback(owned_confirmation):
+    context, lookup, confirm = owned_confirmation
+    lookup.return_value = [_proposal()]
+    confirm.side_effect = AgentAutomationError("internal detail")
+
+    result = await confirmation.confirm_from_chat(context)
+
+    assert result == {"status": "error", "user_message": "暂时无法确认定时任务，请稍后重试。"}
+
+
+@pytest.mark.parametrize(("requested", "selected", "default", "expected"), [
+    (12, {"model_type": "llm"}, {"model_id": 16}, 12),
+    (12, {"model_type": "embedding"}, {"model_id": 16}, 16),
+    (12, None, None, None),
+    (None, None, {"model_id": 16}, 16),
+])
+def test_confirmation_model_selection_respects_tenant_and_model_type(mocker, requested, selected, default, expected):
+    from management.services.automation import intent
+    from management.services.configuration.tenant.settings import tenant_config_manager
+
+    lookup = mocker.patch.object(intent, "get_model_by_model_id", return_value=selected)
+    tenant_default = mocker.patch.object(tenant_config_manager, "get_model_config", return_value=default)
+
+    assert intent.resolve_automation_model_id(requested, "tenant") == expected
+
+    if requested is None:
+        lookup.assert_not_called()
+    else:
+        lookup.assert_called_once_with(requested, "tenant")
+    if selected and selected["model_type"] == "llm":
+        tenant_default.assert_not_called()
+    else:
+        tenant_default.assert_called_once_with(key=intent.MODEL_CONFIG_MAPPING["llm"], tenant_id="tenant")
