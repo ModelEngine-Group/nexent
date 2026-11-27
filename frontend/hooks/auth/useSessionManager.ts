@@ -306,8 +306,10 @@ export function useSessionManager(user?: User | null) {
       void maybeRefreshOnActivity(event);
     };
 
+    // Local session activity must reach this listener even when a widget stops bubbling.
+    const capture = user?.authProvider !== "cas";
     documentEvents.forEach((eventName) => {
-      document.addEventListener(eventName, handler, { passive: true });
+      document.addEventListener(eventName, handler, { passive: true, capture });
     });
     windowEvents.forEach((eventName) => {
       window.addEventListener(eventName, handler, { passive: true });
@@ -315,7 +317,7 @@ export function useSessionManager(user?: User | null) {
 
     return () => {
       documentEvents.forEach((eventName) => {
-        document.removeEventListener(eventName, handler);
+        document.removeEventListener(eventName, handler, capture);
       });
       windowEvents.forEach((eventName) => {
         window.removeEventListener(eventName, handler);

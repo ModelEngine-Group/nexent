@@ -119,11 +119,13 @@ test("foreground activity starts renewal only inside the 30 minute window", asyn
   let requests = 0;
   const document = {
     hidden: false,
-    addEventListener: (name, handler) => listeners.set(name, handler),
+    addEventListener: (name, handler, options) =>
+      listeners.set(name, { handler, capture: options?.capture }),
     removeEventListener: (name) => listeners.delete(name),
   };
   const window = {
-    addEventListener: (name, handler) => listeners.set(name, handler),
+    addEventListener: (name, handler, options) =>
+      listeners.set(name, { handler, capture: options?.capture }),
     removeEventListener: (name) => listeners.delete(name),
   };
   const mocks = {
@@ -167,8 +169,9 @@ test("foreground activity starts renewal only inside the 30 minute window", asyn
   );
   useSessionManager({ id: "local-account" });
   effects.forEach((effect) => effect());
-  const dispatch = async (type, isTrusted = true) => {
-    listeners.get(type)({ type, isTrusted });
+  const dispatch = async (type, isTrusted = true, stopsPropagation = false) => {
+    const { handler, capture } = listeners.get(type);
+    if (!stopsPropagation || capture) handler({ type, isTrusted });
     await new Promise((resolve) => setImmediate(resolve));
   };
   await dispatch("click");
@@ -179,6 +182,6 @@ test("foreground activity starts renewal only inside the 30 minute window", asyn
   await dispatch("focus");
   await dispatch("click", false);
   assert.equal(requests, 0);
-  await dispatch("keydown");
+  await dispatch("keydown", true, true);
   assert.equal(requests, 1);
 });
