@@ -744,6 +744,21 @@ class TestCurrentUserInfo:
         mock_extract_session_id.assert_called_once_with("Bearer cas-token")
         mock_get_provider_username.assert_called_once_with("user123", "cas")
 
+    @patch("management.api.identity.user_management.extract_session_id_from_authorization", return_value="local:123")
+    @patch("management.api.identity.user_management.get_provider_username")
+    @patch("management.api.identity.user_management.validate_token", return_value=(True, MockUser("user123", "test@example.com")))
+    @patch("management.api.identity.user_management.get_user_info", new_callable=AsyncMock)
+    def test_current_user_info_marks_local_session_as_local(
+        self, mock_get_user_info, mock_validate_token, mock_get_provider_username, mock_extract_session_id,
+    ):
+        mock_get_user_info.return_value = {"user": {"user_id": "user123"}}
+
+        response = client.get("/user/current_user_info", headers={"Authorization": "Bearer local-token"})
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["data"]["user"]["auth_provider"] == "local"
+        mock_get_provider_username.assert_not_called()
+
     def test_current_user_info_no_authorization(self):
         """Test current user info retrieval without authorization header"""
         response = client.get("/user/current_user_info")

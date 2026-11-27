@@ -97,6 +97,7 @@ def test_native_http_identity_password_and_api_keys(runtime):
     profile = client.get("/api/user/current_user_info", headers=bearer(token))
     assert profile.status_code == 200, profile.text
     assert profile.json()["data"]["user"]["tenant_id"] == "tenant-native"
+    assert profile.json()["data"]["user"]["auth_provider"] == "local"
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.db.identity.account import get_account
 

@@ -234,7 +234,8 @@ async def get_user_information(request: Request):
         if not user_info:
             raise UnauthorizedError("User information not found")
 
-        is_cas_user = bool(extract_session_id_from_authorization(authorization))
+        session_id = extract_session_id_from_authorization(authorization)
+        is_cas_user = bool(session_id) and not is_local_session_id(session_id)
         user_info["user"]["auth_provider"] = "cas" if is_cas_user else "local"
         if is_cas_user:
             user_info["user"]["username"] = get_provider_username(user_id, "cas")
