@@ -14,7 +14,7 @@ from jsonschema import ValidationError
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
-from nexent.core.agents.cores.jiuwen.errors import failure_error, public_error
+from nexent.core.agents.cores.jiuwen.errors import JiuwenExecutionError, failure_error, public_error
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.model_service.contracts import ModelError, ToolCall
@@ -128,6 +128,36 @@ def test_swallowed_resource_failure_survives_native_generic_failure(adapter):
     assert result.error.category == "mcp_timeout"
     assert "MCP" in result.error.safe_message and "超时" in result.error.safe_message
     assert "secret" not in result.error.safe_message
+
+
+@pytest.mark.parametrize("payload,reason,public_text", [
+    (None, "runner_invalid_answer", "格式无效"),
+    ({"output": " "}, "runner_empty_answer", "空的最终回答"),
+    ({"result_type": "error", "output": "PRIVATE_BODY"}, "runner_error_result", "失败结果"),
+    ({"result_type": "error", "error": "PRIVATE_BODY", "stop_reason": "MaxOuterRounds"},
+     "runner_round_limit", "轮数上限"),
+    ({"result_type": "error", "stop_reason": "NoProgressAnswerEvaluator"}, "runner_no_progress", "多次未能"),
+    ({"result_type": "error", "error": "completion_timeout"}, "runner_completion_timeout", "等待任务完成超时"),
+    ({"result_type": "error", "stop_reason": "PRIVATE_BODY"}, "runner_error_result", "失败结果"),
+])
+def test_native_failure_logs_known_reason_without_exposing_answer(adapter, caplog, payload, reason, public_text):
+    try:
+        adapter.events.emit({"type": "answer", "payload": payload})
+    except JiuwenExecutionError as failure:
+        adapter.record_failure(failure)
+    result = adapter.events.finish("failed")
+    assert result.error.category == "JIUWEN_EXECUTION_FAILED"
+    assert result.error.diagnostic_code == reason and public_text in result.error.safe_message
+    assert f"reason={reason}" in caplog.text and f"turn_id={result.turn_id}" in caplog.text
+    assert "exception_site=nexent.core.agents.cores.jiuwen.events.emit:" in caplog.text
+    assert "PRIVATE_BODY" not in caplog.text + result.model_dump_json()
+
+
+def test_failed_finalization_without_diagnostic_logs_turn(adapter, caplog):
+    result = adapter.events.finish("failed")
+    assert result.error.category == "JIUWEN_EXECUTION_FAILED"
+    assert result.error.diagnostic_code == "execution_result_missing"
+    assert f"phase=finalization category=JIUWEN_EXECUTION_FAILED reason=execution_result_missing request_id={result.turn_id}" in caplog.text
 
 
 def test_later_model_failure_takes_precedence_over_recoverable_resource_failure(adapter):

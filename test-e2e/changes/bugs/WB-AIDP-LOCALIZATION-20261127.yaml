@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: WB-AIDP-LOCALIZATION-20261127
+  change_type: bugfix
+  bug_id: WB-AIDP-LOCALIZATION-20261127
+  title: Compare localized Workbench AIDP definitions during snapshot export
+  description: Validate the scoped tool against the canonical definition or its verified SDK-localized projection.
+  observed_behavior: The Workbench constructs a localized tool, but the scoped exporter compares it with the raw catalog.
+  expected_behavior: An enabled localized AIDP tool completes the Workbench turn. Unexpected description, input, or execution fields fail validation.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: The previous signed test constructed the scoped platform tool from a raw row without invoking the public Workbench and catalog path.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AOS-TRANSPORT-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Accept SDK-localized catalog descriptions and inputs and retain the same signed execution options.
+    - Reject arbitrary localized descriptions, input schemas and routing metadata changes.
+    test_selectors:
+    - test/backend/app/test_agentos_prepared_shared_aidp.py::test_scoped_aidp_accepts_catalog_localization_only
+    - test/backend/database/test_tool_db.py
+    reason: Reuse repository localization coverage and prove the scoped exporter still rejects unexpected differences.
+  notes: >-
+    SPEC nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/design.md.
+    Runtime owns AC-32. The test owns its Management, Runtime and AIDP HTTP listeners,
+    test database sessions and local workspace. Admission persistence and generation are controlled fixtures.

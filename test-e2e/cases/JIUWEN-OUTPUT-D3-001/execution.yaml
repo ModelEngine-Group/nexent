@@ -12,6 +12,8 @@ acceptance_bindings:
   - test_clarification_terminal_history_before_and_after_submission
   AC-02:
   - test_failure_diagnostics_roundtrip
+  AC-03:
+  - test_model_action_rejection_diagnostics_roundtrip
 preparation:
   families: []
   anchors: false

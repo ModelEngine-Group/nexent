@@ -143,7 +143,7 @@ def present_ephemeral_stream(
 
     async def events():
         outputs = {}
-        native_output = NexentOutputAdapter()
+        native_output = NexentOutputAdapter(channel="ephemeral_stream")
         prefix = iter(opening_events)
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
@@ -238,7 +238,7 @@ def present_legacy_journal(response: StreamingResponse, run_id: str, last_unit: 
 
     async def events():
         opening = True
-        native_output = NexentOutputAdapter()
+        native_output = NexentOutputAdapter(channel="legacy_replay")
         error_presented = False
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
@@ -364,7 +364,7 @@ def present_public_resume(
         announce_creation = created
         initial_events = iter(opening_events)
         answer = _CompleteAnswer() if complete_answer and NEXENT_AGENT_CORE == "smolagents" else None
-        native_output = NexentOutputAdapter()
+        native_output = NexentOutputAdapter(channel="journal_stream")
         restore_prefix = replay_from_start is not None and request.after_event_id is not None
         terminal_seen = False
 

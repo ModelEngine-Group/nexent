@@ -76,3 +76,31 @@ def test_invalid_terminal_does_not_promote_unvalidated_error_metadata():
     error = adapter.close()[0]
     assert error["content"] == "NEXENT_TERMINAL_INVALID"
     assert "error_code" not in error and "request_id" not in error
+
+
+def test_missing_terminal_identifies_last_boundary_in_live_and_history(caplog):
+    event = {
+        "schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+        "turn_id": "turn-reference", "sequence": 3, "type": "model_output", "content": "private model output",
+    }
+    adapter = NexentOutputAdapter(channel="journal_stream")
+    adapter.push(event)
+    live, = adapter.close("failed")
+    assert adapter.close() == []
+    history, status = normalize_nexent_history([event], "failed")
+    assert status == "failed" and history[-1] == live
+    assert live["error_code"] == "NEXENT_TERMINAL_MISSING"
+    assert live["request_id"] == "turn-reference" and "final result" in live["content"]
+    assert caplog.text.count("event=nexent_terminal_missing") == 2
+    for entry in ("channel=journal_stream", "channel=history", "last_event='model_output'",
+                  "last_sequence=3", "turn_id=turn-reference", "close_status=failed"):
+        assert entry in caplog.text
+    assert "private model output" not in caplog.text
+
+
+def test_stopped_partial_stream_does_not_log_missing_terminal(caplog):
+    adapter = NexentOutputAdapter()
+    adapter.push({"schema_version": 1, "runtime_mode": "native_agent", "turn_id": "stopped",
+                  "type": "model_output", "sequence": 1, "content": "partial"})
+    assert adapter.close("stopped") == []
+    assert "event=nexent_terminal_missing" not in caplog.text

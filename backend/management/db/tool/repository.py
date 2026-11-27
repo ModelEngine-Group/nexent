@@ -437,6 +437,22 @@ def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: 
         return updated or 0
 
 
+def apply_local_tool_descriptions(tool: dict, sdk_info: dict) -> None:
+    """Apply the SDK localization used in Management's runtime catalog."""
+    tool["description_zh"] = sdk_info.get("description_zh")
+    raw_inputs = tool.get("inputs", "{}")
+    try:
+        inputs = json.loads(raw_inputs) if isinstance(raw_inputs, str) else raw_inputs
+        if isinstance(inputs, dict):
+            sdk_inputs = sdk_info.get("inputs", {})
+            for key, value in inputs.items():
+                if isinstance(value, dict) and not value.get("description_zh") and key in sdk_inputs:
+                    value["description_zh"] = sdk_inputs[key].get("description_zh")
+            tool["inputs"] = json.dumps(inputs, ensure_ascii=False)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+
 def add_tool_field(tool_info):
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
@@ -460,7 +476,7 @@ def add_tool_field(tool_info):
             local_tool_descriptions = get_local_tools_description_zh()
             if tool_name in local_tool_descriptions:
                 sdk_info = local_tool_descriptions[tool_name]
-                tool_dict["description_zh"] = sdk_info.get("description_zh")
+                apply_local_tool_descriptions(tool_dict, sdk_info)
 
                 # Merge params description_zh from SDK
                 for param in tool_params:
@@ -469,20 +485,6 @@ def add_tool_field(tool_info):
                             if sdk_param.get("name") == param.get("name"):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
-
-                # Merge inputs description_zh from SDK
-                inputs_str = tool_dict.get("inputs", "{}")
-                try:
-                    inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
-                    if isinstance(inputs, dict):
-                        for key, value in inputs.items():
-                            if isinstance(value, dict) and not value.get("description_zh"):
-                                sdk_inputs = sdk_info.get("inputs", {})
-                                if key in sdk_inputs:
-                                    value["description_zh"] = sdk_inputs[key].get("description_zh")
-                        tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
-                except (json.JSONDecodeError, TypeError):
-                    pass
 
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)

@@ -10,6 +10,7 @@ import { getCreatorMode } from "@/lib/creatorConversation";
 import { recordNl2AgentState } from "./nl2agent-state-history";
 import type { Nl2AgentStateEvent } from "./remote-chat-model-adapter";
 import { messageExecutionStatus } from "@/lib/messageExecutionState";
+import { describeConversationRunError } from "@/lib/conversationRunError";
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
@@ -1149,10 +1150,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "error") {
             flushReasoning(part.invocation_id);
-            if (part.content) {
+            const error = describeConversationRunError(part);
+            if (part.content || error) {
               const errorPart: any = {
                 type: "text",
-                text: part.content,
+                text: error?.text ?? part.content,
+                ...(error?.reference && { errorReference: error.reference }),
                 ...(runHasFinalAnswer
                   ? { isWarning: true }
                   : { isError: true }),

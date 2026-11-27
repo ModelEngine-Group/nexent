@@ -14,6 +14,7 @@ case:
   - JIUWEN-OUTPUT-RULE-003
   - JIUWEN-OUTPUT-RULE-005
   - JIUWEN-OUTPUT-RULE-006
+  - JIUWEN-OUTPUT-RULE-007
   title: Jiuwen output contract and display D3
   type: AGENT-IT
   priority: P0
@@ -50,6 +51,9 @@ case:
       model responses and the real SDK.
     expected: The actually rendered historical reference is readable under the fresh run owner with exact source
       bytes; no business tool is replayed and source facts remain unchanged.
+  - order: 5
+    action: Send malformed native tool arguments and invalid text clarification through the controlled model.
+    expected: Runtime logs the actual rejection rule before dispatch and transports the same localized reason and request ID through stream and restored history.
   expected_results:
   - Observations retain ordered content/reasoning blocks, exact tool results, full provider IDs, unique local IDs
     and invocation grouping; usage absent is unknown. Public step capacity and processing mode agree with the actual
@@ -65,6 +69,7 @@ case:
     tool or changing saved facts.
   - Specific localized error text and existing optional metadata agree across SSE, subscriber cache, saved facts
     and historical projection without replacing the original cause.
+  - Argument and clarification rejection reasons are distinguishable in runtime logs and in live and historical conversation output.
   forbidden_side_effects:
   - No inferred success from EOF or text; no duplicate final, lost partial, cross-invocation tool pairing, invented
     reasoning or native HTTP bypass.
@@ -91,6 +96,11 @@ case:
     forbidden_side_effects:
     - 1
     - 2
+  - id: AC-03
+    description: Invalid model actions retain their safe validation diagnostics across runtime and Management.
+    steps: [5]
+    expected_results: [4]
+    forbidden_side_effects: [1, 2]
   execution:
     profiles:
     - name: mock

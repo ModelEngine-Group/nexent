@@ -2,14 +2,23 @@
 """Translate Jiuwen facts to public observations and one explicit run result."""
 
 import json
+import logging
 import threading
 import time
 import uuid
 
 from nexent.core.agents.contracts.output import RunResult, StepObservation
-from nexent.core.agents.cores.jiuwen.errors import protocol_error, public_error
+from nexent.core.agents.cores.jiuwen.errors import JiuwenExecutionError, protocol_error, public_error
 from nexent.core.agents.output.answer import AnswerBoundaryError, PublicTextFilter, normalize_public_answer
 from nexent.core.utils.observer import ProcessType
+
+logger = logging.getLogger(__name__)
+_RUNNER_STOP_REASONS = {"MaxOuterRounds": "runner_round_limit", "NoProgressAnswerEvaluator": "runner_no_progress"}
+_RUNNER_ERROR_REASONS = {
+    "completion_timeout": "runner_completion_timeout",
+    "no LoopCoordinator": "runner_task_loop_unavailable",
+    "task_manager is None": "runner_task_loop_unavailable",
+}
 
 
 def _matches_schema_defaults(provided, executed, schema=None, *, allow_defaults=True):
@@ -187,11 +196,20 @@ class JiuwenEventAdapter:
             if self.final_answer is not None:
                 self.last_error = self.error("JIUWEN_DUPLICATE_TERMINAL")
                 raise RuntimeError("Jiuwen emitted multiple terminal answers")
-            if not isinstance(payload, dict) or payload.get("result_type") == "error":
-                raise RuntimeError("Jiuwen agent execution failed")
+            if not isinstance(payload, dict):
+                raise JiuwenExecutionError("runner_invalid_answer")
+            if payload.get("result_type") == "error":
+                stop_reason = payload.get("stop_reason")
+                reason = _RUNNER_STOP_REASONS.get(stop_reason) if isinstance(stop_reason, str) else None
+                error = payload.get("error")
+                if reason is None and isinstance(error, str):
+                    reason = _RUNNER_ERROR_REASONS.get(error)
+                raise JiuwenExecutionError(reason or "runner_error_result")
             output = payload.get("output")
-            if not isinstance(output, str) or not output.strip():
-                raise RuntimeError("Jiuwen returned no final answer")
+            if not isinstance(output, str):
+                raise JiuwenExecutionError("runner_invalid_answer")
+            if not output.strip():
+                raise JiuwenExecutionError("runner_empty_answer")
             try:
                 self.final_answer = output if self.artifact_output else normalize_public_answer(output)
             except AnswerBoundaryError:
@@ -201,8 +219,8 @@ class JiuwenEventAdapter:
             self.observer.add_message(self.agent_name, ProcessType.TOKEN_COUNT, json.dumps(payload))
         # ModelService owns ordered content/reasoning; native llm_output would duplicate it.
 
-    def error(self, category):
-        return protocol_error(category, request_id=self.turn_id, lang=getattr(self.observer, "lang", "en"))
+    def error(self, category, *, reason=None):
+        return protocol_error(category, request_id=self.turn_id, lang=getattr(self.observer, "lang", "en"), reason=reason)
 
     def finish(self, status="completed", error=None):
         if self.result is not None:
@@ -213,7 +231,14 @@ class JiuwenEventAdapter:
         if error is not None and status == "completed":
             status = "failed"
         if status == "failed" and error is None:
-            error = self.resource_error or self.error("JIUWEN_EXECUTION_FAILED")
+            error = self.resource_error
+            if error is None:
+                error = self.error("JIUWEN_EXECUTION_FAILED", reason="execution_result_missing")
+                logger.error(
+                    "event=jiuwen_run_failed phase=finalization category=%s reason=%s request_id=%s "
+                    "turn_id=%s last_sequence=%s step=%s",
+                    error.category, error.diagnostic_code, error.request_id, self.turn_id, self.sequence, self.step_number,
+                )
         if error is not None:
             error = public_error(error, getattr(self.observer, "lang", "en"))
         final_ids = []

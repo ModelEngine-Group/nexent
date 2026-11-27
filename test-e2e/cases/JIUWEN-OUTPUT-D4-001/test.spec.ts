@@ -27,6 +27,7 @@ print(json.dumps(output,ensure_ascii=False))`;
 }
 
 journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
+  contract.deferCleanup(() => page.close());
   await page.context().addCookies([{
     name:"nexent_token_expires_at",value:String(Math.floor(Date.now()/1000)+3600),url:new URL(baseUrl).origin,
   }]);
@@ -73,22 +74,42 @@ journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
       {type:"run_terminal",content:JSON.stringify({schema_version:1,runtime_mode:"native_agent",agent_core:"jiuwen",turn_id:turn,sequence:2,type:"run_terminal",status,end_reason:status,content:"",final_content:"",final_block_ids:[]})},
     ]});
   };
+  const diagnosticFailures = [
+    ["NEXENT_TERMINAL_MISSING", "运行已结束，服务没有收到最终结果。"],
+    ["JIUWEN_INVALID_CLARIFICATION", "模型同时请求澄清和其他操作。澄清必须单独发起。"],
+    ["INVALID_TOOL_ARGUMENTS", "模型调用工具时缺少必填参数。"],
+    ["JIUWEN_EXECUTION_FAILED", "智能体达到执行轮数上限，未能完成任务。"],
+  ].map(([code, reason], index) => {
+    const reference = `diagnostic-reference-${index + 1}`;
+    const envelope = { schema_version: 1, runtime_mode: "native_agent", agent_core: "jiuwen", turn_id: reference };
+    const frames: Record<string, unknown>[] = [{ ...envelope, type: "model_output", sequence: 1, content: "Partial diagnostic turn" }];
+    if (code !== "NEXENT_TERMINAL_MISSING") {
+      frames.push({ ...envelope, type: "run_terminal", sequence: 2, status: "failed", end_reason: code,
+        content: "", final_content: "", final_block_ids: [],
+        error: { category: code, scope: "protocol", safe_message: reason, request_id: reference, retryable: false } });
+    }
+    return { code, reason, reference, frames };
+  });
   let runs=0;
   await page.route("**/api/**",async route=>{
     const path=new URL(route.request().url()).pathname.replace(/^.*\/api/,"");
     const respond=(data:unknown)=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(data)});
     if(path==="/user/current_user_info")return respond({data:{user:{
       user_id:"output-fixture",tenant_id:"output-tenant",user_email:"fixture@nexent.test",user_role:"SPEED",
-      auth_provider:"local",permissions:["agent:create"],accessiblePages:["/","/agents","/newchat"],
+      auth_provider:"local",group_ids:[],permissions:["agent:create"],accessiblePages:["/","/agents","/newchat","/workbench"],
     }}});
     if(path==="/memory/config/load")return respond({MEMORY_SWITCH:"N"});
     if(path==="/conversation/list")return respond({code:0,data:{items:[{conversation_id:101,conversation_title:"Output contract",agent_id:42,create_time:Date.now(),update_time:Date.now()}],metadata:{total:1,today:1,last_7_days:0,older:0}}});
     if(path==="/conversation/101")return respond({code:0,data:[{conversation_id:101,conversation_title:"Output contract",agent_id:42,chat_mode:"execution",create_time:Date.now(),runtime_metadata:{},runtime_metadata_version:0,message:messages.map(message=>message.role==="assistant"?{...message,message:project(message.message,true,message.status)}:message)}]});
     if(path==="/agent/run"){
       runs++;
-      messages.push({role:"user",message_id:3,message_index:3,status:"completed",message:"Current task"});
-      messages.push({role:"assistant",message_id:4,message_index:4,status:"completed",message:events.map((event,index)=>({...event,unit_index:index,content:event.runtime_mode?JSON.stringify(event):event.content}))});
-      return route.fulfill({status:200,contentType:"text/event-stream",headers:{conversation_id:"101"},body:project(events).map((event:unknown)=>`data: ${JSON.stringify(event)}\n\n`).join("")});
+      const failure = diagnosticFailures[runs - 2];
+      const frames = failure?.frames ?? events;
+      const status = failure ? "failed" : "completed";
+      const index = messages.length + 1;
+      messages.push({role:"user",message_id:index,message_index:index,status:"completed",message:failure ? `Test ${failure.reference}` : "Current task"});
+      messages.push({role:"assistant",message_id:index + 1,message_index:index + 1,status,message:frames.map((event,index)=>({...event,unit_index:index,content:event.runtime_mode?JSON.stringify(event):event.content}))});
+      return route.fulfill({status:200,contentType:"text/event-stream",headers:{conversation_id:"101"},body:project(frames).map((event:unknown)=>`data: ${JSON.stringify(event)}\n\n`).join("")});
     }
     return route.fallback();
   });
@@ -198,7 +219,28 @@ journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
     await expect(childGroup.getByText("Completed",{exact:true})).toHaveCount(0);
     await page.screenshot({path:join(contract.caseDir,"runtime-output.png"),fullPage:true});
   });
+  await contract.step(steps[2], async () => {
+    const verifyFailure = async ({ code, reason, reference }: typeof diagnosticFailures[number]) => {
+      const failureMessage = messageFor(reason);
+      await expect(failureMessage.getByText(reason, { exact: true })).toBeVisible();
+      await expect(failureMessage.getByText(`排查编号：${reference}`, { exact: true })).toBeVisible();
+      await expect(failureMessage.getByText(code, { exact: true })).toHaveCount(0);
+    };
+    const send = page.getByRole("button", { name: "发送", exact: true });
+    for (const failure of diagnosticFailures) {
+      await page.getByRole("textbox").fill(`Test ${failure.reference}`);
+      await send.click();
+      await verifyFailure(failure);
+    }
+    await page.reload();
+    for (const failure of diagnosticFailures) await verifyFailure(failure);
+  });
   const assertions=contract.expectedIds("assertions");
-  await contract.assertion(assertions[0],async()=>{expect(runs).toBe(1);expect(fixture.unexpectedWrites).toEqual([]);});
+  await contract.assertion(assertions[0],async()=>{expect(runs).toBe(1 + diagnosticFailures.length);expect(fixture.unexpectedWrites).toEqual([]);});
   await contract.assertion(assertions[1],async()=>{await expect(page.getByText("FINAL_ONCE",{exact:true})).toHaveCount(1);});
+  await contract.assertion(assertions[2], async () => {
+    for (const { reference } of diagnosticFailures) {
+      await expect(page.getByText(`排查编号：${reference}`, { exact: true })).toHaveCount(1);
+    }
+  });
 });

@@ -5,6 +5,8 @@
 import asyncio
 import json
 
+from pydantic import ValidationError
+
 from nexent.core.agents.contracts.clarification import (
     ClarificationForm,
     choose_clarification_tool_name,
@@ -20,6 +22,23 @@ class ClarificationRequested(asyncio.CancelledError):
     def __init__(self, form: ClarificationForm):
         super().__init__("NEXENT_CLARIFICATION_REQUESTED")
         self.form = form
+
+
+class InvalidClarification(JiuwenProtocolError):
+    def __init__(self, reason, issues=()):
+        super().__init__("JIUWEN_INVALID_CLARIFICATION")
+        self.reason = reason
+        self.issues = issues
+
+
+_FORM_FIELDS = frozenset(
+    {"questions", "id", "type", "title", "required", "options", "allow_other", "placeholder", "creation_request", "label"}
+)
+_FORM_REASONS = {
+    "clarification_too_few_choices": "clarification_too_few_choices",
+    "clarification_duplicate_option_id": "clarification_duplicate_ids",
+    "clarification_duplicate_question_id": "clarification_duplicate_ids",
+}
 
 
 class JiuwenClarification:
@@ -39,16 +58,33 @@ class JiuwenClarification:
                 arguments = json.loads(call.arguments)
                 if call.name == self.name:
                     if text_protocol:
-                        raise ValueError("Native clarification in text mode")
+                        raise InvalidClarification("clarification_mode_mismatch")
                     form = ClarificationForm.model_validate(arguments)
                 elif call.name in {EXECUTION_TOOL, NATIVE_EXECUTION_TOOL}:
                     candidate = parse_clarification_call(arguments["code"], self.name)
                     if candidate is not None:
                         if not text_protocol or call.name != EXECUTION_TOOL:
-                            raise ValueError("Clarification cannot execute in the sandbox")
+                            raise InvalidClarification("clarification_mode_mismatch")
                         form = candidate
             if form is not None and len(calls) != 1:
-                raise ValueError("Clarification must be the sole action")
+                raise InvalidClarification("clarification_mixed_actions")
             return form
+        except InvalidClarification:
+            raise
+        except ValidationError as error:
+            # Locations for forbidden extra keys can contain arbitrary model text.
+            issues = tuple(
+                (issue["type"], tuple(part if isinstance(part, int) or part in _FORM_FIELDS else "<extra>"
+                                      for part in issue["loc"]))
+                for issue in error.errors(include_input=False, include_context=False, include_url=False)[:5]
+            )
+            reason = "clarification_form_invalid"
+            if issues:
+                kind, path = issues[0]
+                if path == ("questions",) and kind in {"missing", "too_short", "too_long"}:
+                    reason = "clarification_question_count"
+                else:
+                    reason = _FORM_REASONS.get(kind, reason)
+            raise InvalidClarification(reason, issues) from None
         except (ValueError, TypeError, KeyError, SyntaxError, RecursionError, MemoryError):
-            raise JiuwenProtocolError("JIUWEN_INVALID_CLARIFICATION") from None
+            raise InvalidClarification("clarification_call_invalid") from None
