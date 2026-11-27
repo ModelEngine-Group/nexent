@@ -276,12 +276,15 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
 
 @pytest.mark.parametrize("platform_allowed", [False, True])
 @pytest.mark.parametrize("origin", ["SYSTEM", "PERSISTED"])
-def test_stored_platform_aidp_requires_workbench_run(mocker, platform_allowed, origin):
+@pytest.mark.parametrize("tenant_binding", [False, True])
+def test_stored_platform_aidp_requires_workbench_run(mocker, platform_allowed, origin, tenant_binding):
     mocker.patch.object(environment, "JWT_SECRET", "fixture-signing-key")
     from fastapi import HTTPException
 
     from infrastructure.local_tool_execution import build_local_tool
+    from management.services.agent.preparation import evaluation_snapshot
     from management.services.agent.preparation.local_tool import export_local_tool
+    from nexent.core.agents.contracts.config import AgentConfig
     from runtime.agentos import prepared_local_tool
 
     row = {
@@ -293,22 +296,50 @@ def test_stored_platform_aidp_requires_workbench_run(mocker, platform_allowed, o
     binding = export_local_tool(tool, [row], 8, 3, "tenant-a", "en")
     resource = SimpleNamespace(agent_id=8, version_no=3, origin=origin, tools=[binding])
     actor = ServicePrincipal("user-a", "tenant-a")
-    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[])
+    tenant_rows = [row] if tenant_binding else []
+    catalog = mocker.patch.object(evaluation_snapshot, "read_bound_local_tools", side_effect=lambda *_: tenant_rows.copy())
+    export_platform = mocker.patch.object(
+        evaluation_snapshot, "read_workbench_default_aidp_tools", return_value=[row],
+    )
+    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", side_effect=lambda *_: tenant_rows.copy())
     platform = mocker.patch.object(prepared_local_tool, "read_workbench_default_aidp_tools", return_value=[row])
     bind_access = mocker.patch.object(prepared_local_tool, "_bind_shared_aidp_access")
 
-    if platform_allowed and origin == "SYSTEM":
-        result = prepared_local_tool.materialize_local_tools(
-            resource, actor, "en", allow_workbench_default_aidp=True,
+    agent = AgentConfig(
+        agent_id=8, version_no=3, name="root", model_name="test-model", description="", tools=[tool], origin=origin,
+    )
+    can_use_platform = platform_allowed and origin == "SYSTEM"
+
+    def export_resource():
+        return evaluation_snapshot._export_resource(
+            agent, {}, actor.tenant_id, "en", lambda _tenant: [], {},
+            allow_workbench_default_aidp=platform_allowed,
         )
-        platform.assert_called_once_with(8, 3)
+
+    if tenant_binding or can_use_platform:
+        exported = export_resource()
+        assert exported.tools == [binding]
+        result = prepared_local_tool.materialize_local_tools(
+            exported, actor, "en", allow_workbench_default_aidp=platform_allowed,
+        )
+        if tenant_binding:
+            export_platform.assert_not_called()
+            platform.assert_not_called()
+        else:
+            export_platform.assert_called_once_with(8, 3)
+            platform.assert_called_once_with(8, 3)
         bind_access.assert_called_once_with(result["aidp_search"], actor)
-        binding.parameters["instance_id"] = 20
+        exported.tools[0].parameters["instance_id"] = 20
         with pytest.raises(HTTPException) as error:
-            prepared_local_tool.materialize_local_tools(resource, actor, "en", allow_workbench_default_aidp=True)
+            prepared_local_tool.materialize_local_tools(
+                exported, actor, "en", allow_workbench_default_aidp=platform_allowed,
+            )
         assert error.value.status_code == 404
         assert bind_access.call_count == 1
     else:
+        with pytest.raises(ValueError, match="does not have one enabled instance"):
+            export_resource()
+        export_platform.assert_not_called()
         with pytest.raises(HTTPException) as error:
             prepared_local_tool.materialize_local_tools(
                 resource, actor, "en", allow_workbench_default_aidp=platform_allowed,
@@ -316,12 +347,14 @@ def test_stored_platform_aidp_requires_workbench_run(mocker, platform_allowed, o
         assert error.value.status_code == 404
         platform.assert_not_called()
         bind_access.assert_not_called()
+    catalog.assert_called_once_with(8, 3, actor.tenant_id, ["aidp_search"])
 
 
 @pytest.mark.parametrize("method", [
     "vector_search|full_text_search|graph_search", "graph_search|vector_search",
 ])
-def test_scoped_shared_aidp_exports_migrated_parameters(mocker, method):
+@pytest.mark.parametrize("platform_binding", [False, True])
+def test_scoped_shared_aidp_exports_migrated_parameters(mocker, method, platform_binding):
     from infrastructure.local_tool_execution import build_local_tool
     from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
     from management.services.agent.preparation import local_tool
@@ -343,17 +376,28 @@ def test_scoped_shared_aidp_exports_migrated_parameters(mocker, method):
     tool = build_local_tool(row, "en", None, None)
     tool.params["kds_list"] = ["authorized"]
     tool.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: row["tool_id"]}
-    mocker.patch.object(local_tool, "read_shared_aidp_catalog_tool", return_value=row)
-    mocker.patch.object(prepared_local_tool, "read_shared_aidp_catalog_tool", return_value=row)
-    binding = local_tool.export_scoped_shared_aidp(tool, 8, 3, "tenant-a", "en")
+    for module in (local_tool, prepared_local_tool):
+        mocker.patch.object(module, "read_shared_aidp_catalog_tool", return_value=None if platform_binding else row)
+    export_platform = mocker.patch.object(local_tool, "read_workbench_scoped_aidp_tool", return_value=row)
+    restore_platform = mocker.patch.object(prepared_local_tool, "read_workbench_scoped_aidp_tool", return_value=row)
+    binding = local_tool.export_scoped_shared_aidp(
+        tool, 8, 3, "tenant-a", "en", allow_workbench_default_aidp=platform_binding,
+    )
     expected = {key: value for key, value in migrated.items() if key != "kwargs"}
     assert binding.parameters["options"] == {**expected, "kds_list": ["authorized"]}
-    resource = SimpleNamespace(agent_id=8, version_no=3, tools=[binding])
+    resource = SimpleNamespace(agent_id=8, version_no=3, origin="SYSTEM", tools=[binding])
     actor = ServicePrincipal("user-a", "tenant-a")
     bind_access = mocker.patch.object(prepared_local_tool, "_bind_shared_aidp_access")
-    rebound = prepared_local_tool.materialize_local_tools(resource, actor, "en", allow_scoped_aidp=True)
+    rebound = prepared_local_tool.materialize_local_tools(
+        resource, actor, "en", allow_scoped_aidp=True, allow_workbench_default_aidp=platform_binding,
+    )
     assert rebound["aidp_search"].params == binding.parameters["options"]
     bind_access.assert_called_once_with(rebound["aidp_search"], actor)
+    for lookup in (export_platform, restore_platform):
+        if platform_binding:
+            lookup.assert_called_once_with(7, 8, 3)
+        else:
+            lookup.assert_not_called()
 
 
 @pytest.mark.parametrize("invalid", [
@@ -411,3 +455,43 @@ async def test_scoped_aidp_accepts_catalog_localization_only(mocker):
     for change in ({"description_zh": "tampered"}, {"inputs": "{}"}, {"usage": "tampered"}):
         with pytest.raises(ValueError, match="differs from its catalog"):
             local_tool.export_scoped_shared_aidp(tool.model_copy(update=change), 8, 3, "tenant-a", "zh")
+
+
+@pytest.mark.parametrize("mode", ["invalid-id", "nonempty-kwargs", "no-sdk-description"])
+def test_scoped_aidp_rejects_untrusted_catalog_options(mocker, mode):
+    from pydantic import ValidationError
+
+    from infrastructure.local_tool_execution import build_local_tool
+    from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
+    from management.services.agent.preparation import local_tool
+
+    row = {
+        "tool_id": 7, "name": "aidp_search", "class_name": "AidpSearchTool", "source": "local",
+        "description": "AIDP search", "inputs": None, "usage": None, "output_type": "string",
+        "params": [], "instance_params": {},
+    }
+    tool = build_local_tool(row, "en", None, None)
+    tool.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: 7}
+    tenant_lookup = mocker.patch.object(local_tool, "read_shared_aidp_catalog_tool", return_value=row)
+    platform_lookup = mocker.patch.object(local_tool, "read_workbench_scoped_aidp_tool")
+    localized_catalog = mocker.patch.object(local_tool, "get_local_tools_description_zh", return_value={})
+
+    if mode == "invalid-id":
+        tool.metadata[SCOPED_SHARED_AIDP_CATALOG_ID] = True
+        with pytest.raises(ValueError, match="requires an available tenant catalog tool"):
+            local_tool.export_scoped_shared_aidp(tool, 8, 3, "tenant-a", "en", allow_workbench_default_aidp=True)
+        tenant_lookup.assert_not_called()
+        localized_catalog.assert_not_called()
+    elif mode == "nonempty-kwargs":
+        tool.params["kwargs"] = {"unexpected": True}
+        with pytest.raises(ValidationError) as error:
+            local_tool.export_scoped_shared_aidp(tool, 8, 3, "tenant-a", "en")
+        assert error.value.errors()[0]["loc"] == ("kwargs",)
+        assert error.value.errors()[0]["type"] == "extra_forbidden"
+        localized_catalog.assert_not_called()
+    else:
+        tool.description_zh = "Unexpected description"
+        with pytest.raises(ValueError, match="differs from its catalog"):
+            local_tool.export_scoped_shared_aidp(tool, 8, 3, "tenant-a", "en")
+        localized_catalog.assert_called_once_with()
+    platform_lookup.assert_not_called()
