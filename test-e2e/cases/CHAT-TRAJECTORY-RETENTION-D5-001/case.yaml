@@ -19,7 +19,7 @@ case:
   automation: automated
   objective: 可配置定期和主动清理只回收符合时间的轨迹，失败可重试
   preconditions:
-  - 后端存储及清理接口已实现；test.py包含文件故障、配置加载及批次预算部分，完整HTTP/PG及受管定时线程脚本和case-local execution.yaml尚未齐备，本Case保持blocked。
+  - 后端存储及清理接口已实现。脚本验证文件故障、批次预算、真实 PostgreSQL 上的受管线程定时清理和成功删除后的 HTTP 交接。完整的生命周期、失败场景和执行绑定仍待补齐。
   - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
   - 读取使用可信OPS/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
   - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有授权关系并保存执行摘要/统计快照，轨迹正文及执行清单由文件保存。
@@ -117,11 +117,10 @@ case:
     - AC-008
     - AC-013
     - AC-SCHEDULE-01
-    blocked_reason: Backend cleanup is implemented, including the scheduled two-second work deadline. File-risk scripts and
-      QUERY-D2 after-read HTTP expiry/cleanup/revocation variants are prepared but unexecuted. Live PG/chat reconciliation
-      and managed timer startup/wakeup remain unimplemented in this Case; no complete execution binding is declared. Full
-      acceptance is deferred by the user. Conversation-delete queue handoff and retry requirements are added; full API/PG/managed-worker
-      runtime proof remains deferred and is not claimed from UT.
+    blocked_reason: Filesystem and managed-worker proofs cover policy loading, scheduled wakeup, summary expiry and
+      single and batch HTTP deletion handoff. Attachment lifecycle, database transaction failure, full queues and
+      restart recovery, and complete multi-batch HTTP reconciliation still need fixed assertions and a complete execution
+      binding.
   execution:
     profiles:
     - name: mock

@@ -103,6 +103,7 @@ def test_archive_security_browser():
     import os
     import shutil
     import subprocess
+    import sys
     from pathlib import Path
 
     result = subprocess.run(
@@ -111,6 +112,6 @@ def test_archive_security_browser():
         capture_output=True,
         text=True,
         timeout=120,
-        env=dict(os.environ),
+        env={**os.environ, "FIXED_TEST_PYTHON": sys.executable},
     )
     assert result.returncode == 0, result.stdout + result.stderr

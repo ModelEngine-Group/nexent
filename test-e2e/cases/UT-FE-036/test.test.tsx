@@ -1,81 +1,36 @@
-import React from "react";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import {
-  buildCapacityPayload,
-  emptyCapacityForm,
-  validateCapacityForm,
-} from "@/app/[locale]/models/components/model/ModelCapacityFields";
-import {
-  advancedSettingsValueFromRecord,
-  buildInferenceParamsPayload,
-} from "@/app/[locale]/models/components/model/ModelAdvancedSettings";
-import { isValidMaxTokens, parseMaxTokens } from "@/app/[locale]/models/components/model/ModelMaxTokensInput";
-import {
-  canAnalyzeAutomationMessage,
-  createPreparingAutomationMessage,
-  resolveAutomationProposalMessage,
-} from "@/features/agentAutomation/chatAdapter";
-import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
-import { formValuesToProposalPatch } from "@/features/agentAutomation/scheduleForm";
-import { isValidAgentDescription, isValidAgentDisplayName, isValidAgentName } from "@/hooks/agent/useSaveGuard";
-import { canManageModels } from "@/lib/auth";
+import { expect, it } from "vitest";
+
 import {
   DEFAULT_MONITORING_DASHBOARD_ALLOWED_ROLES,
   canViewMonitoringDashboard,
 } from "@/lib/monitoringAccess";
-import { isEmbeddingModelCompatible, isMultimodalConstraintMismatch } from "@/lib/knowledgeBaseCompatibility";
-import { detectProviderError, processProviderResponse } from "@/lib/providerError";
-import {
-  detectCsvDelimiter,
-  getPreviewAccessReasonFromStatus,
-  ignoreAbortError,
-  parseCsvLine,
-  updateChunkRangeState,
-} from "@/lib/filePreviewUtils";
-import {
-  getMineCardMenuActions,
-  isCancelableRepositoryStatus,
-  isTakeDownableRepositoryStatus,
-  pickLatestSharedVersionName,
-} from "@/lib/agentRepositoryMine";
-import {
-  extractMcpErrorMessage,
-  filterServiceCards,
-  findMissingRequiredField,
-  hasUnresolvedUrlTemplate,
-  isValidPort,
-  paginateItems,
-} from "@/lib/mcpTools";
-import { calculateConversationViewport } from "@/lib/conversationViewport";
-import { shouldContinueConversationPageLoading } from "@/lib/conversationLoadPolicy";
-import { extractMarkdownHeadings } from "@/components/common/markdownRenderer";
-import { extractSkillInfoFromContent, isSkillMdFile, normalizeSkillFiles } from "@/lib/skillFileUtils";
-import { getQuotaConflictTranslationKey, getQuotaExceededMessage, isQuotaExceededError } from "@/types/quota";
-import { validateAidpFiles, validateFileType } from "@/services/uploadService";
-import { getLocalFileDownloadUrl, getLocalFilePreviewUrl } from "@/services/storageService";
-import { toApiError } from "@/services/api";
-import { formatNotificationMessage } from "@/lib/notificationMessage";
-import { buildRepositoryReviewDeepLink, parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
-import { parseSelection, serializeSelection } from "@/app/[locale]/agents/components/knowledge-base-search";
-import { isNewAgentPaddingItem } from "@/types/agentRepository";
-import { getToolParamOptions } from "@/const/agentConfig";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
+it("UT-FE-036 defaults monitoring access to SU", () => {
+  expect(DEFAULT_MONITORING_DASHBOARD_ALLOWED_ROLES).toEqual(["SU"]);
+  expect(canViewMonitoringDashboard(" sU ", false)).toBe(true);
+  expect(canViewMonitoringDashboard("tenant_admin", false)).toBe(false);
+});
 
-const t = ((key: string) => key) as any;
+it("UT-FE-036 matches actual roles against the configured allowlist", () => {
+  const userRoles = ["USER", "TeNaNt_AdMiN"];
+  const allowedRoles = [" tenant_admin "];
 
-describe("D1 frontend functional components and state reducers", () => {
-  it("UT-FE-036 enforces the monitoring dashboard role allowlist", () => {
-    expect(DEFAULT_MONITORING_DASHBOARD_ALLOWED_ROLES).toEqual(["SU", "SPEED"]);
-    expect(canViewMonitoringDashboard(" su ", false)).toBe(true);
-    expect(canViewMonitoringDashboard("tenant_admin", false)).toBe(false);
-    expect(canViewMonitoringDashboard("tenant_admin", true)).toBe(true);
-    expect(canViewMonitoringDashboard("tenant_admin", false, ["TENANT_ADMIN"])).toBe(true);
-    expect(canViewMonitoringDashboard(undefined, false, ["SU"])).toBe(false);
-  });
+  expect(canViewMonitoringDashboard(userRoles, false, allowedRoles)).toBe(true);
+  expect(canViewMonitoringDashboard("SU", false, allowedRoles)).toBe(false);
+});
+
+it("UT-FE-036 denies access through retired SPEED", () => {
+  expect(canViewMonitoringDashboard("SU", true)).toBe(true);
+  expect(canViewMonitoringDashboard("TENANT_ADMIN", true)).toBe(false);
+  expect(canViewMonitoringDashboard(undefined, true, ["SPEED"])).toBe(false);
+  expect(canViewMonitoringDashboard(" speed ", false, ["SPEED"])).toBe(false);
+});
+
+it("UT-FE-036 denies unmatched roles and an empty allowlist", () => {
+  expect(canViewMonitoringDashboard("UNKNOWN", false)).toBe(false);
+  expect(canViewMonitoringDashboard(" ", false)).toBe(false);
+  expect(canViewMonitoringDashboard(undefined, false)).toBe(false);
+  expect(canViewMonitoringDashboard("SU", false, [])).toBe(false);
 });

@@ -59,7 +59,7 @@ def scheduled_cleanup(root, clock, fault):
     started = time.monotonic()
     for _ in range(100):
         processor._maintain()
-        if processor._maintenance_iterator is None:
+        if fault == "scheduled_slow" or processor._maintenance_iterator is None:
             break
     else:
         raise AssertionError("Owned maintenance cycle did not finish")
