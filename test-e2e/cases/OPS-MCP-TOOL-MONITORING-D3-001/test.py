@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -274,11 +274,16 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
         # controls its catalog: the isolated environment owns the Ops stores only.
         registered = [
             {"tenant_id": tenant, "mcp_server_id": 3, "mcp_server_name": "stub",
-             "mcp_server_type": "container", "group_ids": (5,)},
+             "mcp_server_type": "container", "group_ids": (5,),
+             "tool_names": ("echo_tool", "slow_tool", "error_tool")},
             {"tenant_id": tenant, "mcp_server_id": 8, "mcp_server_name": "idle-remote",
-             "mcp_server_type": "remote", "group_ids": (5,)},
+             "mcp_server_type": "remote", "group_ids": (5,), "tool_names": ("idle_tool",)},
             {"tenant_id": tenant, "mcp_server_id": 11, "mcp_server_name": "public-remote",
-             "mcp_server_type": "remote", "group_ids": None},
+             "mcp_server_type": "remote", "group_ids": None, "tool_names": ()},
+            {"tenant_id": tenant, "mcp_server_id": 12, "mcp_server_name": "empty-group-remote",
+             "mcp_server_type": "remote", "group_ids": (), "tool_names": ()},
+            {"tenant_id": tenant, "mcp_server_id": None, "mcp_server_name": "outer-apis",
+             "mcp_server_type": "builtin", "group_ids": None},
         ]
         monkeypatch.setattr(query, "mcp_server_inventory", lambda _: registered)
         with TestClient(app) as client:
@@ -288,20 +293,16 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
             assert response.status_code == 200
             data = response.json()["data"]
             assert data["request_count"] == 3
-            assert data["service_count"] == 3 and data["active_services"] == 1
-            # The deadline-exceeded call still counts as an attempt (its started
-            # revision is published), so both tools are active.
-            assert data["tool_count"] == 3 and data["active_tools"] == 3
+            assert data["service_count"] == 5 and data["active_services"] == 1
+            assert data["tool_count"] == 4 and data["active_tools"] == 3
             assert data["error_count"] == 2
             assert client.get(route.removeprefix("/api"), params=interval).json() == response.json()
             assert client.get(route, params={**interval, "tenant_id": "someone-else"}).status_code == 403
             tools_list = client.get("/api/ops/v1/monitoring/mcp-tools", params={
                 **interval, "dimension": "services"}).json()["data"]["items"]
-            assert [item["mcp_server_name"] for item in tools_list] == ["stub", "idle-remote", "public-remote"]
-            assert tools_list[0]["active_tools"] == 3
-            # Registered never-called servers appear with null counters under partial coverage.
-            assert tools_list[1]["metrics"]["request_count"] is None
-            assert tools_list[1]["active_tools"] == 0
+            by_service = {item["mcp_server_name"]: item for item in tools_list}
+            assert set(by_service) == {"stub", "idle-remote", "public-remote", "empty-group-remote", "outer-apis"}
+            assert by_service["stub"]["active_tools"] == 3
 
         # -- Case step 3: replaying the confirmed batch does not inflate anything.
         replay = json.dumps([event for event in observations], separators=(",", ":"))
@@ -385,7 +386,7 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
         grouped_tools = client.get("/api/ops/v1/monitoring/mcp-tools", params={
             **interval, "dimension": "tools", "group_ids": 5}).json()["data"]["items"]
         by_tool = {item["tool_name"]: item for item in grouped_tools}
-        assert set(by_tool) == {"echo_tool", "slow_tool", "error_tool"}
+        assert set(by_tool) == {"echo_tool", "slow_tool", "error_tool", "idle_tool"}
         # The catalog-miss endpoint has no server identity, so its call never matches a group filter.
         assert by_tool["echo_tool"]["metrics"]["request_count"] == 2
         assert client.get("/api/ops/v1/monitoring/mcp-tools", params={
@@ -393,11 +394,29 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
         # The service catalog used by filter dropdowns applies the same matching.
         catalog = client.get("/api/ops/v1/monitoring/mcp-tools/catalog", params={
             "group_ids": 5}).json()["data"]
-        assert catalog == [{"service_id": 3, "name": "stub", "type": "container"},
-                           {"service_id": 8, "name": "idle-remote", "type": "remote"}]
+        assert [(entry["service_id"], entry["group_ids"]) for entry in catalog] == [(3, [5]), (8, [5])]
         unfiltered = client.get("/api/ops/v1/monitoring/mcp-tools/catalog").json()["data"]
-        assert unfiltered == [{"service_id": 3, "name": "stub", "type": "container"},
-                              {"service_id": 8, "name": "idle-remote", "type": "remote"},
-                              {"service_id": 11, "name": "public-remote", "type": "remote"}]
+        assert {entry["service_id"] for entry in unfiltered} == {3, 8, 11, 12, None}
+        ungrouped = client.get("/api/ops/v1/monitoring/mcp-tools", params={
+            **interval, "dimension": "services", "resource_group": "ungrouped"}).json()["data"]["items"]
+        assert {entry["mcp_server_id"] for entry in ungrouped} == {11, 12}
+
+        covered_day = day + timedelta(days=1)
+        ops_store.store.ensure_today(covered_day)
+        ops_store.publish(tenant, "mcp_tool")
+        for selected_day, coverage, calls in [
+            (day - timedelta(days=1), "uncovered", None),
+            (covered_day, "covered", 0),
+        ]:
+            selected = {"start_date": selected_day.isoformat(), "end_date": selected_day.isoformat(),
+                        "server_id": 8, "tool_name": "idle_tool"}
+            result = client.get("/api/ops/v1/monitoring/mcp-tools", params={**selected, "dimension": "tools"})
+            assert result.status_code == 200
+            payload = result.json()
+            assert payload["coverage_state"] == coverage
+            item, = payload["data"]["items"]
+            assert item["tool_name"] == "idle_tool" and item["metrics"]["request_count"] == calls
+            summary = client.get("/api/ops/v1/monitoring/mcp-tools/summary", params=selected).json()["data"]
+            assert (summary["tool_count"], summary["active_tools"], summary["request_count"]) == (1, 0, calls)
     finally:
         set_fact_sink(None)

@@ -20,6 +20,7 @@ from contracts.errors.exceptions import (
 )
 from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from management.services.agent import prepared_turn, runtime_client
+from management.services.automation import confirmation
 
 
 ACTOR = ("actor", "tenant")
@@ -47,6 +48,7 @@ def flow(mocker):
 
     mocker.patch.object(prepared_turn, "run_blocking", side_effect=inline)
     mocker.patch.object(prepared_turn.store, "next_message_index", return_value=8)
+    mocker.patch.object(confirmation, "previous_automation_invitation", return_value=None)
     mocker.patch.object(prepared_turn, "get_conversation", return_value={})
     compile_snapshot = mocker.patch.object(prepared_turn, "prepare_conversation_snapshot", return_value=snapshot)
     mocker.patch.object(prepared_turn.store, "stage_turn", side_effect=lambda *_args, **_kwargs: operations.append("stage") or staged)

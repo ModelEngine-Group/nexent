@@ -6,10 +6,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 
 from contracts.agent import WorkbenchSessionConfig
 from contracts.agentos import AgentRunReference, WorkbenchSkillLookup, WorkbenchSkillMounts
+from contracts.automation import AutomationProposalStatus
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.conversation import MessageSource
 from contracts.errors.codes import ErrorCode
@@ -19,6 +20,8 @@ from infrastructure.rdb.agent_admission import AdmissionScopeError, Conversation
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
+from management.db.automation.models import AgentAutomationProposal
+from management.db.automation.repository import read_running_workbench_execution
 from management.db.conversation.models import ConversationMessageUnit
 from management.db.conversation.projection_receipt import ConversationProjectionReceipt
 from management.db.conversation.repository import (
@@ -98,6 +101,57 @@ def next_message_index(conversation_id: int, user_id: str, tenant_id: str) -> in
         if _owned(session, conversation_id, user_id, tenant_id) is None:
             raise AdmissionScopeError
         return _next_index(session, conversation_id)
+
+
+def previous_automation_invitation(
+    conversation_id: int, tenant_id: str, user_id: str, before_index: int,
+) -> int | None:
+    """Resolve a proposal from its server-linked card on the immediately preceding turn."""
+    message, unit, proposal = ConversationMessage, ConversationMessageUnit, AgentAutomationProposal
+    previous = select(message.message_id).where(
+        message.conversation_id == conversation_id, message.created_by == user_id,
+        message.message_index == before_index - 1, message.delete_flag == "N",
+    ).order_by(message.message_id.desc()).limit(1).scalar_subquery()
+    with get_db_session() as session:
+        cards = session.execute(
+            select(unit.unit_id, unit.unit_content, message.message_id)
+            .join(message, message.message_id == unit.message_id)
+            .where(
+                message.message_id == previous, message.message_role == "assistant",
+                message.status == "completed", unit.conversation_id == conversation_id,
+                unit.created_by == user_id, unit.delete_flag == "N", unit.unit_status == "completed",
+                unit.unit_type == "automation_proposal",
+            )
+            .limit(2)
+        ).all()
+        if len(cards) != 1:
+            return None
+        unit_id, content, message_id = cards[0]
+        try:
+            card = json.loads(content)
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(card, dict) or card.get("executable") is not True or card.get("confirmed_task_id"):
+            return None
+        proposal_id = card.get("proposal_id")
+        if type(proposal_id) is not int or not 0 < proposal_id < 2 ** 63:
+            return None
+        source = select(message.message_id).where(
+            message.conversation_id == conversation_id, message.created_by == user_id,
+            message.message_index == before_index - 2, message.message_role == "user",
+            message.status == "completed", message.delete_flag == "N",
+        ).order_by(message.message_id.desc()).limit(1).scalar_subquery()
+        link = session.scalar(select(proposal.proposed_task).where(
+            proposal.proposal_id == proposal_id, proposal.conversation_id == conversation_id,
+            proposal.tenant_id == tenant_id, proposal.user_id == user_id, proposal.delete_flag == "N",
+            proposal.status == AutomationProposalStatus.PENDING.value, proposal.expires_at > func.now(),
+            or_(proposal.source_message_id.is_(None), proposal.source_message_id == source),
+        ))
+        if not isinstance(link, dict):
+            return None
+        if (link.get("_conversation_message_id"), link.get("_conversation_unit_id")) != (message_id, unit_id):
+            return None
+        return proposal_id
 
 
 def _saved_user_message(session, conversation_id, user_id, message_index, query, files):
@@ -293,6 +347,15 @@ def read_legacy_resume_index(conversation_id: int, message_id: int, user_id: str
         return -1 if last is None else last
 
 
+def _read_automation_workbench_mounts(session, lookup, user_id, tenant_id):
+    execution = read_running_workbench_execution(
+        session, lookup.run_id, lookup.conversation_id, lookup.agent_id, user_id, tenant_id,
+    )
+    if execution is None or execution["version"] != lookup.workbench_version:
+        return None
+    return WorkbenchSessionConfig.model_validate(execution["config"]).skill_mounts
+
+
 def read_workbench_skill_mounts(
     lookup: WorkbenchSkillLookup, user_id: str, tenant_id: str,
 ) -> WorkbenchSkillMounts | None:
@@ -311,7 +374,10 @@ def read_workbench_skill_mounts(
             conversation.created_by == user_id, conversation.delete_flag == "N",
         )).one_or_none()
         if row is None:
-            return None
+            mounts = _read_automation_workbench_mounts(session, lookup, user_id, tenant_id)
+            if mounts is None:
+                return None
+            return WorkbenchSkillMounts(mounts=[mount.model_dump(mode="json") for mount in mounts])
         state = row.prepared_user_turn or {}
         if state.get("workbench_skill_root") != {"agent_id": lookup.agent_id, "version_no": lookup.agent_version}:
             return None
@@ -347,9 +413,11 @@ def read_workbench_image_mounts(
             message.conversation_id == conversation.conversation_id, message.created_by == user_id,
             message.message_role == "assistant", message.delete_flag == "N",
         ))
-        if config is None:
-            return None
-        return {mount.skill_id: mount.config_values for mount in WorkbenchSessionConfig.model_validate(config).skill_mounts}
+        mounts = (
+            WorkbenchSessionConfig.model_validate(config).skill_mounts if config is not None
+            else _read_automation_workbench_mounts(session, lookup, user_id, tenant_id)
+        )
+        return {mount.skill_id: mount.config_values for mount in mounts} if mounts is not None else None
 
 
 def _require_metadata_version(conversation: ConversationRecord, expected: int) -> None:

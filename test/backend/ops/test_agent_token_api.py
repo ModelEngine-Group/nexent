@@ -58,7 +58,7 @@ async def test_summary_exposes_independently_published_token_values_and_status(a
     assert body["tokens"] == tokens and body["token_status"] == status
     assert not body["is_stale"] and body["token_status"]["is_stale"]
     reader.assert_called_once_with(api.state.monitoring, tenant="a", start=DAY, end=DAY,
-                                   groups=[12, 13], agent_id=21)
+                                   groups=[12, 13], agent_id=21, resource_group=None)
 
 
 @pytest.mark.asyncio

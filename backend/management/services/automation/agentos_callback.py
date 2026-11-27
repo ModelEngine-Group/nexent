@@ -7,6 +7,7 @@ from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_admission import AdmissionScopeError
 from management.db.conversation import prepared_turn as store
 from management.services.agent.runtime_client import _agentos_client
+from management.services.automation.confirmation import confirm_from_chat
 from management.services.automation.proposal import AutomationToolRuntimeContext, agent_loop_automation_tool_adapter
 from nexent.core.concurrency import run_blocking
 
@@ -15,6 +16,8 @@ def _read_context(turn) -> AutomationToolRuntimeContext | None:
     source = store.automation_source(turn)
     if source is None:
         return None
+    if source.get("confirm_from_chat"):
+        source["confirmation_before_index"] = turn.message_index - 1
     return AutomationToolRuntimeContext(
         tenant_id=turn.tenant_id, user_id=turn.user_id,
         conversation_id=turn.reference.conversation_id, **source,
@@ -49,4 +52,6 @@ async def create_automation_proposal(reference: AgentRunReference, actor: Servic
     context = await read("agentos-automation-source", _read_context, turn)
     if context is None:
         return None
+    if context.confirm_from_chat:
+        return await confirm_from_chat(context)
     return await agent_loop_automation_tool_adapter.create_proposal(context, "")

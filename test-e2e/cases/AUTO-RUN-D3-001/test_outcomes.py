@@ -16,15 +16,19 @@ from starlette.responses import StreamingResponse
 from shared.automation_run_fixture import run_store
 from shared.factories.redis_target import deployed_redis_urls
 
-from contracts.agentos import AgentRunReference
+from contracts.agentos import AgentRunReference, WorkbenchSkillLookup
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.redis import agent_events, run_state
+from infrastructure.rdb import model_records
+from infrastructure.rdb.model_record import ModelRecord
 from management.api.automation import agent_automation as api
 from management.db.automation import repository as runs
-from management.db.models import ConversationMessage, ConversationMessageUnit
+from management.db.conversation import prepared_turn
+from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord
 from management.services.agent import background, prepared_projection, runtime_client
-from management.services.automation import runner
+from management.services.automation import runner, scheduler
 from management.services.automation.service import AgentAutomationFacade
+from nexent.scheduler.core import ExecutionLease
 from runtime.agentos import resume
 
 pytestmark = [pytest.mark.case_id("AUTO-RUN-D3-001"), pytest.mark.stage("D3")]
@@ -65,13 +69,14 @@ def wire(monkeypatch):
 def runtime(monkeypatch, wire, run_store):
     state = SimpleNamespace(
         mode="completed", entered=asyncio.Event(), release=asyncio.Event(),
-        preparations=0, reference=None, replay_attempts=0, admissions=0,
+        preparations=0, reference=None, replay_attempts=0, admissions=0, on_admission=None, model_ids=[],
     )
 
-    async def prepare(request, reference, user_id, tenant_id, *, current_user_message_id):
+    async def prepare(request, reference, user_id, tenant_id, *, current_user_message_id, **options):
         assert (user_id, tenant_id, request.conversation_id) == (ACTOR.user_id, ACTOR.tenant_id, 1)
         assert request.enable_automation_tool is False and current_user_message_id > 0
         state.preparations += 1
+        state.model_ids.append(request.model_id)
         if state.mode == "preparation_failed":
             raise RuntimeError("controlled preparation failure")
         if state.mode == "cancel_in_preparation":
@@ -85,6 +90,8 @@ def runtime(monkeypatch, wire, run_store):
         assert (user_id, tenant_id) == (ACTOR.user_id, ACTOR.tenant_id)
         state.admissions += 1
         state.reference = reference = snapshot.reference
+        if state.on_admission is not None:
+            state.on_admission(reference)
         journal = wire(reference)
         journal.start()
         if state.mode != "before_output":
@@ -133,6 +140,9 @@ def runtime(monkeypatch, wire, run_store):
         inspect_run=lambda request, user_id, tenant_id: resume.inspect_run(request, ACTOR),
         acknowledge_projection=lambda request, user_id, tenant_id: resume.acknowledge_projection(request, ACTOR),
     )
+
+    from management.db.conversation import repository as conversations
+    monkeypatch.setattr(conversations, "_get_user_tenant", lambda user: {"tenant_id": ACTOR.tenant_id})
     monkeypatch.setattr(runner, "prepare_conversation_snapshot", prepare)
     monkeypatch.setattr(background, "prepare_conversation_snapshot", prepare)
     monkeypatch.setattr(runner, "validate_bindings_available", AsyncMock(return_value={"available": True}))
@@ -247,6 +257,161 @@ async def test_failed_commit_cannot_be_reported_as_success(run_store, runtime, m
     result = await settle(executor, run_store)
     assert result["status"] == "SUCCEEDED"
     assert_identity(run_store, result)
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["MANUAL", "SCHEDULED"])
+@pytest.mark.parametrize("confirmed", [False, True])
+async def test_workbench_execution_prepares_owned_scope_and_projects_result(
+    run_store, runtime, monkeypatch, trigger, confirmed,
+):
+    from management.services.agent import workbench
+    from management.services.agent.preparation import evaluation_snapshot, run as compiler
+    from management.services.model import run_controls
+    from infrastructure import memory_io
+    from infrastructure.rdb.agent_admission import ConversationRunAdmission
+
+    config = {"schema_version": 4, "mode": "generic_chat", "skill_mounts": [{"skill_id": 45}]}
+    with run_store.sessions() as session:
+        ConversationRunAdmission.__table__.create(session.connection())
+        conversation = session.get(ConversationRecord, 1)
+        conversation.workbench_config = config
+        conversation.workbench_config_version = 3
+
+    task = run_store.task
+    skill_id, version = 45, 3
+    if confirmed:
+        skill_id, version = 44, 2
+        snapshot = {
+            **task["runtime_snapshot"],
+            runs.WORKBENCH_EXECUTION_KEY: {
+                "config": {**config, "skill_mounts": [{"skill_id": skill_id}]}, "version": version,
+            },
+        }
+        task = runs.update_task(task["task_id"], ACTOR.tenant_id, ACTOR.user_id, {"runtime_snapshot": snapshot})
+
+    root = SimpleNamespace(agent_id=7, version_no=2)
+    plan = SimpleNamespace(root=SimpleNamespace(identity=root), child_mounts=(), root_skills=())
+    monkeypatch.setattr(workbench, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(workbench, "resolve_workbench_config", lambda config, **kwargs: (config, plan))
+    monkeypatch.setattr(run_controls, "validate_agent_model_selection", lambda *args: None)
+    monkeypatch.setattr(run_controls, "preflight_agent_turn_controls", lambda *args: None)
+    monkeypatch.setattr(memory_io, "optional_memory_io", AsyncMock(return_value=False))
+    monkeypatch.setattr(runner, "prepare_conversation_snapshot", evaluation_snapshot.prepare_conversation_snapshot)
+
+    async def compile_run(**kwargs):
+        scope = kwargs["prepared_conversation"]
+        assert scope.workbench_config_version == version
+        assert kwargs["prepared_workbench"].config.skill_mounts[0].skill_id == skill_id
+        assert kwargs["agent_id"] == 7 and kwargs["enable_automation_tool"] is False
+        return SimpleNamespace(
+            reference=AgentRunReference(run_id=scope.run_id, conversation_id=scope.conversation_id),
+            memory_enabled=False,
+        )
+
+    def inspect_mounts(reference):
+        lookup = WorkbenchSkillLookup(**reference.model_dump(), agent_id=7, agent_version=2, workbench_version=version)
+        mounts = prepared_turn.read_workbench_skill_mounts(lookup, ACTOR.user_id, ACTOR.tenant_id)
+        assert mounts.model_dump() == {"mounts": [{"skill_id": skill_id, "config_values": {}}]}
+        assert prepared_turn.read_workbench_image_mounts(lookup, ACTOR.user_id, ACTOR.tenant_id) == {skill_id: {}}
+        assert prepared_turn.read_workbench_skill_mounts(
+            lookup.model_copy(update={"run_id": "a" * 32}), ACTOR.user_id, ACTOR.tenant_id,
+        ) is None
+
+    monkeypatch.setattr(compiler, "create_agent_run_info", compile_run)
+    runtime.on_admission = inspect_mounts
+    result = await runner.AgentAutomationRunner().execute_task(task, trigger_type=trigger)
+
+    assert result["status"] == "SUCCEEDED"
+    assert_identity(run_store, result)
+    assistant = next(row for row in run_store.rows(ConversationMessage)
+                     if row["message_id"] == result["assistant_message_id"])
+    assert assistant["conversation_id"] == 1 and assistant["message_content"] == ANSWER
+    task = runs.get_task(run_store.task["task_id"], ACTOR.tenant_id, ACTOR.user_id)
+    assert task["fire_count"] == int(trigger == "SCHEDULED")
+    if trigger == "SCHEDULED":
+        assert task["next_fire_at"] > run_store.task["next_fire_at"]
+    else:
+        assert task["next_fire_at"] == run_store.task["next_fire_at"]
+    saved_conversation = run_store.rows(ConversationRecord)[0]
+    assert saved_conversation["workbench_config"] == config
+    assert saved_conversation["workbench_config_version"] == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workbench_mode", [False, True], ids=["ordinary", "workbench"])
+@pytest.mark.parametrize("trigger", ["MANUAL", "SCHEDULED"])
+@pytest.mark.parametrize("selection", ["switched", "missing", "deleted"])
+async def test_automation_uses_current_saved_model(run_store, runtime, monkeypatch, workbench_mode, trigger, selection):
+    from management.services.agent import workbench
+
+    config = {"schema_version": 4, "mode": "generic_chat"}
+    snapshot = {"model_id": 101}
+    if workbench_mode:
+        snapshot[runs.WORKBENCH_EXECUTION_KEY] = {"config": config, "version": 2}
+        root = SimpleNamespace(identity=SimpleNamespace(agent_id=7, version_no=2))
+        plan = SimpleNamespace(root=root, child_mounts=(), root_skills=())
+        monkeypatch.setattr(workbench, "ENABLE_AGENT_WORKBENCH", True)
+        monkeypatch.setattr(workbench, "resolve_workbench_config", lambda config, **kwargs: (config, plan))
+
+    with run_store.sessions() as session:
+        session.add(ModelRecord(model_id=101, model_name="Original model", model_type="llm",
+                                tenant_id=ACTOR.tenant_id, delete_flag="N"))
+        conversation = session.get(ConversationRecord, 1)
+        conversation.selected_model_id = None if selection == "missing" else 102
+        if workbench_mode:
+            conversation.workbench_config = config
+            conversation.workbench_config_version = 2
+    task_id = run_store.task["task_id"]
+    runs.update_task(task_id, ACTOR.tenant_id, ACTOR.user_id, {"runtime_snapshot": snapshot, "timeout_seconds": 5})
+    if selection == "switched":
+        assert model_records.delete_model_record(101, ACTOR.user_id, ACTOR.tenant_id)
+    elif selection == "deleted":
+        assert model_records.delete_model_record(102, ACTOR.user_id, ACTOR.tenant_id)
+
+    manual_run = None
+    if trigger == "MANUAL":
+        monkeypatch.setattr(api, "_get_current_user", lambda _: (ACTOR.user_id, ACTOR.tenant_id))
+        app = FastAPI()
+        app.include_router(api.router)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/agent/automations/{task_id}/run")
+        assert response.status_code == 200
+        manual_run = response.json()["data"]
+    else:
+        store = scheduler.AgentAutomationLeaseStore()
+        [job] = await store.claim_due("fixture-scheduler", limit=1, lease_seconds=30)
+        assert job.job_id == task_id
+        lease = ExecutionLease(job_id=job.job_id, owner_id="fixture-scheduler")
+        try:
+            await scheduler.execute_agent_automation(job, lease)
+        finally:
+            await store.release(job.job_id, lease.owner_id)
+
+    result = latest_run(run_store)
+    assert result["trigger_type"] == trigger
+    if manual_run is not None:
+        for field in ("run_id", "status", "error_code", "assistant_message_id"):
+            assert manual_run[field] == result[field]
+    task = runs.get_task(task_id, ACTOR.tenant_id, ACTOR.user_id)
+    assert task["fire_count"] == int(trigger == "SCHEDULED")
+    if selection == "switched":
+        assert result["status"] == "SUCCEEDED"
+        assert runtime.model_ids == [102] and runtime.admissions == 1
+        runner.validate_bindings_available.assert_awaited_once()
+        assert runner.validate_bindings_available.await_args.kwargs["model_id"] == 102
+        assert_identity(run_store, result)
+        assistant = next(row for row in run_store.rows(ConversationMessage)
+                         if row["message_id"] == result["assistant_message_id"])
+        assert assistant["conversation_id"] == 1 and assistant["message_content"] == ANSWER
+    else:
+        assert result["status"] == "FAILED" and result["error_code"] == "AUTOMATION_MODEL_UNAVAILABLE"
+        assert result["user_message_id"] is None and result["assistant_message_id"] is None
+        assert task["last_error"] == result["error_message"]
+        assert runtime.model_ids == [] and runtime.admissions == 0
+        runner.validate_bindings_available.assert_not_awaited()
+        assert run_store.rows(ConversationMessage) == []
 
 
 @pytest.mark.asyncio

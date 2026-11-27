@@ -7,12 +7,12 @@ import bcrypt
 import psycopg2
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres.migrate_docker import MigrationConflict, import_users
+from deploy.sql.tools.supabase_to_postgres.migrate_docker import import_users
 from local_auth import disposable_database
 from shared.merged_migrations import merged_migration_sql
 
 
-def assert_consolidated_schema(root):
+def assert_consolidated_schema(root, capsys):
     sql = merged_migration_sql("v2.9.0_001_local_user_accounts.sql")
     assert not (root / "deploy/sql/migrations/v2.9.0_002_account_availability.sql").exists()
     assert "ADD COLUMN account_status" not in sql and "account_status VARCHAR" not in sql
@@ -39,35 +39,34 @@ def assert_consolidated_schema(root):
                 {"id": dual_id, "email": "dual@example.com", "encrypted_password": encoded, "raw_user_meta_data": {"provider": "cas"}},
                 {"id": banned_id, "email": "cas@example.com", "banned_until": "2999-01-01T00:00:00Z"},
             ]
-            if conflict:
-                with pytest.raises(MigrationConflict) as error, psycopg2.connect(dsn) as connection:
-                    import_users(connection, rows, dry_run=False)
-                assert "cas-only" in str(error.value) and "duplicate-cas" in str(error.value)
-                with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
-                    cursor.execute("SELECT to_regclass('nexent.user_account_t')")
-                    assert cursor.fetchone()[0] is None
-                    cursor.execute("SELECT count(*) FROM nexent.user_tenant_t WHERE user_role IS NOT NULL")
-                    assert cursor.fetchone()[0] == len(members)
-                continue
-            # A revoked binding alone cannot establish passwordless provenance
-            # for an otherwise active member absent from the source snapshot.
-            with pytest.raises(MigrationConflict, match="deleted-binding"), psycopg2.connect(dsn) as connection:
-                import_users(connection, rows, dry_run=False)
             with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
-                cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y' WHERE user_id='deleted-binding'")
                 import_users(connection, rows, dry_run=False)
+                # A revoked binding cannot enable login, but the account profile survives.
+                warning = capsys.readouterr().err
+                assert "[warning]" in warning and "deleted-binding" in warning and "gone@example.com" in warning
                 cursor.execute("SELECT user_id,user_roles,password_login_enabled,password_hash,delete_flag FROM nexent.user_account_t ORDER BY user_id")
                 accounts = {r[0]: r[1:] for r in cursor.fetchall()}
-                assert accounts == {
+                expected_accounts = {
                     "cas-only": (["USER"], False, None, "N"),
                     "oauth-only": (["DEV"], False, None, "N"),
+                    "deleted-binding": (["USER"], False, None, "Y"),
                     dual_id: (["ADMIN"], True, encoded, "N"),
+                    banned_id: (["USER"], False, None, "Y"),
                 }
+                if conflict:
+                    assert "Duplicate active email" in warning and "cas@example.com" in warning
+                    assert "cas-only" in warning and "duplicate-cas" in warning
+                    expected_accounts["duplicate-cas"] = (["USER"], False, None, "N")
+                assert accounts == expected_accounts
+                cursor.execute("SELECT delete_flag FROM nexent.user_tenant_t WHERE user_id='deleted-binding'")
+                assert cursor.fetchone() == ("N",)
                 cursor.execute("SELECT count(*) FROM nexent.user_oauth_account_t")
                 assert cursor.fetchone()[0] == len(bindings)
                 cursor.execute("UPDATE nexent.user_account_t SET delete_flag='Y',token_version=8,updated_by='operator' WHERE user_id='cas-only'")
-                cursor.execute(sql)
-                cursor.execute(sql)
+                # Conflict replay is exercised by the deployment SQL runner.
+                if not conflict:
+                    cursor.execute(sql)
+                    cursor.execute(sql)
                 cursor.execute("SELECT delete_flag,token_version,updated_by FROM nexent.user_account_t WHERE user_id='cas-only'")
                 assert cursor.fetchone() == ("Y", 8, "operator")
                 cursor.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'")

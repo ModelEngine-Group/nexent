@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Verify exception-only reports preserve complete local execution evidence."""
 import json
 from pathlib import Path
@@ -131,6 +133,25 @@ class SuiteReportTests(unittest.TestCase):
             self.assertNotIn("| C |", d2)
             self.assertIn("| C | D4 |", d4)
             self.assertNotIn("| B |", d4)
+
+
+    def test_staged_report_uses_available_performance_metrics_from_batch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            batch = Path(temp) / "batch"
+            migration = batch / "cases/DB-MIGRATION-D5-001/runtime/upgrade-metrics.json"
+            migration.parent.mkdir(parents=True)
+            migration.write_text('{"rows": 1000000, "upgrade_seconds": 41, "budget_seconds": 300}', encoding="utf-8")
+            load = batch / "cases/PERF-02/runtime/conversation-load.json"
+            load.parent.mkdir(parents=True)
+            load.write_text('{"tiers": null}', encoding="utf-8")
+            row = {"case_id": "DB-MIGRATION-D5-001", "stage": "D5", "result": "PASS"}
+            summary = finalize(batch, [row], [row])
+            staging = Path(temp) / "staging"
+            staging.mkdir()
+            render_report(staging, [row], [row], summary, metadata_directory=batch)
+            report = (staging / "report.md").read_text(encoding="utf-8")
+            self.assertIn("## D5 performance evidence", report)
+            self.assertIn("1,000,000 seeded rows", report)
 
 
 if __name__ == "__main__":

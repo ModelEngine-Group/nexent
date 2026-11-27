@@ -123,7 +123,7 @@ async def test_sorting_preserves_authorized_selection_for_both_published_readers
                          start_date="2026-11-18", search="AGENT-1")
     assert response.status_code == 200
     assert [row["agent_id"] for row in response.json()["data"]["items"]] == [1]
-    selection = dict(tenant="a", start=date(2026, 11, 18), end=DAY, groups=[12, 13], agent_id=1)
+    selection = dict(tenant="a", start=date(2026, 11, 18), end=DAY, groups=[12, 13], agent_id=1, resource_group=None)
     views.assert_called_once_with(app.state.monitoring, **selection)
     assert tokens.call_count == 1
     assert {key: value for key, value in tokens.call_args.kwargs.items() if key != "identities"} == selection
@@ -207,7 +207,7 @@ async def test_rankings_forward_all_authorized_filters(ranking_app, metric):
                          start_date="2026-11-18")
     assert response.status_code == 200
     assert [row["agent_id"] for row in response.json()["data"]] == [3]
-    selection = dict(tenant="a", start=date(2026, 11, 18), end=DAY, groups=[12, 13], agent_id=3)
+    selection = dict(tenant="a", start=date(2026, 11, 18), end=DAY, groups=[12, 13], agent_id=3, resource_group=None)
     views.assert_called_once_with(app.state.monitoring, **selection)
     if metric == "total_tokens":
         assert {key: value for key, value in tokens.call_args.kwargs.items() if key != "identities"} == selection

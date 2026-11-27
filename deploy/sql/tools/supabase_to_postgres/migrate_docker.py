@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -128,7 +129,10 @@ def read_source_users(source) -> list:
 
 def inspection_sql():
     """Inspect membership coverage and usable credentials without persistent writes."""
-    return (HERE / "inspect_accounts.sql").read_text(encoding="utf-8")
+    return "\n".join(
+        (HERE / name).read_text(encoding="utf-8")
+        for name in ("inspect_accounts.sql", "inspect_account_warnings.sql")
+    )
 
 
 def inspect_accounts(target):
@@ -137,15 +141,15 @@ def inspect_accounts(target):
         return cursor.fetchone()[0]
 
 
-def account_data_complete(state):
-    """Reject incomplete existing tables; automatic migration never repairs them."""
-    if state["complete"]:
-        return True
-    if state.get("account_table"):
-        raise MigrationSetupError("Existing account data is incomplete; IDs: "
-            + json.dumps(state.get("unresolved_ids", []))
-            + "; restore the consistent pre-upgrade backup before retrying; no automatic repair was attempted")
-    return False
+def skip_existing_accounts(state):
+    """Skip existing tables, reporting incomplete account coverage without writes."""
+    warn_accounts(state.get("account_warnings", []), "Incomplete account coverage")
+    return state["complete"] or state.get("account_table", False)
+
+
+def warn_accounts(accounts, reason):
+    for account in accounts:
+        print(f"[account-migration][warning] {reason} " + json.dumps(account), file=sys.stderr)
 
 
 def merged_migration_section(name):
@@ -162,18 +166,26 @@ def merged_migration_section(name):
 def _account_import_sql(source_rows, *, dry_run=False):
     """Build one credential/schema transaction body, shared by host and psql."""
     rows = [map_source_user(row) for row in source_rows]
-    ids = set()
+    counts = Counter(row["user_id"] for row in rows)
+    duplicate_contacts = sorted({
+        (row["user_id"], row["email"]) for row in rows if counts[row["user_id"]] > 1
+    })
+    warn_accounts(
+        ({"user_id": user_id, "user_email": email} for user_id, email in duplicate_contacts),
+        "Duplicate source user ID",
+    )
+    rows = [row for row in rows if counts[row["user_id"]] == 1]
     for row in rows:
-        if row["user_id"] in ids:
-            raise MigrationConflict("Account migration conflict IDs: " + json.dumps([row["user_id"]]))
-        ids.add(row["user_id"])
         row["user_email"] = row.pop("email")
     encoded = json.dumps(rows, default=lambda value: value.isoformat()).replace("'", "''")
+    legacy_emails = (HERE / "preserve_legacy_emails.sql").read_text(encoding="utf-8")
     schema = merged_migration_section("v2.9.0_001_local_user_accounts.sql")
     roles_schema = merged_migration_section("v2.9.0_010_account_and_ops_roles.sql")
     return "SET LOCAL standard_conforming_strings=on;\n" + inspection_sql() + r"""
 SET LOCAL nexent.account_import='on';
-""" + schema + "\n" + roles_schema + "\n" + r"""
+""" + legacy_emails + "\nSELECT pg_temp.prepare_legacy_account_emails();\n" + schema + r"""
+SELECT pg_temp.restore_legacy_account_emails();
+""" + roles_schema + "\n" + r"""
 CREATE TABLE IF NOT EXISTS nexent.account_migration_exclusion_t (
     exclusion_id SERIAL PRIMARY KEY,
     user_id VARCHAR(100) NOT NULL UNIQUE,
@@ -204,18 +216,19 @@ FROM jsonb_populate_recordset(NULL::nexent.user_account_t, '__ROWS__'::jsonb) s
 LEFT JOIN pg_temp.account_migration_profiles p ON p.user_id=s.user_id
 LEFT JOIN nexent.user_account_t a ON a.user_id=s.user_id;
 UPDATE account_import SET delete_flag='Y' WHERE orphan OR role_values IS NULL OR cardinality(role_values)=0;
-DO $validate$
-DECLARE conflict_ids json;
-BEGIN
-    SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids FROM (
-        SELECT DISTINCT user_id FROM account_import
-        WHERE delete_flag='N' AND profile_email IS NOT NULL AND profile_email<>user_email
-    ) conflicts;
-    IF conflict_ids IS NOT NULL THEN
-        RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids;
-    END IF;
-END
-$validate$;
+CREATE TEMP TABLE account_import_conflicts ON COMMIT DROP AS
+SELECT user_id,user_email,profile_email,'Source and historical profile emails differ'::text AS reason
+FROM account_import
+WHERE delete_flag='N' AND profile_email IS NOT NULL AND lower(trim(profile_email))<>user_email;
+INSERT INTO account_import_conflicts (user_id,user_email,reason)
+SELECT user_id,email->>'user_email','Conflicting legacy membership email'
+FROM pg_temp.legacy_account_emails,LATERAL jsonb_array_elements(emails) AS email;
+UPDATE account_import s
+SET source_metadata=s.source_metadata || jsonb_build_object('legacy_profile_email',s.profile_email)
+WHERE s.delete_flag='N' AND s.profile_email IS NOT NULL AND lower(trim(s.profile_email))<>s.user_email;
+UPDATE account_import s
+SET source_metadata=s.source_metadata || jsonb_build_object('legacy_membership_emails',e.emails)
+FROM pg_temp.legacy_account_emails e WHERE e.user_id=s.user_id;
 UPDATE nexent.user_account_t a SET
     user_email=s.user_email,user_roles=s.role_values,password_hash=s.password_hash,password_hash_scheme=s.password_hash_scheme,
     password_login_enabled=s.password_login_enabled,token_version=s.token_version,
@@ -229,75 +242,80 @@ SELECT user_id,user_email,role_values,password_hash,password_hash_scheme,passwor
        email_confirmed_at,source_metadata,create_time,update_time,delete_flag,'auth-migration','auth-migration'
 FROM account_import s WHERE delete_flag='N'
 AND NOT EXISTS (SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id);
-DELETE FROM nexent.user_account_t WHERE delete_flag='Y'
-AND coalesce(source_metadata->>'system_identity','')<>'speed';
-DO $email_conflicts$
-DECLARE conflict_ids json;
-BEGIN
-    SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids
-    FROM nexent.user_account_t
-    WHERE delete_flag='N' AND lower(trim(user_email)) IN (
-        SELECT lower(trim(user_email)) FROM nexent.user_account_t
-        WHERE delete_flag='N' AND user_email IS NOT NULL
-        GROUP BY lower(trim(user_email)) HAVING count(*)>1
-    );
-    IF conflict_ids IS NOT NULL THEN
-        RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids;
-    END IF;
-END
-$email_conflicts$;
+INSERT INTO account_import_conflicts (user_id,user_email,reason)
+SELECT user_id,user_email,'Duplicate active email'
+FROM nexent.user_account_t
+WHERE delete_flag='N' AND lower(trim(user_email)) IN (
+    SELECT lower(trim(user_email)) FROM nexent.user_account_t
+    WHERE delete_flag='N' AND user_email IS NOT NULL
+    GROUP BY lower(trim(user_email)) HAVING count(*)>1
+);
 INSERT INTO nexent.account_migration_exclusion_t (user_id,exclusion_reason)
 SELECT user_id,'source_unavailable' FROM account_import WHERE source_inactive AND NOT orphan
 ON CONFLICT (user_id) DO NOTHING;
-DO $coverage$
-DECLARE unresolved json := pg_temp.inspect_local_accounts()->'unresolved_ids';
-BEGIN
-    IF json_array_length(unresolved)>0 THEN
-        RAISE EXCEPTION 'NEXENT_ACCOUNT_INCOMPLETE=%',unresolved;
-    END IF;
-END
-$coverage$;
+CREATE TEMP TABLE account_import_warnings ON COMMIT DROP AS
+SELECT unresolved.user_id, coalesce(a.user_email, s.user_email, p.email_value) AS user_email
+FROM json_array_elements_text(pg_temp.inspect_local_accounts()->'unresolved_ids') AS unresolved(user_id)
+LEFT JOIN nexent.user_account_t a ON a.user_id=unresolved.user_id
+LEFT JOIN account_import s ON s.user_id=unresolved.user_id
+LEFT JOIN pg_temp.account_migration_profiles p ON p.user_id=unresolved.user_id;
+
+-- Preserve historical profiles whose membership columns were moved by the schema migration.
+INSERT INTO nexent.user_account_t (user_id,user_email,user_roles,password_hash,password_hash_scheme,
+                                  email_confirmed_at,source_metadata,delete_flag,created_by,updated_by)
+SELECT w.user_id,w.user_email,coalesce(s.role_values,ARRAY[p.role_value]::varchar[],ARRAY[]::varchar[]),
+       s.password_hash,s.password_hash_scheme,s.email_confirmed_at,coalesce(s.source_metadata,'{}'::jsonb),
+       'Y','auth-migration','auth-migration'
+FROM account_import_warnings w
+LEFT JOIN account_import s ON s.user_id=w.user_id
+LEFT JOIN pg_temp.account_migration_profiles p ON p.user_id=w.user_id AND p.role_value IS NOT NULL
+WHERE NOT EXISTS (SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=w.user_id);
+
+INSERT INTO nexent.account_migration_exclusion_t (user_id,exclusion_reason)
+SELECT user_id,'incomplete_source_coverage' FROM account_import_warnings
+ON CONFLICT (user_id) DO NOTHING;
 SET LOCAL nexent.account_import='off';
 SELECT json_build_object('source',__SOURCE_COUNT__,'inserted',count(*) FILTER (WHERE NOT existing AND delete_flag='N'),
                          'updated',count(*) FILTER (WHERE existing AND delete_flag='N'),
                          'skipped',count(*) FILTER (WHERE delete_flag='Y'),
                          'excluded_inactive',count(*) FILTER (WHERE delete_flag='Y'),
-                         'disabled_orphans',count(*) FILTER (WHERE orphan),'dry_run',__DRY_RUN__)
+                         'disabled_orphans',count(*) FILTER (WHERE orphan),'dry_run',__DRY_RUN__,
+                         'account_warnings',(SELECT coalesce(json_agg(w ORDER BY w.user_id),'[]'::json)
+                                             FROM account_import_warnings w),
+                         'account_conflicts',(SELECT coalesce(json_agg(c ORDER BY c.user_id,c.reason),'[]'::json)
+                                              FROM account_import_conflicts c))
 FROM account_import;
-""".replace("__DRY_RUN__", "true" if dry_run else "false").replace("__SOURCE_COUNT__", str(len(rows))).replace("__ROWS__", encoded)
+""".replace("__DRY_RUN__", "true" if dry_run else "false").replace("__SOURCE_COUNT__", str(len(source_rows))).replace("__ROWS__", encoded)
 
 
 def import_users(target, source_rows: list, *, dry_run: bool = True) -> dict:
-    """Commit only complete new migrations; existing inconsistent tables require recovery."""
+    """Import a new account table atomically, with warnings for coverage gaps."""
     with target.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(hashtext('account-writers'))")
         state = inspect_accounts(target)
-        if account_data_complete(state):
-            return {"skipped": len(source_rows), "complete": True, "dry_run": dry_run}
-        cursor.execute("SAVEPOINT account_migration")
-        try:
-            cursor.execute(_account_import_sql(source_rows, dry_run=dry_run))
-            result = cursor.fetchone()[0]
-        except Exception as exc:
-            conflict = _migration_conflict(getattr(getattr(exc, "diag", None), "message_primary", ""))
-            cursor.execute("ROLLBACK TO SAVEPOINT account_migration")
-            cursor.execute("RELEASE SAVEPOINT account_migration")
-            if conflict:
-                raise conflict from None
-            raise
+        if skip_existing_accounts(state):
+            return {"skipped": len(source_rows), "complete": state["complete"], "dry_run": dry_run}
         if dry_run:
-            cursor.execute("ROLLBACK TO SAVEPOINT account_migration")
-        cursor.execute("RELEASE SAVEPOINT account_migration")
+            cursor.execute("SAVEPOINT account_migration_preview")
+        cursor.execute(_account_import_sql(source_rows, dry_run=dry_run))
+        result = cursor.fetchone()[0]
+        if dry_run:
+            cursor.execute("ROLLBACK TO SAVEPOINT account_migration_preview")
+            cursor.execute("RELEASE SAVEPOINT account_migration_preview")
+        warn_accounts(result.pop("account_warnings"), "Incomplete account coverage")
+        for conflict in result.pop("account_conflicts"):
+            reason = conflict.pop("reason")
+            warn_accounts([conflict], reason)
         return result
 
 
 def _migration_conflict(message):
     """Extract only structured account identifiers, never raw database output."""
-    match = re.search(r'(?:^|ERROR:\s*)NEXENT_ACCOUNT_(CONFLICT|INCOMPLETE)=(\[[^\r\n]*\])', message or '', re.M)
+    match = re.search(r'(?:^|ERROR:\s*)NEXENT_ACCOUNT_CONFLICT=(\[[^\r\n]*\])', message or '', re.M)
     if not match:
         return None
     try:
-        ids = json.loads(match.group(2))
+        ids = json.loads(match.group(1))
         if not isinstance(ids, list) or not ids:
             return None
         if any(not isinstance(value,str) or not 0<len(value)<=100 or any(ord(c)<32 for c in value) for value in ids):
@@ -305,9 +323,6 @@ def _migration_conflict(message):
         ids = sorted(set(ids))
     except (ValueError, TypeError, AttributeError):
         return None
-    if match.group(1) == "INCOMPLETE":
-        return MigrationConflict("Incomplete account migration IDs: " + json.dumps(ids)
-            + "; verify original Supabase coverage and restore missing legacy role/email profiles from backup")
     return MigrationConflict("Account migration conflict IDs: " + json.dumps(ids))
 
 
@@ -338,43 +353,41 @@ def container_main(argv=None):
 
     try:
         with psycopg2.connect(**parameters("", "NEXENT_POSTGRES_PASSWORD")) as target:
-            try:
-                with target.cursor() as cursor:
-                    cursor.execute("SELECT pg_advisory_xact_lock(hashtext('account-writers'))")
-                state = inspect_accounts(target)
-                complete, legacy = account_data_complete(state), state["legacy"]
-                if complete or not legacy:
-                    print(json.dumps({"skipped": True, "complete": complete, "new": not legacy}))
-                    return 0
-                source_params = parameters("SUPABASE_", "SUPABASE_POSTGRES_PASSWORD")
-                deadline = time.monotonic() + args.wait_timeout
-                while True:
-                    try:
-                        source = psycopg2.connect(**source_params)
-                        break
-                    except psycopg2.OperationalError:
-                        if time.monotonic() >= deadline:
-                            raise MigrationSetupError("Original Supabase is unavailable; check source readiness and credentials") from None
-                        time.sleep(1)
+            with target.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_xact_lock(hashtext('account-writers'))")
+            state = inspect_accounts(target)
+            legacy = state["legacy"]
+            if skip_existing_accounts(state) or not legacy:
+                print(json.dumps({"skipped": True, "complete": state["complete"], "new": not legacy}))
+                return 0
+            source_params = parameters("SUPABASE_", "SUPABASE_POSTGRES_PASSWORD")
+            deadline = time.monotonic() + args.wait_timeout
+            while True:
                 try:
-                    with source:
-                        source.set_session(readonly=True, isolation_level="REPEATABLE READ")
-                        rows = read_source_users(source)
-                        print("[account-migration][snapshot] Source rows=" + str(len(rows))
-                              + " rows_with_password=" + str(sum(bool(row.get("encrypted_password")) for row in rows)), file=sys.stderr)
-                finally:
-                    source.close()
-                result = import_users(target, rows, dry_run=not args.apply)
-            except Exception:
-                target.rollback()
-                raise
-        result["committed"] = args.apply and not result.get("complete", False)
+                    source = psycopg2.connect(**source_params)
+                    break
+                except psycopg2.OperationalError:
+                    if time.monotonic() >= deadline:
+                        raise MigrationSetupError("Original Supabase is unavailable; check source readiness and credentials") from None
+                    time.sleep(1)
+            try:
+                with source:
+                    source.set_session(readonly=True, isolation_level="REPEATABLE READ")
+                    rows = read_source_users(source)
+                    print("[account-migration][snapshot] Source rows=" + str(len(rows))
+                          + " rows_with_password=" + str(sum(bool(row.get("encrypted_password")) for row in rows)), file=sys.stderr)
+            finally:
+                source.close()
+            result = import_users(target, rows, dry_run=not args.apply)
+        result["committed"] = args.apply and "complete" not in result
         print(json.dumps(result))
         return 0
     except (MigrationConflict, MigrationSetupError) as error:
         print("Account upgrade rejected: " + str(error), file=sys.stderr)
     except Exception as error:  # noqa: BLE001 -- Never log driver text or credentials.
-        print("Account upgrade failed (" + type(error).__name__ + "); target transaction rolled back", file=sys.stderr)
+        conflict = _migration_conflict(getattr(getattr(error, "diag", None), "message_primary", ""))
+        detail = str(conflict) if conflict else type(error).__name__
+        print(f"Account upgrade failed ({detail})", file=sys.stderr)
     finally:
         if "target" in locals():
             target.close()

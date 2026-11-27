@@ -28,6 +28,7 @@ from management.services.agent.agentos_events import knowledge_scope_event_conte
 from management.services.agent.context import strip_current_time_prefix
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot, prepare_native_knowledge
 from management.services.agent.prepared_projection import acknowledge_projection, resume_assistant_projection
+from management.services.automation.confirmation import route_chat_confirmation
 from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger(__name__)
@@ -171,6 +172,18 @@ async def start_turn(
             options["workbench"] = workbench
         if native_knowledge is not None:
             options["native_knowledge"] = native_knowledge
+        chat_confirmation = None
+        if (
+            initial_title is None and request.enable_automation_tool and not request.minio_files
+            and not request.annotations and request.clarification_response is None
+            and (saved_user is None or saved_user.message_source == MessageSource.CHAT)
+        ):
+            selected_model_id = request.model_id or (native_conversation or {}).get("selected_model_id")
+            chat_confirmation = await route_chat_confirmation(
+                request.query, conversation_id, tenant_id, user_id, boundary, selected_model_id,
+            )
+        if chat_confirmation:
+            options["automation_confirmation"] = True
         reference = AgentRunReference(conversation_id=conversation_id, run_id=run_id)
         snapshot = await prepare_conversation_snapshot(
             request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone, **options,
@@ -195,7 +208,11 @@ async def start_turn(
                 "tool_params": tool_params.model_dump(mode="json") if tool_params else None,
                 "has_attachments": bool(request.minio_files),
             }
-        if request.entrypoint == "automation" and automation is None:
+            if chat_confirmation:
+                automation["confirm_from_chat"] = True
+                automation["confirmation_action"] = chat_confirmation.action
+                automation["confirmation_proposal_id"] = chat_confirmation.proposal_id
+        if (request.entrypoint == "automation" or chat_confirmation) and automation is None:
             raise HTTPException(status_code=422, detail={"code": "AUTOMATION_PROPOSAL_UNAVAILABLE"})
         creation = {"initial_title": initial_title} if initial_title is not None else {}
         if initial_title is not None:

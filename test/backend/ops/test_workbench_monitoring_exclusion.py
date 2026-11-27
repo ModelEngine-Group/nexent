@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""System identity filtering with real catalog SQL and published read projections."""
+"""Platform-owned Agent filtering with real catalog SQL and published read projections."""
 
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -38,20 +38,24 @@ def catalog(monkeypatch):
     table = Table(AgentInfo.__tablename__, MetaData(),
                   *(Column(name, Integer) for name in ("agent_id", "version_no", "current_version_no")),
                   *(Column(name, String) for name in
-                    ("tenant_id", "name", "display_name", "model_ids", "group_ids", "delete_flag", "system_key")),
+                    ("tenant_id", "name", "display_name", "model_ids", "group_ids", "delete_flag",
+                     "system_key", "agent_origin")),
                   schema=schema)
     table.create(engine)
+    # (agent_id, version_no, tenant, name, system_key, agent_origin, delete_flag)
+    # ``other_system`` models a second platform identity (e.g. NL2Agent/NL2Skill)
+    # that must be excluded just like the Workbench scheduler.
     rows = [
-        (97, 0, "asset-owner", "Renamed scheduler", "workbench_main", "N"),
-        (97, 1, "asset-owner", "Old release", "workbench_main", "N"),
-        (98, 1, "asset-owner", "Deleted release", "workbench_main", "Y"),
-        (50, 0, "a", "workbench_main", None, "N"),
-        (101, 0, "a", "Nexent Workbench", "other_system", "N"),
+        (97, 0, "asset-owner", "Renamed scheduler", "workbench_main", "SYSTEM", "N"),
+        (97, 1, "asset-owner", "Old release", "workbench_main", "SYSTEM", "N"),
+        (98, 1, "asset-owner", "Deleted release", "workbench_main", "SYSTEM", "Y"),
+        (50, 0, "a", "workbench_main", None, "USER", "N"),
+        (101, 0, "a", "Nexent Workbench", "other_system", "SYSTEM", "N"),
     ]
     with engine.begin() as conn:
         conn.execute(table.insert(), [dict(agent_id=i, version_no=v, current_version_no=1,
-                     tenant_id=t, name=n, display_name=n, system_key=k, delete_flag=d,
-                     model_ids="", group_ids="12") for i, v, t, n, k, d in rows])
+                     tenant_id=t, name=n, display_name=n, system_key=k, agent_origin=o, delete_flag=d,
+                     model_ids="", group_ids="12") for i, v, t, n, k, o, d in rows])
     with Session(engine) as session:
         @contextmanager
         def database():
@@ -89,9 +93,9 @@ def publication(catalog):
     return SimpleNamespace(store=store, zone=ZoneInfo("UTC"), publication_snapshot=snapshot), rows, token_rows
 
 
-def test_identity_not_local_id_name_owner_or_release_controls_exclusion(catalog):
-    assert agent_monitoring.excluded_monitoring_agent_ids() == {97, 98}
-    assert {row["agent_id"] for row in query.agent_catalog(None, None)} == {50, 101}
+def test_origin_not_name_owner_or_release_controls_exclusion(catalog):
+    assert agent_monitoring.excluded_monitoring_agent_ids() == {97, 98, 101}
+    assert {row["agent_id"] for row in query.agent_catalog(None, None)} == {50}
     assert query.agent_catalog("asset-owner", 97) == []
     assert query.agent_catalog_tenants(None) == {"a"}
 
@@ -100,12 +104,12 @@ def test_summary_views_rankings_and_cross_day_trends_keep_dispatched_agents(publ
     service, raw, _ = publication
     scope = dict(tenant="a", start=PREVIOUS, end=DAY, groups=[12], agent_id=None)
     summary, _ = query.read_agents(service, **scope)
-    assert summary["execution_count"] == 6
+    assert summary["execution_count"] == 4
     assert summary["avg_duration_ms"] == 100 and summary["success_rate"] == 1
     items, count, history, _ = query.read_agent_views(service, **scope)
-    assert count == 2 and {row["agent_id"] for row in items} == {50, 101}
-    assert [day["execution_count"] for day in history] == [3, 3]
-    assert [row["agent_id"] for row in _agent_items(items, "execution_count")[:5]] == [50, 101]
+    assert count == 1 and {row["agent_id"] for row in items} == {50}
+    assert [day["execution_count"] for day in history] == [2, 2]
+    assert [row["agent_id"] for row in _agent_items(items, "execution_count")[:5]] == [50]
     assert len(raw) == 8 and {row["agent_id"] for row in raw} == {50, 97, 98, 101}
     excluded_scope = {**scope, "agent_id": 97}
     excluded_items, excluded_count, _, _ = query.read_agent_views(service, **excluded_scope)
@@ -113,13 +117,13 @@ def test_summary_views_rankings_and_cross_day_trends_keep_dispatched_agents(publ
     assert query.read_agents(service, **excluded_scope)[0]["execution_count"] == 0
 
 
-def test_agent_token_projection_excludes_only_scheduler_usage_and_keeps_model_data(publication):
+def test_agent_token_projection_excludes_platform_agents_and_keeps_model_data(publication):
     service, _, raw = publication
     result = agent_tokens.read_agent_tokens(service, tenant="a", start=PREVIOUS, end=DAY,
                                             groups=[12], agent_id=None)
-    assert result.tokens["total_tokens"]["value"] == "48"
-    assert set(result.agents) == {("a", 50), ("a", 101)}
-    assert [day["tokens"]["total_tokens"]["value"] for day in result.days.values()] == ["24", "24"]
+    assert result.tokens["total_tokens"]["value"] == "24"
+    assert set(result.agents) == {("a", 50)}
+    assert [day["tokens"]["total_tokens"]["value"] for day in result.days.values()] == ["12", "12"]
     model_rows, _, _ = query._read_published_rows(service, tenant="a", kind="model", start=PREVIOUS, end=DAY)
     assert len(model_rows) == len(raw) == 8
 
@@ -144,16 +148,16 @@ async def test_http_projections_use_the_same_exclusion(publication, monkeypatch)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops") as client:
         summary = await client.get("/ops/v1/monitoring/agents/summary", params=params)
         assert summary.status_code == 200
-        assert summary.json()["data"]["execution_count"] == 6
-        assert summary.json()["tokens"]["total_tokens"]["value"] == "48"
+        assert summary.json()["data"]["execution_count"] == 4
+        assert summary.json()["tokens"]["total_tokens"]["value"] == "24"
         listing = await client.get("/ops/v1/monitoring/agents", params=params)
         assert listing.status_code == 200
-        assert listing.json()["data"]["current_agent_count"] == 2
-        assert {row["agent_id"] for row in listing.json()["data"]["items"]} == {50, 101}
+        assert listing.json()["data"]["current_agent_count"] == 1
+        assert {row["agent_id"] for row in listing.json()["data"]["items"]} == {50}
         trends = await client.get("/ops/v1/monitoring/agents/trends", params=params)
         assert trends.status_code == 200
-        assert [day["execution_count"] for day in trends.json()["data"]] == [3, 3]
+        assert [day["execution_count"] for day in trends.json()["data"]] == [2, 2]
         for metric in ("execution_count", "total_tokens", "success_rate"):
             ranking = await client.get("/ops/v1/monitoring/agents/rankings", params={**params, "metric": metric})
             assert ranking.status_code == 200
-            assert {row["agent_id"] for row in ranking.json()["data"]} == {50, 101}
+            assert {row["agent_id"] for row in ranking.json()["data"]} == {50}

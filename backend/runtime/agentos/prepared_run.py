@@ -135,15 +135,23 @@ async def _automation_proposal_chunks(info, payload, actor):
                 "type": "automation_proposal",
                 "content": json.dumps(proposal, ensure_ascii=False),
             }, ensure_ascii=False)
+        elif result["status"] == "task_confirmed":
+            confirmation = result.get("confirmation")
+            if not isinstance(confirmation, dict) or any(
+                type(confirmation.get(key)) is not int or confirmation[key] <= 0
+                for key in ("proposal_id", "task_id")
+            ):
+                raise RuntimeError("Scheduled-task confirmation response is missing its receipt")
+            yield json.dumps({"type": "automation_confirmation", "content": json.dumps(confirmation)})
         elif result["status"] == "error":
             info.attempt_outcome = "failed"
     except RuntimeError:
         logger.warning("Scheduled-task proposal request failed for run %s", reference.run_id)
         info.attempt_outcome = "failed"
         message = (
-            "暂时无法生成定时任务提案，请稍后重试。"
+            "暂时无法处理定时任务请求，请稍后重试。"
             if payload.language == "zh"
-            else "The scheduled-task proposal could not be generated. Try again shortly."
+            else "The scheduled-task request could not be processed. Try again shortly."
         )
     yield json.dumps({"type": "final_answer", "content": message}, ensure_ascii=False)
 

@@ -22,6 +22,7 @@ async function readSkillMonitoring<T>(
   });
   if (scope.tenantId !== null) params.set("tenant_id", scope.tenantId);
   if (scope.skillId !== null) params.set("skill_id", scope.skillId);
+  if (scope.resourceGroup) params.set("resource_group", scope.resourceGroup);
   for (const id of scope.groupIds) params.append("group_ids", String(id));
   const response = await fetchWithAuth(`${endpoint}?${params}`, { signal });
   return response.json();
@@ -55,6 +56,7 @@ export function getSkillMonitoringList(
     page: number;
     pageSize: number;
     search: string;
+    sortBy: "name" | "usage_count";
     descending: boolean;
   },
   signal: AbortSignal
@@ -67,6 +69,7 @@ export function getSkillMonitoringList(
       page: String(options.page),
       page_size: String(options.pageSize),
       search: options.search,
+      sort_by: options.sortBy,
       descending: String(options.descending),
     }
   );

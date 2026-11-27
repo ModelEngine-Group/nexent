@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import bcrypt
 
+from shared.merged_migrations import merged_migration_sql
+
 
 def docker(*args, data=None):
     result = subprocess.run(["docker", *args], input=data.encode() if data is not None else None, capture_output=True, check=False)
@@ -26,10 +28,16 @@ def build_worker_image(root, image, run_id):
                    "COPY migrate_docker.py /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py\n"
                    "COPY inspect_accounts.sql /opt/deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql\n"
                    "COPY merged.sql /opt/deploy/sql/migrations/v2.9.0_merged_migrations.sql\n"
+                   "COPY inspect_account_warnings.sql /opt/deploy/sql/tools/supabase_to_postgres/inspect_account_warnings.sql\n"
+                   "COPY preserve_legacy_emails.sql /opt/deploy/sql/tools/supabase_to_postgres/preserve_legacy_emails.sql\n"
                    'ENTRYPOINT ["sh","-c","exit 88"]\n').encode()
         info = tarfile.TarInfo("Dockerfile"); info.size = len(content); archive.addfile(info, io.BytesIO(content))
         for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (bundle, "merged.sql"), (root / "deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql", "inspect_accounts.sql")]:
             archive.add(source, arcname=destination)
+        archive.add(root / "deploy/sql/tools/supabase_to_postgres/inspect_account_warnings.sql",
+                    arcname="inspect_account_warnings.sql")
+        archive.add(root / "deploy/sql/tools/supabase_to_postgres/preserve_legacy_emails.sql",
+                    arcname="preserve_legacy_emails.sql")
     built = subprocess.run(["docker", "build", "-t", image, "-"], input=context.getvalue(), capture_output=True)
     assert built.returncode == 0, built.stderr
 
@@ -50,13 +58,13 @@ def assert_automatic_upgrade(root, temporary):
     source_data.mkdir(parents=True)
     label = "codex.test=" + run_id
     password = "IsolatedAutoTest123"
-    user_id = str(uuid4())
+    user_id, duplicate_email_id = str(uuid4()), str(uuid4())
     encoded = bcrypt.hashpw(b"original-password", bcrypt.gensalt(rounds=4)).decode()
     bundle = root / "deploy/sql/migrations/v2.9.0_merged_migrations.sql"
     env = {**os.environ, "SUPABASE_MIGRATION_DB_CONTAINER": names["db"],
            "SUPABASE_MIGRATION_AUTH_CONTAINER": names["auth"], "SUPABASE_MIGRATION_KONG_CONTAINER": names["kong"],
            "SUPABASE_POSTGRES_USER": "postgres", "SUPABASE_POSTGRES_DB": "postgres",
-           "POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres", "NEXENT_POSTGRES_PASSWORD": password, "APP_VERSION": "2.9.0", "NEXENT_IMAGE": image, "DEPLOYMENT_IMAGE_SOURCE": "local-latest"}
+           "POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres", "NEXENT_POSTGRES_PASSWORD": password, "APP_VERSION": "2.9.0", "NEXENT_MANAGEMENT_IMAGE": image, "DEPLOYMENT_IMAGE_SOURCE": "local-latest"}
     # Automatic mode must recover the source password from the original container.
     for key in ("SUPABASE_POSTGRES_PASSWORD", "SUPABASE_POSTGRES_HOST", "SUPABASE_DATA_DIR", "SUPABASE_DB"):
         env.pop(key, None)
@@ -73,13 +81,15 @@ def assert_automatic_upgrade(root, temporary):
         path.chmod(0o755)
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else "bash"
 
-    def phase(name, success=True):
+    def phase(name, success=True, *, warning=None):
         shell = 'source "$1/deploy/common/common.sh"; export DEPLOYMENT_ROOT_ENV="$2"; deployment_upgrade_local_accounts docker nexent "$4" "$5"'
         shell = 'export PATH="$(cygpath -u "$6" 2>/dev/null || printf "%s" "$6"):$PATH"; ' + shell
         result = subprocess.run([bash, "-c", shell, "case", root.as_posix(), env_file.as_posix(), name, target, worker, no_python.as_posix()],
                                 env=env, capture_output=True, text=True, check=False)
         assert result.returncode == (0 if success else 1), result.stdout + result.stderr
         assert encoded not in result.stdout + result.stderr
+        if warning:
+            assert "[warning]" in result.stderr and all(value in result.stderr for value in warning)
         if not success:
             return result
         output = (result.stdout.strip().splitlines() or [""])[-1]
@@ -111,7 +121,8 @@ def assert_automatic_upgrade(root, temporary):
                 time.sleep(0.2)
         docker("exec", "-i", names["db"], "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1",
                data="CREATE SCHEMA auth; CREATE TABLE auth.users (id uuid,email text,encrypted_password text);"
-                    f"INSERT INTO auth.users VALUES ('{user_id}','auto@example.com','{encoded}');")
+                    f"INSERT INTO auth.users VALUES ('{user_id}','auto@example.com','{encoded}'),"
+                    f"('{duplicate_email_id}','auto@example.com','{encoded}');")
         # Infrastructure executes only this baseline, before Python inspects the
         # target. It must not create the account completion marker prematurely.
         # Production POSTGRES_USER creates this baseline owner at initialization;
@@ -122,19 +133,19 @@ def assert_automatic_upgrade(root, temporary):
         assert phase("prepare")["new"]
         query("CREATE SCHEMA IF NOT EXISTS nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),"
               "user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N');"
-              f"INSERT INTO nexent.user_tenant_t VALUES ('{user_id}','retained-tenant','SU','auto@example.com','N');")
+              f"INSERT INTO nexent.user_tenant_t VALUES ('{user_id}','retained-tenant','SU','conflict@example.com','N'),"
+              f"('{duplicate_email_id}','retained-tenant','USER','auto@example.com','N');")
         query("INSERT INTO nexent.user_tenant_t VALUES ('user_id','tenant_id','SPEED',NULL,'N');")
         query("CREATE TABLE nexent.user_token_info_t (user_id varchar(100),delete_flag varchar(1)); "
               "INSERT INTO nexent.user_tenant_t VALUES ('api-only','api-tenant','USER',NULL,'N'); "
               "INSERT INTO nexent.user_token_info_t VALUES ('api-only','Y')")
         docker("stop", names["db"])
-        # A conflict fails after schema creation, rolling back both the new
-        # table and the removal of legacy profile fields. Retry starts fresh.
-        query(f"UPDATE nexent.user_tenant_t SET user_email='conflict@example.com' WHERE user_id='{user_id}'")
+        # An ambiguous legacy role is a schema error, distinct from an email warning.
+        query(f"INSERT INTO nexent.user_tenant_t VALUES ('{user_id}','ambiguous-role','ADMIN','conflict@example.com','N')")
         rejected = phase("prepare", success=False)
         assert user_id in rejected.stderr
         assert query("SELECT to_regclass('nexent.user_account_t') IS NULL") == "t"
-        assert query(f"SELECT user_role,user_email FROM nexent.user_tenant_t WHERE user_id='{user_id}'") == "SU|conflict@example.com"
+        assert query(f"SELECT user_role,user_email FROM nexent.user_tenant_t WHERE user_id='{user_id}' AND tenant_id='retained-tenant'") == "SU|conflict@example.com"
         assert all(name in docker("ps", "-a", "--format", "{{.Names}}").splitlines() for name in names.values())
         assert not (temporary / ".migration-state").exists()
         docker("stop", names["db"])
@@ -151,8 +162,9 @@ def assert_automatic_upgrade(root, temporary):
         assert user_id in rejected.stderr and "checking original PostgreSQL data" in rejected.stderr, rejected.stdout + rejected.stderr
         assert docker("inspect", "--format", '{{index .Config.Labels "com.docker.compose.project"}}', names["db"]) == recovery_project
         assert query("SELECT to_regclass('nexent.user_account_t') IS NULL") == "t"
-        query(f"UPDATE nexent.user_tenant_t SET user_email='auto@example.com' WHERE user_id='{user_id}'")
-        assert phase("prepare")["updated"] == 1
+        query("DELETE FROM nexent.user_tenant_t WHERE tenant_id='ambiguous-role'")
+        assert phase("prepare", warning=(user_id, duplicate_email_id, "auto@example.com", "conflict@example.com"))["updated"] == 2
+        assert query(f"SELECT source_metadata->>'legacy_profile_email' FROM nexent.user_account_t WHERE user_id='{user_id}'") == "conflict@example.com"
         assert (source_data / "PG_VERSION").is_file()
         assert (source_data / "global/pg_control").is_file()
         assert query("SELECT source_metadata->>'system_identity' FROM nexent.user_account_t WHERE user_id='user_id'") == "speed"
@@ -174,9 +186,16 @@ def assert_automatic_upgrade(root, temporary):
             INSERT INTO nexent.tenant_invitation_code_t (code_type) VALUES ('DEV_INVITE');
         """)
         docker("exec", worker, "mkdir", "-p", "/tmp/auth-migrations")
-        docker("cp", str(bundle), worker + ":/tmp/auth-migrations/" + bundle.name)
+        # The account fixture has no Agent, conversation, or model tables.
+        # Exercise the runner with the production account sections and bundle filename.
+        account_sections = ("v2.9.0_001_local_user_accounts.sql", "v2.9.0_010_account_and_ops_roles.sql")
+        account_bundle = "".join(f"-- Source migration: {name}\n{merged_migration_sql(name)}\n"
+                                 for name in account_sections)
+        docker("exec", "-i", worker, "sh", "-c", f"cat > /tmp/auth-migrations/{bundle.name}", data=account_bundle)
         for script in ("run-sql-migrations.sh", "start-backend.sh"):
             docker("cp", str(root / "deploy/common" / script), f"{worker}:/tmp/{script}")
+        docker("cp", str(root / "deploy/sql/tools/supabase_to_postgres/preserve_legacy_emails.sql"),
+               worker + ":/opt/deploy/sql/tools/supabase_to_postgres/preserve_legacy_emails.sql")
         docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/init-auth.sql", data="CREATE SCHEMA IF NOT EXISTS nexent;\n")
         sql_environment = ["exec", "-e", "NEXENT_APP_VERSION=2.9.0", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql"]
         sql_command = [*sql_environment, worker, "bash", "/tmp/run-sql-migrations.sh", "--migrate"]
@@ -184,6 +203,7 @@ def assert_automatic_upgrade(root, temporary):
                            worker, "bash", "/tmp/start-backend.sh", "printf", "CONFIG_STARTED\\n"]
         docker(*sql_command)
         assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_merged_migrations.sql'") == "1"
+        assert query("SELECT count(*) FROM nexent.user_account_t WHERE user_email='auto@example.com' AND delete_flag='N'") == "2"
         assert query("SELECT roles FROM nexent.tenant_invitation_code_t") == "{DEV}"
         assert query("SELECT count(*) FROM nexent.role_permission_t WHERE user_role='OPS'") == "12"
         # Old 002 execution records are retained even though the file is consolidated.
@@ -199,17 +219,22 @@ def assert_automatic_upgrade(root, temporary):
         assert query(init_execution) != bootstrapped_at
         assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
         assert query("SELECT checksum FROM nexent.schema_migrations WHERE migration_id='v2.9.0_002_account_availability.sql'") == "legacy"
-        # A failed historical replay must roll back its schema/data changes,
-        # preserving the already committed accounts instead of deleting them.
+        # Historical replay reports stale membership emails while keeping their values.
         query("ALTER TABLE nexent.user_tenant_t ADD COLUMN user_email varchar(255); "
               f"UPDATE nexent.user_tenant_t SET user_email='conflict@example.com' WHERE user_id='{user_id}'; "
-              "UPDATE nexent.schema_migrations SET checksum='force-failure' WHERE migration_id='v2.9.0_merged_migrations.sql'")
-        failed = subprocess.run(["docker", *startup_command], capture_output=True, check=False)
-        assert failed.returncode != 0
-        assert b"CONFIG_STARTED" not in failed.stdout
+              "UPDATE nexent.schema_migrations SET checksum='replay-warning' WHERE migration_id='v2.9.0_merged_migrations.sql'")
+        replay = subprocess.run(["docker", *startup_command], capture_output=True, check=False)
+        assert replay.returncode == 0 and b"Conflicting legacy membership email" in replay.stderr, replay.stderr
+        assert b"conflict@example.com" in replay.stderr and user_id.encode() in replay.stderr
+        assert b"CONFIG_STARTED" in replay.stdout
         assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
         assert query(f"SELECT password_hash FROM nexent.user_account_t WHERE user_id='{user_id}'") == encoded
-        query("ALTER TABLE nexent.user_tenant_t DROP COLUMN user_email")
+        assert query(f"SELECT source_metadata->'legacy_membership_emails'->0->>'user_email' FROM nexent.user_account_t WHERE user_id='{user_id}'") == "conflict@example.com"
+        docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/auth-migrations/zz-test-error.sql", data="SELECT 1/0;\n")
+        failed = subprocess.run(["docker", *startup_command], capture_output=True, check=False)
+        assert failed.returncode != 0 and b"division by zero" in failed.stderr
+        assert b"CONFIG_STARTED" not in failed.stdout
+        docker("exec", worker, "rm", "/tmp/auth-migrations/zz-test-error.sql")
         docker(*sql_command)
         assert all(name not in docker("ps", "-a", "--format", "{{.Names}}").splitlines() for name in names.values())
         stored = query(f"SELECT password_hash FROM nexent.user_account_t WHERE user_id='{user_id}'")
@@ -217,12 +242,12 @@ def assert_automatic_upgrade(root, temporary):
         assert query(f"SELECT tenant_id FROM nexent.user_tenant_t WHERE user_id='{user_id}'") == "retained-tenant"
         assert query("SELECT delete_flag FROM nexent.user_account_t WHERE user_id='api-only'") == 'N'
         assert query("SELECT delete_flag FROM nexent.user_token_info_t WHERE user_id='api-only'") == 'Y'
-        # An emptied account table cannot skip migration. Missing source must
-        # stop rollout even when version history has been removed.
-        query("DELETE FROM nexent.user_account_t; DROP TABLE nexent.schema_migrations")
+        # A coverage gap in an existing table is reported even without version history.
+        query(f"UPDATE nexent.user_account_t SET password_hash=NULL,password_login_enabled=false WHERE user_id='{user_id}'; "
+              "DROP TABLE nexent.schema_migrations")
         env["APP_VERSION"] = "unreadable"
-        rejected = phase("prepare", success=False)
-        assert 'incomplete' in rejected.stderr.lower() and user_id in rejected.stderr
+        assert phase("prepare", warning=(user_id, "auto@example.com")) == {"skipped": True, "complete": False}
+        assert query(f"SELECT user_email FROM nexent.user_account_t WHERE user_id='{user_id}'") == "auto@example.com"
         assert not (temporary / ".migration-state").exists()
 
     finally:

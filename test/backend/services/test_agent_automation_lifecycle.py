@@ -116,19 +116,21 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
         proposals[proposal_id]["proposed_task"] = proposed_task
         return True
 
-    def fake_update_proposal_status(proposal_id, tenant_id, user_id, status):
-        proposals[proposal_id]["status"] = status
-        return True
-
     def fake_create_task(values, user_id):
         task = {"task_id": 11, **values}
         tasks[11] = task
         return task
 
+    def fake_create_task_from_proposal(values, proposal, user_id):
+        task = fake_create_task(values, user_id)
+        proposal["status"] = "ACCEPTED"
+        proposal["confirmed_task_id"] = task["task_id"]
+        return task
+
     monkeypatch.setattr(facade_module.agent_automation_db, "create_proposal", fake_create_proposal)
     monkeypatch.setattr(facade_module.agent_automation_db, "get_proposal", lambda *args: proposals.get(1))
     monkeypatch.setattr(facade_module.agent_automation_db, "update_proposal_task", fake_update_proposal_task)
-    monkeypatch.setattr(facade_module.agent_automation_db, "update_proposal_status", fake_update_proposal_status)
+    monkeypatch.setattr(facade_module.agent_automation_db, "create_task_from_proposal", fake_create_task_from_proposal)
     monkeypatch.setattr(facade_module.agent_automation_db, "create_task", fake_create_task)
 
     service = AgentAutomationFacade()
@@ -159,6 +161,9 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
     assert task["conversation_id"] == 321
     assert task["agent_id"] == 7
     assert len(tasks) == 1
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task", lambda task_id, *_: tasks.get(task_id))
+    repeated = await service.confirm_proposal(proposal["proposal_id"], AutomationProposalConfirmRequest(), "tenant", "user")
+    assert repeated["task_id"] == task["task_id"]
 
     latest_binding = CapabilityBinding(
         type=CapabilityType.TOOL,
@@ -226,6 +231,8 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
         return tasks[task_id]
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
+    monkeypatch.setattr(runner_module, "get_conversation", lambda *args, **kwargs: {"selected_model_id": 102})
+    monkeypatch.setattr(runner_module, "validate_selected_model", lambda *args: {})
     monkeypatch.setattr(runner_module, "prepare_conversation_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value=None))

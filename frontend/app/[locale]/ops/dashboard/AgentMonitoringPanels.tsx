@@ -23,11 +23,7 @@ import type {
 } from "@/types/agentMonitoring";
 import { AgentOutcomeDistribution } from "./AgentOutcomeDistribution";
 import { AgentRankings } from "./AgentRankings";
-import {
-  MonitoringTokenCardValue,
-  PublicationStatus,
-  TokenCoverage,
-} from "./AgentMonitoringStatus";
+import { MonitoringTokenCardValue } from "./AgentMonitoringStatus";
 import {
   agentMetricLabels,
   formatAgentMetric,
@@ -48,7 +44,8 @@ function AgentTrend({
   hasRange: boolean;
 }) {
   const { t, i18n } = useTranslation("common");
-  const [metric, setMetric] = useState<AgentMonitoringMetric>("total_tokens");
+  const [metric, setMetric] =
+    useState<AgentMonitoringMetric>("execution_count");
   const titleId = useId();
   const gradientId = useId();
   const response: AgentMonitoringTrends | undefined = trends.data;
@@ -169,21 +166,6 @@ function AgentTrend({
                         {formatAgentMetric(exact, metric, i18n.language)}
                         {isToken && exact !== null ? " tokens" : ""}
                       </p>
-                      {isToken ? (
-                        <>
-                          <TokenCoverage usage={day.tokens.total_tokens} />
-                          <PublicationStatus
-                            label={t("ops.monitoring.agent.tokens")}
-                            publication={day.token_status}
-                          />
-                        </>
-                      ) : (
-                        <p>
-                          {t(
-                            `ops.monitoring.agent.coverage.${day.coverage_state}`
-                          )}
-                        </p>
-                      )}
                     </div>
                   );
                 }}
@@ -214,16 +196,6 @@ function AgentTrend({
           }
         />
       ) : null}
-      {response && (
-        <PublicationStatus
-          label={
-            isToken
-              ? t("ops.monitoring.agent.tokens")
-              : t("ops.monitoring.agent.executionStatus")
-          }
-          publication={isToken ? response.token_status : response}
-        />
-      )}
     </section>
   );
 }
@@ -338,7 +310,6 @@ export function AgentMonitoringPanels({
                 {id === "tokens" ? (
                   <MonitoringTokenCardValue
                     usage={usage}
-                    publication={summary?.token_status}
                     loading={summaryLoading && !summary}
                   />
                 ) : (
@@ -351,14 +322,6 @@ export function AgentMonitoringPanels({
           </div>
         ))}
       </dl>
-      {summary && (
-        <div className={styles.statusList}>
-          <PublicationStatus
-            label={t("ops.monitoring.agent.executionStatus")}
-            publication={summary}
-          />
-        </div>
-      )}
       <h2 className={styles.metricsTitle} id={titleId}>
         {t("ops.monitoring.agent.metrics")}
       </h2>

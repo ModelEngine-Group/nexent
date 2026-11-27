@@ -5,7 +5,9 @@ from __future__ import annotations
 
 CASE_CODES = {"CASE_EXECUTION_MISSING", "CASE_SCRIPT_MISSING", "CASE_SELECTOR_MISSING", "CASE_PREPARATION_MISSING",
               "CASE_EXECUTION_INVALID"}
-WARNING_CODES = {"UT_REFERENCE_MISSING", "DERIVED_VIEW_STALE", "FEATURE_RESPONSIBILITY_UNRESOLVED"}
+ADVISORY_WARNING_CODES = {"UT_SELECTORS_MISSING"}
+WARNING_CODES = {"UT_REFERENCE_MISSING", "DERIVED_VIEW_STALE",
+                 "FEATURE_RESPONSIBILITY_UNRESOLVED"} | ADVISORY_WARNING_CODES
 CASE_WARNING_CODES = {"CASE_RESPONSIBILITY_UNRESOLVED", "CASE_ID_FORMAT_INVALID"}
 
 
@@ -26,6 +28,17 @@ def report(root, issues, records):
             "status": "INVALID" if any(row["severity"] == "FATAL" for row in rows)
             else "INCOMPLETE" if rows else "VALID", "issues": rows,
             "blocked_cases": sorted({row["case_id"] for row in rows if row["severity"] == "CASE_BLOCKED"})}
+
+
+def affects_batch_result(validation):
+    """Keep advisory findings in the coverage report without failing execution."""
+    if validation is None or validation.get("status") == "VALID":
+        return False
+    issues = validation["issues"]
+    if validation.get("status") != "INCOMPLETE" or not issues:
+        return True
+    return any(issue.get("severity") != "WARNING" or issue.get("code") not in ADVISORY_WARNING_CODES
+               for issue in issues)
 
 
 def apply_blocks(records, validation):

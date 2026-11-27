@@ -28,6 +28,7 @@ export interface ModelMonitoringSelection extends MonitoringDateScope {
 }
 
 export type ModelListSort =
+  | "name"
   | "request_count"
   | "error_rate"
   | "avg_duration_ms"

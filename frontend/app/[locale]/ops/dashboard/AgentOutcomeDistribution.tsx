@@ -2,7 +2,6 @@
 import { Alert, Empty, Spin } from "antd";
 import { useId, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { PublicationStatus } from "./AgentMonitoringStatus";
 import {
   formatAgentMetric,
   getAgentOutcomeDistribution,
@@ -107,12 +106,6 @@ export function AgentOutcomeDistribution({
             </div>
           )}
         </>
-      )}
-      {response && (
-        <PublicationStatus
-          label={t("ops.monitoring.agent.executionStatus")}
-          publication={response}
-        />
       )}
     </section>
   );

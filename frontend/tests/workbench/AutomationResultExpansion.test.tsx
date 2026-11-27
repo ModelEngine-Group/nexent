@@ -10,6 +10,7 @@ import {
 import { beforeEach, expect, it, vi } from "vitest";
 import { message } from "antd";
 import AgentTasksPage from "@/app/agent-tasks/page";
+import { publishAutomationConfirmation } from "@/features/agentAutomation/confirmationEvent";
 import { agentAutomationService } from "@/services/agentAutomationService";
 import { conversationService } from "@/services/conversationService";
 import type { AgentAutomationTask } from "@/types/agentAutomation";
@@ -107,6 +108,15 @@ it("keeps only the Recent Result control and removes the empty expansion column"
   expect(eye()).toBeVisible();
   expect(agentAutomationService.runs).not.toHaveBeenCalled();
   expect(conversationService.getDetail).not.toHaveBeenCalled();
+});
+
+it("refreshes a mounted task list when chat confirms a task", async () => {
+  await openPage();
+  const initialRequests = vi.mocked(agentAutomationService.list).mock.calls.length;
+  act(() => publishAutomationConfirmation('{"proposal_id":11,"task_id":12}'));
+  await waitFor(() => {
+    expect(agentAutomationService.list).toHaveBeenCalledTimes(initialRequests + 1);
+  });
 });
 
 it("reuses loaded output when Recent Result is reopened", async () => {
@@ -253,3 +263,44 @@ it.each(["CANCELED", "FAILED", "TIMEOUT", "SKIPPED"])(
     expect(success).not.toHaveBeenCalled();
   }
 );
+
+it("explains how to fix a missing source model after a manual run", async () => {
+  const report = vi
+    .spyOn(message, "error")
+    .mockImplementation(() => ({}) as never);
+  vi.mocked(agentAutomationService.run).mockResolvedValue({
+    ...runs.items[0],
+    status: "FAILED",
+    error_code: "AUTOMATION_MODEL_UNAVAILABLE",
+  } as never);
+  await openPage();
+  fireEvent.click(
+    screen.getByRole("button", { name: "agentAutomation.page.run" })
+  );
+  await waitFor(() =>
+    expect(report).toHaveBeenCalledWith(
+      "agentAutomation.errors.modelUnavailable"
+    )
+  );
+});
+
+it("explains a scheduled run's missing source model in Recent Result", async () => {
+  vi.mocked(agentAutomationService.runs).mockResolvedValue({
+    ...runs,
+    items: [
+      {
+        ...runs.items[0],
+        status: "FAILED",
+        trigger_type: "SCHEDULED",
+        assistant_message_id: null,
+        error_code: "AUTOMATION_MODEL_UNAVAILABLE",
+        error_message: "Select a model and try again.",
+      },
+    ],
+  } as never);
+  await openPage();
+  fireEvent.click(eye());
+  expect(
+    await screen.findByText("agentAutomation.errors.modelUnavailable")
+  ).toBeVisible();
+});

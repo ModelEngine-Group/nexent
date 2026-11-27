@@ -45,6 +45,7 @@ import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
 import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+import { publishAutomationConfirmation } from "@/features/agentAutomation/confirmationEvent";
 import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 import type {
@@ -2895,6 +2896,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
+          if (chunk.type === "automation_confirmation") {
+            publishAutomationConfirmation(chunk.content);
+            continue;
+          }
+
           if (chunk.type === "automation_proposal") {
             const proposal = parseAutomationProposal(chunk.content);
             if (proposal) {
@@ -3360,6 +3366,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
+          } else if (chunk.type === "automation_confirmation") {
+            publishAutomationConfirmation(chunk.content);
           } else if (chunk.type === "automation_proposal") {
             const proposal = parseAutomationProposal(chunk.content);
             if (proposal) {

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import json
@@ -6,13 +8,16 @@ from collections import Counter
 import os
 from pathlib import Path
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import httpx
 
 
-async def read_sse(response: httpx.Response, limit: int = 1000) -> list[dict[str, Any]]:
+async def read_sse(
+    response: httpx.Response, limit: int = 1000, *, on_event: Callable[[dict[str, Any]], None] | None = None,
+    include_ids: bool = False,
+) -> list[dict[str, Any]]:
     """Consume the whole stream; answer/sub-agent events are not EOF.
 
     Legacy callers pass token-sized limits (1000/2000). Keep those calls
@@ -21,6 +26,7 @@ async def read_sse(response: httpx.Response, limit: int = 1000) -> list[dict[str
     """
     events: list[dict[str, Any]] = []
     event_name = "message"
+    event_id = None
     pending: list[str] = []
     counts: Counter = Counter()
     max_events = int(os.environ.get("NEXENT_SSE_MAX_EVENTS", str(max(limit, 50000))))
@@ -31,9 +37,10 @@ async def read_sse(response: httpx.Response, limit: int = 1000) -> list[dict[str
     started, byte_count, ending = time.monotonic(), 0, "interrupted"
 
     def dispatch() -> bool:
-        nonlocal event_name
+        nonlocal event_name, event_id
         if not pending:
             event_name = "message"
+            event_id = None
             return False
         data = "\n".join(pending)
         pending.clear()
@@ -48,8 +55,13 @@ async def read_sse(response: httpx.Response, limit: int = 1000) -> list[dict[str
         except json.JSONDecodeError:
             payload = data
         events.append({"event": event_name, "data": payload})
+        if event_id is not None:
+            events[-1]["id"] = event_id
+        if on_event is not None:
+            on_event(events[-1])
         counts[str(payload.get("type", event_name)) if isinstance(payload, dict) else event_name] += 1
         event_name = "message"
+        event_id = None
         return False
 
     try:
@@ -65,6 +77,8 @@ async def read_sse(response: httpx.Response, limit: int = 1000) -> list[dict[str
                         break
                 elif line.startswith("event:"):
                     event_name = line[6:].lstrip(" ")
+                elif include_ids and line.startswith("id:"):
+                    event_id = line[3:].removeprefix(" ")
                 elif line.startswith("data:"):
                     pending.append(line[5:].removeprefix(" "))
             else:

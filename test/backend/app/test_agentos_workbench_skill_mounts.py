@@ -54,6 +54,29 @@ def test_read_only_mounts_from_the_exact_open_turn(mocker, status, current, chan
         assert result is None
 
 
+@pytest.mark.parametrize("version,found", [(3, True), (2, False), (None, False)])
+def test_mount_callback_uses_the_scoped_running_automation_only(mocker, version, found):
+    session = MagicMock()
+    session.execute.return_value.one_or_none.side_effect = [
+        None, ({"_workbench_execution": {"config": _CONFIG, "version": version}}, {}, 5) if version else None,
+    ]
+    mocker.patch.object(prepared_turn, "get_db_session", return_value=nullcontext(session))
+    mocker.patch.object(prepared_turn, "tenant_membership_matches", return_value=True)
+
+    result = prepared_turn.read_workbench_skill_mounts(
+        WorkbenchSkillLookup(**_LOOKUP), _ACTOR.user_id, _ACTOR.tenant_id,
+    )
+
+    assert bool(result) is found
+    if found:
+        assert result.model_dump() == {"mounts": _CONFIG["skill_mounts"]}
+    assert session.execute.call_count == 2
+    statement = session.execute.call_args.args[0]
+    values = set(statement.compile().params.values())
+    assert {_ACTOR.user_id, _ACTOR.tenant_id, _LOOKUP["run_id"], _LOOKUP["conversation_id"], 7, "RUNNING"} <= values
+    assert "projection_message_index IS NOT NULL" in str(statement)
+
+
 def test_revoked_membership_cannot_query_workbench_state(mocker):
     session = MagicMock()
     mocker.patch.object(prepared_turn, "get_db_session", return_value=nullcontext(session))

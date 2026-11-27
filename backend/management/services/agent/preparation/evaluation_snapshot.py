@@ -381,6 +381,7 @@ async def prepare_conversation_snapshot(
     metadata_from_northbound: bool = False, workbench: "PreparedWorkbench | None" = None,
     native_knowledge: PreparedNativeKnowledge | None = None, owned_conversation: dict | None = None,
     preserve_shared_reasoning: bool = False, northbound_run: bool = False,
+    automation_confirmation: bool = False,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -410,7 +411,7 @@ async def prepare_conversation_snapshot(
         )
     from infrastructure.memory_io import memory_deadline, optional_memory_io
 
-    automation_proposal_only = request.entrypoint == "automation"
+    automation_proposal_only = request.entrypoint == "automation" or automation_confirmation
     memory_query_deadline = memory_deadline()
     memory_enabled = not automation_proposal_only and bool(await optional_memory_io(
         "snapshot-memory-policy", get_memory_switch, user_id, deadline=memory_query_deadline,
