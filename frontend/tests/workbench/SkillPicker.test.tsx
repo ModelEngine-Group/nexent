@@ -264,9 +264,9 @@ it("UT-FE-WB-023 required configuration blocks confirmation until complete", asy
   render(
     <SkillPicker open selected={[]} onCancel={vi.fn()} onConfirm={confirm} />
   );
-  await userEvent.click(
-    await screen.findByRole("option", { name: /Default Skill/ })
-  );
+  const skill = await screen.findByRole("option", { name: /Default Skill/ });
+  expect(skill).not.toHaveTextContent("需要填写必填配置");
+  await userEvent.click(skill);
   await userEvent.click(screen.getByRole("button", { name: /^保存$/ }));
   expect(confirm).not.toHaveBeenCalled();
   await userEvent.type(screen.getByLabelText("Default Skill region"), "CN");

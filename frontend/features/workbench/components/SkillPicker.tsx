@@ -518,11 +518,6 @@ export function SkillPicker({
                     }}
                     selected={selectedNow}
                     disabled={disabled || saving}
-                    disabledReason={
-                      missingRequiredConfig(skill, configs[skillId])
-                        ? t("workbench.controls.requiredConfig")
-                        : undefined
-                    }
                     onToggle={() => {
                       if (selectedNow) {
                         setSelectedIds((current) => {
