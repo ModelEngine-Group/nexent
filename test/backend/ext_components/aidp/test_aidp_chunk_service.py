@@ -32,7 +32,6 @@ def chunk(monkeypatch):
     monkeypatch.setattr(module, "_request_aidp_json", request)
     monkeypatch.setattr(module, "_get_chunks_path", lambda kds: f"/kb/{kds}/Chunks")
     monkeypatch.setattr(module, "_get_batch_metadata_path", lambda kds, **kw: f"/kb/{kds}/Batch")
-    monkeypatch.setattr(module, "_get_tags_sync_path", lambda tenant=None: "/tags/sync")
     return module, calls
 
 
@@ -54,11 +53,7 @@ def test_chunk_crud_and_metadata(chunk):
         file_uuid_list=["u"],
         async_mode=True,
     )
-    assert module.sync_chunk_tags_impl("s", "k", [1]) == {
-        "task_id": "t1",
-        "message": "queued",
-    }
-    assert len(calls) == 7
+    assert len(calls) == 6
 
 
 def test_chunk_image_returns_bytes(chunk, monkeypatch):

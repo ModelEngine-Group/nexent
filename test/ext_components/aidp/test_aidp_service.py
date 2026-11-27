@@ -4394,24 +4394,6 @@ class TestChunkImpls:
         assert captured["retry"] is False
         assert result["updated_chunks"] == 3
 
-    def test_tag_sync_normalizes_envelope(self, aidp_chunk_service_module):
-        captured = {}
-
-        def fake_request(server_url, api_key, method, path, *, context=None, params=None, json_body=None, retry=True):
-            captured.update(method=method, path=path, json=json_body)
-            return {"code": 0, "data": {"task_id": 10086}, "message": "ok"}
-
-        aidp_chunk_service_module._request_aidp_json = fake_request
-        result = aidp_chunk_service_module.sync_chunk_tags_impl(
-            "http://127.0.0.1:30081", "jwt-token", [7]
-        )
-
-        assert captured["method"] == "POST"
-        assert captured["path"].endswith("/KnowledgeBases/Tags/Sync")
-        assert captured["json"] == {"kb_ids": [7]}
-        assert result["task_id"] == 10086
-        assert result["message"] == "ok"
-
 class TestFileSummaryImpls:
     """File summary reads stay on the documented AIDP POST contract."""
 

@@ -133,14 +133,14 @@ class TestChunkMetadataBatchEndpoints:
 
         with patch.object(self._perms(), "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_chunk_routes, "sync_chunk_tags_impl",
+             patch.object(aidp_chunk_routes, "sync_ontology_tags_impl",
                           return_value={"task_id": 10086}) as sync_tags:
             response = _client().post(
                 "/aidp-mgmt/knowledge-bases/7/tags/sync",
                 headers=_bearer(),
             )
         assert response.status_code == HTTPStatus.OK
-        assert sync_tags.call_args.args[2] == [7]
+        assert sync_tags.call_args.kwargs["kb_ids"] == [7]
         assert response.json() == {"task_id": 10086}
 
 

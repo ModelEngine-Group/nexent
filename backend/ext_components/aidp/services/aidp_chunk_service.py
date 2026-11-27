@@ -32,7 +32,6 @@ from ext_components.aidp.services.aidp_client import (
     _get_batch_metadata_path,
     _get_chunks_path,
     _get_retrieval_path,
-    _get_tags_sync_path,
     _get_view_image_path,
     _raise_aidp_http_error,
     _request_aidp_json,
@@ -358,30 +357,3 @@ def update_chunk_metadata_impl(
     )
 
 
-def sync_chunk_tags_impl(
-    server_url: str,
-    api_key: str,
-    kb_ids: List[int],
-    *,
-    tenant_id: str | None = None,
-) -> Dict[str, Any]:
-    """Trigger AIDP's incremental auto-tagging for the given knowledge bases.
-
-    The upstream envelope is ``{code, data:{task_id}, message}`` unlike the
-    bare payloads of most endpoints, so the proxy normalizes it to a task
-    snapshot. Tags themselves arrive later on chunk reads; this call only
-    queues the task.
-    """
-    payload = _request_aidp_json(
-        server_url,
-        api_key,
-        "POST",
-        _get_tags_sync_path(tenant_id),
-        context="sync-chunk-tags",
-        json_body={"kb_ids": list(kb_ids)},
-        retry=False,
-    )
-    result: Dict[str, Any] = {"task_id": payload["data"]["task_id"]}
-    if payload.get("message"):
-        result["message"] = payload["message"]
-    return result
