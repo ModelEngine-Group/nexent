@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-HTML-FILE-PREVIEW-20261126
+  change_type: bugfix
+  bug_id: CHAT-HTML-FILE-PREVIEW-20261126
+  title: Restore HTML file previews in chat
+  description: Preview generated and uploaded HTML files in the conversation UI.
+  observed_behavior: The stored-file preview rejects text/html and the composer offers preview only for images.
+  expected_behavior: HTML files open as an isolated static document and the preview endpoint serves their original bytes as plain text.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing file preview cases use other formats and do not assert HTML document rendering or isolation.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    reason: Cover HTML media handling and the local and remote preview paths in the existing backend and frontend suites.
+    behaviors:
+    - Resolve stored HTML bytes with a safe response media type.
+    - Load local and remote HTML into a sandboxed document.
+    test_selectors:
+    - test/backend/services/test_file_management_service.py::TestResolvePreviewFile
+    - frontend/tests/component/inlineFilePreview.test.tsx
+  affected_features:
+    existing: [F-105, V5-PW-FILE-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [API-108, API-109, PW-FILE-01]
+    added: []
+    modified: []
+    retired: []
+  notes: Design at nexent-doc/docs/Developing/chat-html-file-preview/design.md. Existing formal cases cover adjacent stored-file and chat attachment paths.

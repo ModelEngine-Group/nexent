@@ -61,6 +61,10 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
 
     content_type = get_content_type(object_name)
 
+    if content_type == 'text/html':
+        # Preview URLs must not open uploaded HTML as a same-origin webpage.
+        return object_name, 'text/plain', file_size
+
     # PDF, images, and directly readable text files - return directly
     direct_preview_types = {
         'text/plain',

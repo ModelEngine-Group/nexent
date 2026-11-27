@@ -25,7 +25,7 @@ Repository paths below are relative to the root; reference links resolve from th
 
 | Work | Reference |
 | --- | --- |
-| HTTP routes, validation, identity, response/error mapping | [HTTP layer](references/http.md) |
+| HTTP routes, validation, identity, response/error mapping, external API failures returned to the frontend | [HTTP layer](references/http.md) |
 | Service ownership, shared infrastructure, and domain errors | [Services](references/services.md) |
 | AgentOS calls and callbacks, admission, replay, and event projection | [AgentOS](references/agentos.md) |
 | Relational schema design, models, keys/indexes, queries, transactions, SQL migrations | [Database](references/database.md) |
