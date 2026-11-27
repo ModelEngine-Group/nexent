@@ -11,12 +11,14 @@ import {
   FolderOpenOutlined,
   ReloadOutlined,
   SearchOutlined,
+  TagsOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpFileMetadataDrawer from "@/ext_components/aidp/pages/knowledge-files/AidpFileMetadataDrawer";
+import AidpBatchMetadataDrawer from "@/ext_components/aidp/pages/knowledge-files/AidpBatchMetadataDrawer";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import AidpFolderTree from "@/ext_components/aidp/pages/knowledge-files/components/AidpFolderTree";
 import AidpFolderNameModal from "@/ext_components/aidp/pages/knowledge-files/components/AidpFolderNameModal";
@@ -30,6 +32,7 @@ import {
 import { parentFolderPath } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpFolderUtils";
 import {
   FILE_COLUMN_MIN_WIDTHS,
+  toDocumentItem,
   type AidpKnowledgeFilesPanelProps,
   type FileTableRecord,
 } from "./AidpKnowledgeFilesPanel.types";
@@ -94,6 +97,8 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = (
     setDeleteConfirmOpen,
     metadataFile,
     setMetadataFile,
+    batchMetadataFiles,
+    setBatchMetadataFiles,
     metadataSubmitting,
     setMetadataSubmitting,
     odId,
@@ -150,6 +155,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = (
     handleFileMenuClick,
     getBreadcrumbDropProps,
     handleSaveFileMetadata,
+    handleSaveBatchFileMetadata,
   } = menus;
 
   return (
@@ -205,6 +211,34 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = (
               onClick={handleBatchDeleteFiles}
             >
               {t("common.delete")}
+            </Button>
+          )}
+          {canEdit && odId !== null && (
+            <Button
+              icon={<TagsOutlined />}
+              disabled={selectedFileUuids.length === 0}
+              onClick={() => {
+                const selectedFiles = displayedFiles.filter(
+                  (file) =>
+                    Boolean(file.file_uuid) &&
+                    selectedFileKeys.includes(`file:${file.file_uuid}`)
+                );
+                if (selectedFiles.length !== selectedFileKeys.length) {
+                  message.warning(
+                    t("aidpKnowledge.batchMetadataUnavailable")
+                  );
+                  return;
+                }
+                if (selectedFiles.length > 100) {
+                  message.warning(
+                    t("aidpKnowledge.batchMetadataFileLimit", { max: 100 })
+                  );
+                  return;
+                }
+                setBatchMetadataFiles(selectedFiles.map(toDocumentItem));
+              }}
+            >
+              {t("aidpKnowledge.batchMetadataTitle")}
             </Button>
           )}
           {canEdit && isAvailable && (
@@ -562,6 +596,23 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = (
           if (!metadataSubmitting) setMetadataFile(null);
         }}
         onSave={handleSaveFileMetadata}
+      />
+
+      <AidpBatchMetadataDrawer
+        open={batchMetadataFiles !== null}
+        files={(batchMetadataFiles ?? []).map((file) => ({
+          name: file.file_name,
+          type: file.file_type,
+        }))}
+        metadataFields={metadataFields}
+        submitting={metadataSubmitting}
+        formKey={`files:${(batchMetadataFiles ?? [])
+          .map((file) => file.file_uuid)
+          .join(",")}:${odId ?? "none"}`}
+        onClose={() => {
+          if (!metadataSubmitting) setBatchMetadataFiles(null);
+        }}
+        onSave={handleSaveBatchFileMetadata}
       />
     </section>
   );

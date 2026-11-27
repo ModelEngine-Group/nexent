@@ -20,7 +20,6 @@ import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
@@ -198,13 +197,6 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
       ellipsis: true,
       render: (value: string | null | undefined) =>
         value || <span className={styles.metadataMore}>—</span>,
-    },
-    {
-      title: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
-      dataIndex: "create_time",
-      key: "create_time",
-      width: 170,
-      render: (value: string | null | undefined) => formatAidpDateTime(value),
     },
     {
       title: t("aidpKnowledge.ontologyColumnActions"),

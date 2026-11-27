@@ -229,6 +229,10 @@
   background: white !important;
   margin: 0 !important;
   box-shadow: none !important;
+  /* Word tolerates tables wider than the text column; allow a page-local
+     horizontal scroll instead of docx-preview's overflow: hidden crop. */
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
 }
 .slidesLayout {
   display: flex;

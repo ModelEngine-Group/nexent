@@ -229,6 +229,48 @@
   padding: 0 24px 24px;
 }
 
+.batchFileList {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--chunk-border);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 12px;
+}
+
+.batchFileListTitle {
+  margin-bottom: 4px;
+  color: var(--chunk-text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.batchFileRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 0;
+  color: var(--chunk-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.batchFileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batchFileType {
+  flex: 0 0 auto;
+  color: var(--chunk-muted);
+  font-size: 12px;
+}
+
 .fieldLabelRow {
   display: flex;
   align-items: baseline;
@@ -624,10 +666,12 @@
 }
 .chunkTableScroll th,
 .chunkTableScroll td {
+  min-width: 120px;
   padding: 8px 12px;
   border: 1px solid #e5e5e5;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 .chunkTableScroll th {
   background: #fafafa;
@@ -651,11 +695,12 @@
 }
 .chunkTable th,
 .chunkTable td {
+  min-width: 120px;
   padding: 8px 12px;
   border: 1px solid #e5e5e5;
   text-align: left;
   vertical-align: top;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .chunkTable th {
   background: #fafafa;

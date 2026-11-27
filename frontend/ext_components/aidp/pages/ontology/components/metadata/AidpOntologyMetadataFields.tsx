@@ -9,8 +9,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   App,
   Button,
-  Checkbox,
-  Dropdown,
   Empty,
   Form,
   Input,
@@ -19,11 +17,7 @@ import {
   Table,
   type TableColumnsType,
 } from "antd";
-import {
-  ReloadOutlined,
-  SearchOutlined,
-  SettingOutlined,
-} from "@ant-design/icons";
+import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
@@ -41,7 +35,6 @@ import {
   validateFieldName,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
@@ -95,10 +88,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(AIDP_METADATA_DEFAULT_PAGE_SIZE);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const [visibleColumns, setVisibleColumns] = useState({
-    createTime: true,
-    updateTime: true,
-  });
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const next = searchInput.trim();
@@ -469,30 +458,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       width: 160,
       render: (value: AidpMetadataFieldType) => typeLabel(value),
     },
-    ...(visibleColumns.createTime
-      ? [
-          {
-            title: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
-            key: "create_time",
-            width: 200,
-            render: (_value: unknown, record: AidpOntologyMetadataField) => (
-              <span>{formatAidpDateTime(record.create_time)}</span>
-            ),
-          },
-        ]
-      : []),
-    ...(visibleColumns.updateTime
-      ? [
-          {
-            title: t("aidpKnowledge.ontologyMetadataColumnUpdateTime"),
-            key: "update_time",
-            width: 200,
-            render: (_value: unknown, record: AidpOntologyMetadataField) => (
-              <span>{formatAidpDateTime(record.update_time)}</span>
-            ),
-          },
-        ]
-      : []),
     {
       title: t("aidpKnowledge.ontologyColumnActions"),
       key: "actions",
@@ -528,8 +493,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       {
         field_name: 1.4,
         field_type: 1,
-        create_time: 1.2,
-        update_time: 1.2,
         actions: 0.9,
       },
       canManage ? 32 : 0
@@ -634,52 +597,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               {t("aidpKnowledge.ontologyMetadataFieldCreate")}
             </Button>
           </Tooltip>
-          <Dropdown
-            trigger={["click"]}
-            menu={{
-              items: [
-                {
-                  key: "createTime",
-                  label: (
-                    <Checkbox
-                      checked={visibleColumns.createTime}
-                      onChange={(event) =>
-                        setVisibleColumns((previous) => ({
-                          ...previous,
-                          createTime: event.target.checked,
-                        }))
-                      }
-                    >
-                      {t("aidpKnowledge.ontologyMetadataColumnCreateTime")}
-                    </Checkbox>
-                  ),
-                },
-                {
-                  key: "updateTime",
-                  label: (
-                    <Checkbox
-                      checked={visibleColumns.updateTime}
-                      onChange={(event) =>
-                        setVisibleColumns((previous) => ({
-                          ...previous,
-                          updateTime: event.target.checked,
-                        }))
-                      }
-                    >
-                      {t("aidpKnowledge.ontologyMetadataColumnUpdateTime")}
-                    </Checkbox>
-                  ),
-                },
-              ],
-            }}
-          >
-            <Tooltip title={t("aidpKnowledge.ontologyMetadataColumnSettings")}>
-              <Button
-                aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
-                icon={<SettingOutlined />}
-              />
-            </Tooltip>
-          </Dropdown>
         </div>
       </div>
 

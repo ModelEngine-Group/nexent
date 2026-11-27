@@ -105,6 +105,8 @@ export const useAidpFileMenus = (
     setDeleteConfirmOpen,
     metadataFile,
     setMetadataFile,
+    batchMetadataFiles,
+    setBatchMetadataFiles,
     metadataSubmitting,
     setMetadataSubmitting,
     bindingQuery,
@@ -173,16 +175,16 @@ export const useAidpFileMenus = (
     mutationFn: ({
       odIdValue,
       metadataJson,
-      fileUuid,
+      fileUuids,
     }: {
       odIdValue: number;
       metadataJson: Record<string, string>;
-      fileUuid: string;
+      fileUuids: string[];
     }) =>
       aidpKnowledgeService.batchUpdateChunkMetadata(knowledgeBase.kds_id, {
         od_id: odIdValue,
         metadata_json: metadataJson,
-        file_uuid_list: [fileUuid],
+        file_uuid_list: fileUuids,
       }),
   });
 
@@ -535,7 +537,7 @@ export const useAidpFileMenus = (
         await saveMetadataMutation.mutateAsync({
           odIdValue: Number(odId),
           metadataJson,
-          fileUuid: metadataFile.file_uuid,
+          fileUuids: [metadataFile.file_uuid],
         });
         message.success(t("aidpKnowledge.fileMetadataSaved"));
         setMetadataFile(null);
@@ -554,6 +556,46 @@ export const useAidpFileMenus = (
       }
     },
     [knowledgeBase.kds_id, message, metadataFile, odId, refreshAll, t]
+  );
+
+  const handleSaveBatchFileMetadata = useCallback(
+    async (metadataJson: Record<string, string>) => {
+      const fileUuids = (batchMetadataFiles ?? [])
+        .map((file) => file.file_uuid)
+        .filter(Boolean);
+      if (fileUuids.length === 0 || odId === null) return;
+      setMetadataSubmitting(true);
+      try {
+        await saveMetadataMutation.mutateAsync({
+          odIdValue: Number(odId),
+          metadataJson,
+          fileUuids,
+        });
+        message.success(t("aidpKnowledge.batchMetadataSaved"));
+        setBatchMetadataFiles(null);
+        refreshAll();
+      } catch (error) {
+        message.error(
+          getAidpErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.chunkMetadataSaveFailed")
+          )
+        );
+        throw error;
+      } finally {
+        setMetadataSubmitting(false);
+      }
+    },
+    [
+      batchMetadataFiles,
+      knowledgeBase.kds_id,
+      message,
+      odId,
+      refreshAll,
+      setBatchMetadataFiles,
+      t,
+    ]
   );
 
   const segments = folderPathSegments(currentPath);
@@ -576,5 +618,6 @@ export const useAidpFileMenus = (
     handleFileMenuClick,
     getBreadcrumbDropProps,
     handleSaveFileMetadata,
+    handleSaveBatchFileMetadata,
   };
 };

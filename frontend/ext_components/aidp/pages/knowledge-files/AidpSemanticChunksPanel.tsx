@@ -36,6 +36,7 @@ import AidpChunkDrawer, {
 } from "./AidpChunkDrawer";
 import AidpChunkDetailDrawer from "./AidpChunkDetailDrawer";
 import AidpChunkDeleteModal from "./AidpChunkDeleteModal";
+import AidpBatchMetadataDrawer from "./AidpBatchMetadataDrawer";
 import {
   useAidpChunkSearch,
   useAidpFileChunks,
@@ -88,6 +89,8 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [batchMetadataOpen, setBatchMetadataOpen] = useState(false);
+  const [batchMetadataSubmitting, setBatchMetadataSubmitting] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [drawer, setDrawer] = useState<ChunkDrawerState | null>(null);
   // Set when editing was opened from the detail drawer: after save or cancel
@@ -463,6 +466,12 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
     ...(canEdit && metadataEnabled
       ? [
           {
+            key: "batch-metadata",
+            label: t("aidpKnowledge.batchMetadataTitle"),
+            icon: <TagsOutlined />,
+            disabled: selectedIds.length === 0,
+          },
+          {
             key: "retag",
             label: t("aidpKnowledge.chunkRetag"),
             icon: <TagsOutlined />,
@@ -473,6 +482,9 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
   const handleMoreMenuClick = ({ key }: { key: string }) => {
     if (key === "refresh") {
       void refetch();
+    }
+    if (key === "batch-metadata") {
+      setBatchMetadataOpen(true);
     }
     if (key === "retag") {
       void (async () => {
@@ -487,6 +499,36 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
       })();
     }
   };
+  const handleSaveBatchMetadata = useCallback(
+    async (metadataJson: Record<string, string>) => {
+      if (odId === null || selectedIds.length === 0) return;
+      setBatchMetadataSubmitting(true);
+      try {
+        await aidpKnowledgeService.batchUpdateChunkMetadata(kdsId, {
+          od_id: Number(odId),
+          metadata_json: metadataJson,
+          chunk_id_list: selectedIds,
+        });
+        message.success(t("aidpKnowledge.batchMetadataSaved"));
+        setBatchMetadataOpen(false);
+        setSelectedIds([]);
+        void refetch();
+      } catch (error) {
+        message.error(
+          getAidpErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.chunkMetadataSaveFailed")
+          )
+        );
+        throw error;
+      } finally {
+        setBatchMetadataSubmitting(false);
+      }
+    },
+    [kdsId, message, odId, refetch, selectedIds, t]
+  );
+
   const handleSearchChange = (value: string) => {
     setSearch(value);
     setSelectedIds([]);
@@ -644,6 +686,18 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
         submitting={submitting}
         onCancel={() => setDeleteTargets(null)}
         onConfirm={() => void handleDelete()}
+      />
+
+      <AidpBatchMetadataDrawer
+        open={batchMetadataOpen}
+        chunkCount={selectedIds.length}
+        metadataFields={metadataFields}
+        submitting={batchMetadataSubmitting}
+        formKey={`chunks:${selectedIds.join(",")}:${odId ?? "none"}`}
+        onClose={() => {
+          if (!batchMetadataSubmitting) setBatchMetadataOpen(false);
+        }}
+        onSave={handleSaveBatchMetadata}
       />
     </div>
   );

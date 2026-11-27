@@ -93,6 +93,9 @@ export const useAidpFilesPanelState = ({
   const [metadataFile, setMetadataFile] = useState<AidpDocumentItem | null>(
     null
   );
+  const [batchMetadataFiles, setBatchMetadataFiles] = useState<
+    AidpDocumentItem[] | null
+  >(null);
   const [metadataSubmitting, setMetadataSubmitting] = useState(false);
   const bindingQuery = useKbOntologyBinding(knowledgeBase.kds_id);
   const odId = bindingQuery.data?.binding?.od_id ?? null;
@@ -118,7 +121,8 @@ export const useAidpFilesPanelState = ({
     fileMoveRequest !== null ||
     fileRenameTarget !== null ||
     deleteConfirmOpen ||
-    metadataFile !== null;
+    metadataFile !== null ||
+    batchMetadataFiles !== null;
 
   // Keep the knowledge-base URL in sync with the current folder so browser
   // back from a file detail returns to the same folder instead of the root.
@@ -406,6 +410,8 @@ export const useAidpFilesPanelState = ({
     setDeleteConfirmOpen,
     metadataFile,
     setMetadataFile,
+    batchMetadataFiles,
+    setBatchMetadataFiles,
     metadataSubmitting,
     setMetadataSubmitting,
     bindingQuery,

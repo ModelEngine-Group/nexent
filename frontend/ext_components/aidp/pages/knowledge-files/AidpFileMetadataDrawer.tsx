@@ -23,9 +23,31 @@ interface AidpFileMetadataDrawerProps {
   onSave: (metadataJson: Record<string, string>) => Promise<void>;
 }
 
-const AidpFileMetadataForm: React.FC<
-  Omit<AidpFileMetadataDrawerProps, "open">
-> = ({ fileName, metadataFields, submitting, onClose, onSave }) => {
+export interface AidpMetadataTargetFile {
+  name: string;
+  type?: string | null;
+}
+
+export interface AidpMetadataFormProps {
+  title: string;
+  hint: string;
+  metadataFields: AidpOntologyMetadataField[];
+  submitting: boolean;
+  onClose: () => void;
+  onSave: (metadataJson: Record<string, string>) => Promise<void>;
+  /** Batch-file mode only; omit for chunk batches. */
+  files?: AidpMetadataTargetFile[];
+}
+
+export const AidpMetadataForm: React.FC<AidpMetadataFormProps> = ({
+  title,
+  hint,
+  metadataFields,
+  submitting,
+  onClose,
+  onSave,
+  files,
+}) => {
   const { t } = useTranslation();
   const [rows, setRows] = useState<AidpMetadataRow[]>([]);
   const [touched, setTouched] = useState(false);
@@ -55,9 +77,7 @@ const AidpFileMetadataForm: React.FC<
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className={styles.drawerTitleRow}>
-          <h2 className={styles.drawerTitle}>
-            {t("aidpKnowledge.fileMetadataTitle")}
-          </h2>
+          <h2 className={styles.drawerTitle}>{title}</h2>
           <Button
             type="text"
             aria-label={t("common.close")}
@@ -67,11 +87,29 @@ const AidpFileMetadataForm: React.FC<
           />
         </div>
         <div className={styles.drawerContent}>
-          <Alert
-            type="info"
-            showIcon
-            title={t("aidpKnowledge.fileMetadataHint", { name: fileName })}
-          />
+          <Alert type="info" showIcon title={hint} />
+          {files && files.length > 0 && (
+            <div className={styles.batchFileList}>
+              <div className={styles.batchFileListTitle}>
+                {t("aidpKnowledge.batchMetadataSelectedFiles", {
+                  count: files.length,
+                })}
+              </div>
+              {files.map((file, index) => (
+                <div
+                  className={styles.batchFileRow}
+                  key={`${file.name}-${index}`}
+                >
+                  <span className={styles.batchFileName}>{file.name}</span>
+                  {file.type && (
+                    <span className={styles.batchFileType}>
+                      /{file.type}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {metadataFields.length === 0 ? (
             <Alert
               type="info"
@@ -122,29 +160,35 @@ const AidpFileMetadataDrawer: React.FC<AidpFileMetadataDrawerProps> = ({
   submitting,
   onClose,
   onSave,
-}) => (
-  <Drawer
-    open={open}
-    onClose={onClose}
-    size="min(960px, 50vw)"
-    rootClassName={styles.chunkDrawer}
-    closable={false}
-    styles={{ body: { padding: 0, display: "flex", flexDirection: "column" } }}
-    mask={{ closable: !submitting }}
-    keyboard={!submitting}
-  >
-    {open && (
-      <AidpFileMetadataForm
-        key={`${fileName}-${odId ?? "none"}`}
-        fileName={fileName}
-        odId={odId}
-        metadataFields={metadataFields}
-        submitting={submitting}
-        onClose={onClose}
-        onSave={onSave}
-      />
-    )}
-  </Drawer>
-);
+}) => {
+  const { t } = useTranslation();
+
+  return (
+    <Drawer
+      open={open}
+      onClose={onClose}
+      size="min(960px, 50vw)"
+      rootClassName={styles.chunkDrawer}
+      closable={false}
+      styles={{
+        body: { padding: 0, display: "flex", flexDirection: "column" },
+      }}
+      mask={{ closable: !submitting }}
+      keyboard={!submitting}
+    >
+      {open && (
+        <AidpMetadataForm
+          key={`${fileName}-${odId ?? "none"}`}
+          title={t("aidpKnowledge.fileMetadataTitle")}
+          hint={t("aidpKnowledge.fileMetadataHint", { name: fileName })}
+          metadataFields={metadataFields}
+          submitting={submitting}
+          onClose={onClose}
+          onSave={onSave}
+        />
+      )}
+    </Drawer>
+  );
+};
 
 export default AidpFileMetadataDrawer;
