@@ -304,8 +304,11 @@ async def test_anonymous_presigned_file_download(monkeypatch):
     management.include_router(northbound.router)
     storage = FastAPI()
     received = []
-    accepted_query = b"X-Amz-Expires=300&X-Amz-Signature=fixture%2Fsignature"
-    expired_query = b"X-Amz-Expires=0&X-Amz-Signature=expired"
+    accepted_query = (
+        b"X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=fixture%2F20261127%2Fus-east-1%2Fs3%2Faws4_request"
+        b"&X-Amz-Date=20261127T000000Z&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature=fixture%2Fsignature"
+    )
+    expired_query = accepted_query.replace(b"X-Amz-Expires=300", b"X-Amz-Expires=0")
     image = b"fixture image"
 
     @storage.get("/objects/saved-image.png")
@@ -339,6 +342,9 @@ async def test_anonymous_presigned_file_download(monkeypatch):
                     assert result.headers["content-type"] == "image/png"
                     assert 'filename="saved-image.png"' in result.headers["content-disposition"]
                     assert (await client.get(management_url + path, params=params)).status_code == 401
+                    for raw_url in (object_url.rstrip("?"), "s3://objects/saved-image.png"):
+                        raw = await client.get(gateway_url + path, params={"presigned_url": raw_url})
+                        assert raw.status_code == 400
                 expired = await client.get(gateway_url + "/nb/v1/file/fetch", params={
                     "presigned_url": object_url + expired_query.decode("ascii"),
                 })

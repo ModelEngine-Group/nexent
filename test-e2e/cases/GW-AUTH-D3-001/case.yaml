@@ -54,8 +54,8 @@ case:
     expected: MCP receives verified user context only for its tenant; invalid calls
       never reach its handler and context is restored.
   - order: 5
-    action: Download an uploaded image without login through both presigned fetch aliases. Repeat with an expired storage URL and make a direct unsigned request to Management.
-    expected: Both Gateway aliases return the image with its content type and download filename. Storage denial returns the existing 502 response. Direct unsigned access returns 401 before storage.
+    action: Download an uploaded image without login through both presigned fetch aliases. Repeat with an expired storage URL, a raw HTTPS storage URL and a raw S3 URI. Make a direct unsigned request to Management.
+    expected: Both Gateway aliases return the image with its content type and download filename. Storage denial returns the existing 502 response. Raw storage URLs return 400 before any storage request. Direct unsigned access returns 401 before storage.
   expected_results:
   - Authoritative account and API-key identities cross real HTTP network hops without
     cross-user contamination.

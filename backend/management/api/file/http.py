@@ -11,6 +11,15 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+_S3_PRESIGN_PARAMETERS = (
+    "X-Amz-Algorithm",
+    "X-Amz-Credential",
+    "X-Amz-Date",
+    "X-Amz-Expires",
+    "X-Amz-SignedHeaders",
+    "X-Amz-Signature",
+)
+
 
 def build_storage_proxy_url(presigned_url: str, storage_endpoint: Optional[str]) -> httpx.URL:
     """Pin the request authority to configured storage without rewriting its signature."""
@@ -41,7 +50,15 @@ def build_storage_proxy_url(presigned_url: str, storage_endpoint: Optional[str])
             status_code=HTTPStatus.BAD_REQUEST, detail="presigned_url must use the configured storage endpoint"
         ) from None
 
-    # Copy only the object path and signed query; the authority always comes from server configuration.
+    parameters = target.params
+    if parameters.get("X-Amz-Algorithm") != "AWS4-HMAC-SHA256" or any(
+        len(parameters.get_list(name)) != 1 or not parameters[name] for name in _S3_PRESIGN_PARAMETERS
+    ):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail="A valid S3 SigV4 presigned URL is required"
+        )
+
+    # Storage verifies the signature and permissions using the untouched request path and query.
     return origin.copy_with(raw_path=target.raw_path)
 
 
