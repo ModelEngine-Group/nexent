@@ -99,6 +99,8 @@ export interface ApiMessageItem {
   step_id?: string;
   reclassify_step?: boolean;
   is_error?: boolean;
+  error_code?: string;
+  request_id?: string | null;
   provider_call_id?: string;
   type: string;
   content: string;

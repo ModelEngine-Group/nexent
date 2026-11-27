@@ -22,7 +22,10 @@ from infrastructure.local_tool_execution import (
     local_tool_binding_name, local_tool_rerank_name, local_tool_revision,
 )
 from infrastructure.local_tool_overrides import PREFIX, open_tool_overrides
-from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_shared_aidp_catalog_tool, read_skill_derived_local_tools
+from infrastructure.rdb.local_tool_records import (
+    read_bound_local_tools, read_shared_aidp_catalog_tool, read_skill_derived_local_tools,
+    read_workbench_default_aidp_tools, read_workbench_scoped_aidp_tool,
+)
 from infrastructure.shared_aidp_tool import restrict_aidp_access, scoped_shared_aidp_revision
 from nexent.core.agents.contracts.config import ToolConfig
 from runtime.agentos.prepared_knowledge import _reranker
@@ -53,8 +56,10 @@ def _bind_shared_aidp_access(tool: ToolConfig, actor: ServicePrincipal) -> None:
     tool.metadata = _aidp_access_metadata(tool, actor)
 
 
-def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> ToolConfig:
+def _materialize_scoped_shared_aidp(reference, resource, actor, language, *, allow_workbench_default_aidp) -> ToolConfig:
     row = read_shared_aidp_catalog_tool(reference.catalog_tool_id, actor.tenant_id)
+    if row is None and allow_workbench_default_aidp:
+        row = read_workbench_scoped_aidp_tool(reference.catalog_tool_id, resource.agent_id, resource.version_no)
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_LOCAL_TOOL_NOT_FOUND"})
     try:
@@ -71,7 +76,7 @@ def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> Too
 
 def materialize_local_tools(
     resource: AgentResource, actor: ServicePrincipal, language: str, *, allow_scoped_aidp: bool = False,
-    require_scoped_aidp_instance: bool = False, workbench_tools=(),
+    require_scoped_aidp_instance: bool = False, allow_workbench_default_aidp: bool = False, workbench_tools=(),
     workbench_lookup: WorkbenchSkillLookup | WorkbenchDebugSkillLookup | None = None,
 ) -> dict[str, ToolConfig]:
     references = {}
@@ -96,11 +101,15 @@ def materialize_local_tools(
     if not references:
         return {}
 
+    allow_workbench_default_aidp = allow_workbench_default_aidp and resource.origin == "SYSTEM"
     parameter_refs = {binding.tool_id: binding.credential_ref for binding in resource.tools}
     scope = (resource.agent_id, resource.version_no, actor.tenant_id)
     direct_names = [local_tool_binding_name(name) for name, (version, _) in references.items() if version == "1"]
     derived_names = [local_tool_binding_name(name) for name, (version, _) in references.items() if version == "2"]
     direct = read_bound_local_tools(*scope, direct_names) if direct_names else []
+    if (allow_workbench_default_aidp and "aidp_search" in direct_names
+            and not any(row["name"] == "aidp_search" for row in direct)):
+        direct.extend(read_workbench_default_aidp_tools(resource.agent_id, resource.version_no))
     try:
         derived = read_skill_derived_local_tools(*scope, derived_names) if derived_names else []
     except ValidationError as exc:
@@ -125,7 +134,9 @@ def materialize_local_tools(
                     ]
                 if len(bound) != 1 or bound[0]["tool_id"] != reference.catalog_tool_id:
                     raise HTTPException(status_code=404, detail={"code": "AGENTOS_LOCAL_TOOL_NOT_FOUND"})
-            tools[binding_id] = _materialize_scoped_shared_aidp(reference, resource, actor, language)
+            tools[binding_id] = _materialize_scoped_shared_aidp(
+                reference, resource, actor, language, allow_workbench_default_aidp=allow_workbench_default_aidp,
+            )
             continue
         if isinstance(reference, StoredLocalToolBinding):
             row = by_instance.get((reference.instance_id, name))

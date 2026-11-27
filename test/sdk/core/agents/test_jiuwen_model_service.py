@@ -138,11 +138,13 @@ async def test_noncomplete_response_is_not_success(saved_profile, result, catego
     assert failure.value.error.category == category
 
 
-@pytest.mark.parametrize("name,args,error", [
-    ("unknown", {}, "JIUWEN_UNAUTHORIZED_TOOL"), ("add", {"a": "x", "b": 3}, "INVALID_TOOL_ARGUMENTS"),
-    ("add", {"a": 2}, "INVALID_TOOL_ARGUMENTS"),
+@pytest.mark.parametrize("name,args,error,reason,rule,detail", [
+    ("unknown", {}, "JIUWEN_UNAUTHORIZED_TOOL", None, None, None),
+    ("add", {"a": "PRIVATE_VALUE", "b": 3}, "INVALID_TOOL_ARGUMENTS", "arguments_wrong_type", "type",
+     "schema_path=('properties', 'a', 'type')"),
+    ("add", {"a": 2}, "INVALID_TOOL_ARGUMENTS", "arguments_required", "required", "missing_fields=('b',)"),
 ])
-async def test_complete_calls_validated_before_exposure(saved_profile, name, args, error):
+async def test_complete_calls_validated_before_exposure(saved_profile, caplog, name, args, error, reason, rule, detail):
     import json
     result = AssistantMessage(finish_reason="tool_calls", tool_calls=[ToolCall(
         provider_call_id="provider-1", index=0, name=name, raw_arguments=json.dumps(args), parsed_arguments=args,
@@ -151,6 +153,11 @@ async def test_complete_calls_validated_before_exposure(saved_profile, name, arg
     with pytest.raises(ModelServiceError) as failure:
         await JiuwenServiceModel(service, saved_profile, RunCancellationScope()).invoke(MESSAGES, tools=TOOLS)
     assert failure.value.error.category == error
+    assert failure.value.error.diagnostic_code == reason
+    if reason:
+        assert f"reason={reason}" in caplog.text and f"rule={rule}" in caplog.text
+        assert f"request_id={failure.value.error.request_id}" in caplog.text and detail in caplog.text
+    assert "PRIVATE_VALUE" not in caplog.text
 
 
 async def test_streams_visible_deltas_once_and_closes(saved_profile):

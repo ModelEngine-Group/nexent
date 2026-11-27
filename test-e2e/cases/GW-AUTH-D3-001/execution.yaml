@@ -15,6 +15,8 @@ acceptance_bindings:
   - test_gateway_authoritative_identity_and_signed_protocol_boundary
   AC-04:
   - test_gateway_authoritative_identity_and_signed_protocol_boundary
+  AC-05:
+  - test_anonymous_presigned_file_download
 preparation:
   families: []
   anchors: false

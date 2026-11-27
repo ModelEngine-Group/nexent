@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: WB-DEFAULT-AIDP-20261126
+  change_type: bugfix
+  bug_id: WB-DEFAULT-AIDP-20261126
+  title: Resolve the published Workbench default AIDP binding
+  description: Read the platform-owned stored binding for the exact published Workbench root in both services.
+  observed_behavior: A plain Workbench turn loads the platform default and fails snapshot export when the tenant-only lookup returns no enabled instance.
+  expected_behavior: The default is exported and restored for business tenants and AIDP still checks the signed actor's current access.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing signed transport coverage supplies a tenant-local default stub and cannot detect a lost platform binding.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AOS-TRANSPORT-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Select only the enabled platform AIDP binding for the exact published Workbench root and version.
+    - Keep ordinary Agent lookups tenant-scoped and preserve Runtime binding and actor verification.
+    test_selectors:
+    - test/backend/app/test_agentos_prepared_shared_aidp.py::test_stored_platform_aidp_requires_workbench_run
+    - test/backend/app/test_agentos_prepared_shared_aidp.py::test_workbench_mounts_tenant_catalog_aidp_with_signed_scope
+    reason: The signed transport test exercises platform and tenant bindings. Targeted unit variants check Runtime isolation and prevent substitution of a different instance.
+  notes: >-
+    SPEC nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/design.md.
+    Runtime owns AC-32. The existing self-contained Case owns its relational fixture, signed HTTP
+    servers, fake AIDP provider and temporary Runtime workspace.

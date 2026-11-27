@@ -1675,6 +1675,12 @@ def test_file_fetch_rejects_invalid_urls(url, expected_status):
     assert response.status_code == expected_status
 
 
+_SIGNED_STORAGE_URL = (
+    "https://storage/file?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=fixture%2F20261127%2Fus-east-1%2Fs3%2Faws4_request"
+    "&X-Amz-Date=20261127T000000Z&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature=fixture"
+)
+
+
 def test_file_fetch_returns_bad_gateway_for_storage_status():
     response = MagicMock(status_code=404)
     response.headers = {}
@@ -1682,7 +1688,7 @@ def test_file_fetch_returns_bad_gateway_for_storage_status():
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(return_value=response)
-        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
+        result = client.get("/nb/v1/file/fetch", params={"presigned_url": _SIGNED_STORAGE_URL})
 
     assert result.status_code == 502
 
@@ -1693,7 +1699,7 @@ def test_file_fetch_maps_http_client_errors(error):
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(side_effect=error)
-        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
+        result = client.get("/nb/v1/file/fetch", params={"presigned_url": _SIGNED_STORAGE_URL})
 
     assert result.status_code == (504 if isinstance(error, httpx.TimeoutException) else 502)
 
@@ -1712,7 +1718,7 @@ def test_file_fetch_streams_content_and_uses_content_disposition_filename():
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(return_value=response)
-        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
+        result = client.get("/nb/v1/file/fetch", params={"presigned_url": _SIGNED_STORAGE_URL})
 
     assert result.status_code == 200
     assert result.content == b"file content"

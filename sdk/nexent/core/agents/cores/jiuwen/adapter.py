@@ -308,8 +308,19 @@ class JiuwenAdapter(AgentCoreAdapter):
             else:
                 diagnostic = self.events.resource_error or previous or diagnostic
         self.events.record_error(diagnostic)
-        logger.error("event=jiuwen_run_failed phase=%s category=%s request_id=%s exception_type=%s",
-                     phase, diagnostic.category, diagnostic.request_id, type(error).__name__)
+        origin = error.__traceback__
+        while origin is not None and origin.tb_next is not None:
+            origin = origin.tb_next
+        location = None
+        if origin is not None:
+            frame = origin.tb_frame
+            location = f"{frame.f_globals.get('__name__')}.{frame.f_code.co_name}:{origin.tb_lineno}"
+        logger.error(
+            "event=jiuwen_run_failed phase=%s category=%s reason=%s request_id=%s turn_id=%s "
+            "step=%s exception_type=%s exception_site=%s",
+            phase, diagnostic.category, diagnostic.diagnostic_code or "unclassified", diagnostic.request_id,
+            self.events.turn_id, self.events.step_number, type(error).__name__, location,
+        )
 
     def _resource_result(self, result):
         value = result.model_dump() if hasattr(result, "model_dump") else result

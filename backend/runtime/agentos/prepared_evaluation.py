@@ -232,6 +232,7 @@ def _materialize_agent(
     local_tools.update(materialize_local_tools(
         resource, actor, language, allow_scoped_aidp=allow_scoped_aidp or native_knowledge,
         require_scoped_aidp_instance=native_knowledge,
+        allow_workbench_default_aidp=workbench_version is not None,
         workbench_tools=mounted_tools, workbench_lookup=workbench_lookup,
     ))
     local_tools.update(_materialize_parallel_executor(

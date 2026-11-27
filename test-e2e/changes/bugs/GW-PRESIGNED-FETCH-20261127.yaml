@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: GW-PRESIGNED-FETCH-20261127
+  change_type: bugfix
+  bug_id: GW-PRESIGNED-FETCH-20261127
+  title: Restore anonymous access to the presigned file fetch aliases
+  description: Align the Gateway registry and shared entry policy with the existing MinIO proxy contract.
+  observed_behavior: Gateway returns 401 before the presigned file URL reaches Management.
+  expected_behavior: Both GET aliases forward a signed anonymous request only for a presigned storage URL, and MinIO authorizes the object.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: The storage proxy tests bypass Gateway and the signed network case only verifies anonymous login.
+  feature_contract_changed: false
+  affected_features:
+    existing: [GW-AUTH]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [GW-AUTH-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Both exact GET aliases are public, while neighboring paths and other methods stay protected.
+    - Raw storage URLs and missing or ambiguous signing parameters are rejected before I/O.
+    - Storage origin and redirect protections still hold.
+    test_selectors:
+    - test/backend/gateway/test_exposure.py::test_presigned_file_proxy_only_allows_anonymous_get
+    - test/backend/app/test_northbound_file_proxy_security.py
+    - test/backend/utils/test_presigned_proxy_url.py
+    reason: Shared entry rules and storage boundary restrictions are independently testable.
+  notes: See the existing Northbound Gateway design. GW-AUTH-D3-001 owns signed transport and loopback storage cleanup evidence.

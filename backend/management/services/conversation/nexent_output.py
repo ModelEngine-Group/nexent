@@ -2,8 +2,13 @@
 """Project engine observations onto the established Nexent client protocol."""
 
 import json
+import logging
 
 from management.services.conversation.creator_events import unpack_creator_event
+
+logger = logging.getLogger(__name__)
+_TERMINAL_MISSING = "NEXENT_TERMINAL_MISSING"
+_TERMINAL_MISSING_MESSAGE = "The run ended before the service received its final result."
 
 
 def _native(event):
@@ -22,12 +27,13 @@ def _converted(event, kind, **fields):
 class NexentOutputAdapter:
     """Keep validation and invocation state on the server, never in a UI consumer."""
 
-    def __init__(self):
+    def __init__(self, *, channel="stream"):
         self.runs = {}
         self.invocations = {}
         self.duplicates = set()
         self.closed = False
         self.root = None
+        self.channel = channel
 
     @staticmethod
     def _status(run):
@@ -50,8 +56,17 @@ class NexentOutputAdapter:
         if status == "stopped":
             return []
         error = result.get("error") if isinstance(result.get("error"), dict) else {}
-        return [_converted(source, "error", content=run.get("invalid") or error.get("safe_message")
-                           or result.get("end_reason") or "NEXENT_TERMINAL_MISSING",
+        content = run.get("invalid") or error.get("safe_message") or result.get("end_reason") or _TERMINAL_MISSING
+        if content == _TERMINAL_MISSING:
+            logger.warning(
+                "event=nexent_terminal_missing category=%s reason=run_terminal_not_observed channel=%s "
+                "turn_id=%s invocation_id=%s close_status=%s last_event=%r last_sequence=%s prior_validation_error=%s",
+                _TERMINAL_MISSING, self.channel, source["turn_id"], source.get("invocation_id"),
+                run.get("close_status"), run.get("last_event"), run["sequence"], run.get("prior_invalid"),
+            )
+            return [_converted(source, "error", content=_TERMINAL_MISSING_MESSAGE,
+                               error_code=_TERMINAL_MISSING, request_id=source["turn_id"], retryable=False)]
+        return [_converted(source, "error", content=content,
                            **({"error_code": error["category"], "retryable": error.get("retryable", False),
                                "request_id": error.get("request_id")} if error.get("category") and not run.get("invalid") else {}))]
 
@@ -100,6 +115,7 @@ class NexentOutputAdapter:
             return []
         run["sequence"] = sequence
         kind = event.get("type")
+        run["last_event"] = kind
         if kind == "step_count":
             run["step"] = event.get("step_id") or f"{identity}:step:{event.get('content', '')}"
             return [_converted(event, kind, step_id=run["step"])]
@@ -171,8 +187,10 @@ class NexentOutputAdapter:
             return []
         self.closed = True
         for run in self.runs.values():
+            run["close_status"] = status
             if not run.get("result"):
-                run["invalid"] = "NEXENT_TERMINAL_MISSING"
+                run["prior_invalid"] = run.get("invalid")
+                run["invalid"] = _TERMINAL_MISSING
             if run is self.root and status == "failed" and self._status(run) != "failed":
                 run["invalid"] = "NEXENT_PERSISTED_RUN_FAILED"
             if run is self.root and status == "stopped":
@@ -187,7 +205,7 @@ class NexentOutputAdapter:
 
 def normalize_nexent_history(events, status=None):
     """Decode saved envelopes only; never interpret JSON inside ordinary model text."""
-    adapter = NexentOutputAdapter()
+    adapter = NexentOutputAdapter(channel="history")
     output = []
     for event in events:
         event = dict(event)
@@ -218,7 +236,7 @@ class NexentSSEAdapter:
     """Accept complete SSE frames from backend producers without delaying deltas."""
 
     def __init__(self):
-        self.output = NexentOutputAdapter()
+        self.output = NexentOutputAdapter(channel="creator_stream")
 
     def push(self, frame):
         result = []
