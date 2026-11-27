@@ -2,6 +2,8 @@
 
 本文适用于使用 Helm 部署的 Nexent。建议在无人使用或业务低峰窗口执行。备份前必须停止业务写入，但不需要停止 Pod。
 
+升级前请保留原部署目录及其配置，并记录镜像版本。需要回滚时，先将备份恢复到对应的持久卷，再从旧部署目录重新部署。详见 [Kubernetes 回滚指南](./kubernetes-rollback-guide)。
+
 > ⚠️ 如果复制期间仍有业务写入，PostgreSQL、Elasticsearch、Redis 和 MinIO 等组件的数据可能不属于同一时间点，备份可能无法恢复。
 
 ## 1. 升级前检查和备份
@@ -26,7 +28,9 @@ bash deploy/k8s/backup.sh \
 
 ## 2. 执行升级
 
-Web 默认给登录 Cookie 加上 `Secure`。如果内网仍通过 HTTP 直连 Web，升级前在 `deploy/env/.env` 中设置 `NEXENT_AUTH_COOKIE_SECURE=false`，让浏览器能保存会话。通过 HTTPS Ingress 或反向代理访问时保留默认值 `true`。
+**已有集群要沿用原来的存储模式和卷。** 新版脚本在没有保存或显式指定存储模式时使用 `dynamic`，并在省略 `--storage-class` 时使用集群的默认 StorageClass。升级前核对 `deploy/k8s/deploy.options`、目标命名空间和已有 PVC。旧环境使用静态 hostPath 且没有保存存储模式时，在部署命令中补上 `--persistence-mode local`。使用预建 PVC 的环境应保留原来的 `existing` 设置和卷名。
+
+Web 默认使用带 `Secure` 属性的登录 Cookie。从其他机器验证登录时，请使用已配置的 HTTPS 入口。本机临时验证可按 [Kubernetes 安装部署](./kubernetes-installation#访问您的安装)转发 Web 端口。
 
 ### 2.1 在线升级
 
@@ -38,15 +42,15 @@ git pull --ff-only
 bash deploy.sh k8s --defaults --version X.Y.Z
 ```
 
-`--defaults` 会复用已保存的 Kubernetes 部署配置并跳过交互界面。升级前应确认 `deploy/k8s/deploy.options` 中的组件、端口策略、镜像源、持久化模式和 namespace 与原环境一致。更多在线部署说明参见 [Kubernetes 安装部署](./kubernetes-installation.md#在线部署)。
+将 `X.Y.Z` 替换为目标镜像的实际版本标签。省略 `--version` 时，脚本读取当前部署目录中的 `VERSION`。`--defaults` 复用已保存的组件、端口、镜像源和存储选项，旧配置中的应用版本不会覆盖本次版本选择。详见 [Kubernetes 安装部署](./kubernetes-installation.md#在线部署)。
 
 ### 2.2 离线升级
 
 目标集群无法访问公网镜像仓库时，按 [Kubernetes 离线部署](./kubernetes-installation.md#离线部署) 下载与集群节点架构匹配的目标版本包，复制到能够访问目标集群的管理节点并解压：
 
 ```bash
-unzip nexent-<version>-amd64.zip -d nexent-<version>
-cd nexent-<version>
+unzip 'nexent-<version>-amd64.zip' -d 'nexent-<version>'
+cd 'nexent-<version>'
 ```
 
 单节点且使用 Docker 容器运行时的集群，可直接加载新包镜像并升级：
@@ -72,14 +76,14 @@ bash deploy.sh \
 
 `/path/to/previous/nexent` 必须是上一版已解压部署包的实际根目录，且包含 `deploy/env/.env`。`--reuse-from` 会复用旧包的 `.env`、`monitoring.env` 和 Kubernetes 部署选项。ARM64 集群节点应使用对应的 `arm64` 包名。
 
-升级时由 `nexent-config` 执行数据库自动迁移，其他后端服务会等待迁移达到目标状态。已合并的 SQL 文件不可修改、改名或删除。
-
 ## 3. 升级后检查
 
-检查指定 namespace 中的 Pod 状态；以下示例使用默认 namespace `nexent`：
+常规应用升级会先暂停业务 Pod，由初始化 Job 执行数据库迁移并初始化系统智能体，成功后再启动业务服务。v2.9.0 的合并迁移文件为 `v2.9.0_merged_migrations.sql`。Config 启动时会核对迁移记录及校验和，已是目标版本时跳过重复执行。若初始化失败，业务保持暂停，可在终端提示的部署日志中查看 Job 输出。默认日志路径为部署目录下的 `logs/deploy/deploy-YYYYMMDD-HHMMSS.log`。
+
+在目标命名空间检查应用和存储。以下示例使用默认命名空间 `nexent`。
 
 ```bash
-kubectl get pods -n nexent -o wide
+kubectl -n nexent get deployment,pods,pvc
 ```
 
-所有 Nexent Pod 均为 `Running`，且 READY 数量符合预期，即表示检查通过。Pod 显示 `ContainerCreating` 时继续等待；显示 `CrashLoopBackOff`、`Error` 或长时间 `Pending` 时检查不通过。
+确认各业务 Deployment 的就绪副本数符合预期，原有 PVC 仍为 `Bound` 且绑定预期的 PV。Pod 长时间处于 `Pending` 时，检查 PVC 事件和 StorageClass。最后用已有账号登录并打开一段升级前的会话或附件，确认应用实际读取了原数据。
