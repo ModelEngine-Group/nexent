@@ -182,6 +182,10 @@ def test_formatting_empty_and_tool_variants():
     assert "presigned_url" in zh_description
     assert "Accepts input" in en_description
     assert "presigned_url" in en_description
+    for language in ("zh", "en"):
+        manager_description = _format_tools_description({"search": tool}, language=language, is_manager=True)
+        assert "presigned_url" in manager_description
+        assert "minio.example.com" not in manager_description
 
 
 def test_ut_sdk_fps_017_memory_renders_data_without_legacy_guidance():
