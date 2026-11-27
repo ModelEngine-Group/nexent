@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { afterEach, expect, it, vi } from "vitest";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 
@@ -49,14 +51,18 @@ it("UT-FE-WB-037 retains batched display tags without per-card assignment reques
   const fetch = vi.fn().mockResolvedValue(
     new Response(
       JSON.stringify({
-        indices: ["index-a"],
+        indices: ["index-a", "index-b", "index-c"],
         indices_info: [
           {
             name: "index-a",
             knowledge_id: 1,
             tags: ["Finance", "Search"],
+            description:
+              "<p>Approval workflow</p>\n\n<p>Supporting documents</p>",
             stats: {},
           },
+          { name: "index-b", description: " ", stats: {} },
+          { name: "index-c", stats: {} },
         ],
       })
     )
@@ -71,5 +77,10 @@ it("UT-FE-WB-037 retains batched display tags without per-card assignment reques
     { strict: true }
   );
   expect(result.knowledgeBases[0].tags).toEqual(["Finance", "Search"]);
+  expect(result.knowledgeBases.map(({ description }) => description)).toEqual([
+    "Approval workflow\n\nSupporting documents",
+    null,
+    null,
+  ]);
   expect(fetch).toHaveBeenCalledTimes(1);
 });

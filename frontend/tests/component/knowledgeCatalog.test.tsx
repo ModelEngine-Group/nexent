@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import KnowledgeBaseList from "../../app/[locale]/knowledges/components/knowledge/KnowledgeBaseList";
 const menuPermissions = vi.hoisted(() => new Set(["kb:update", "kb:delete"]));
+const tagDefinitions = vi.hoisted(() => vi.fn((): unknown[] => []));
 vi.mock("@/hooks/permission/usePermission", () => ({
   usePermission: () => ({
     isReady: true,
@@ -41,13 +42,17 @@ vi.mock("@/hooks/useTagManagement", () => ({
   useTagLibraries: () => ({
     data: [{ bucket_id: 1, bucket_key: "default_resource" }],
   }),
-  useTagDefinitions: () => ({ data: [], refresh: vi.fn() }),
+  useTagDefinitions: () => ({ data: tagDefinitions(), refresh: vi.fn() }),
 }));
 vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: { filterResourceIds: vi.fn() },
 }));
 vi.mock("@/services/knowledgeBaseService", () => ({
-  default: { getKnowledgeBasesInfo: vi.fn() },
+  default: {
+    getKnowledgeBasesInfo: vi.fn(),
+    previewBoundAgents: vi.fn(),
+    deleteKnowledgeBase: vi.fn(),
+  },
 }));
 vi.mock("@/components/permission/Can", () => ({
   Can: ({ children }: { children: React.ReactNode }) => children,
@@ -62,17 +67,6 @@ vi.mock("@/components/tag/TagFilterControls", () => ({
     </button>
   ),
 }));
-vi.mock("@/components/tag/ResourceTagAssignmentModal", () => ({
-  default: ({ open, canEdit }: { open: boolean; canEdit: boolean }) =>
-    open ? <div data-testid="assign-dialog">{String(canEdit)}</div> : null,
-}));
-vi.mock("@/components/tag/TagDefinitionManagementModal", () => ({
-  default: () => null,
-}));
-vi.mock(
-  "../../app/[locale]/knowledges/components/knowledge/KnowledgeBaseEditModal",
-  () => ({ KnowledgeBaseEditModal: () => null })
-);
 vi.mock(
   "../../app/[locale]/knowledges/components/knowledge/PersonalKnowledgeBaseCapacityBar",
   () => ({ default: () => null })
@@ -95,7 +89,6 @@ const baseProps = () => ({
   knowledgeBases: [knowledge(1), knowledge(2)],
   activeKnowledgeBase: null,
   onClick: vi.fn(),
-  onDelete: vi.fn(),
   onSync: vi.fn(),
   onCreateNew: vi.fn(),
   getModelDisplayName: (id: string) => id,
@@ -104,7 +97,19 @@ const baseProps = () => ({
 });
 
 describe("local knowledge catalog", () => {
-  it("removes toolbar tag management while retaining synchronization and resource actions", () => {
+  it("shows each saved summary and uses the default for an empty one", () => {
+    const knowledgeBases = [
+      { ...knowledge(1), description: "Approval workflow" },
+      { ...knowledge(2), description: null },
+    ];
+    render(
+      <KnowledgeBaseList {...baseProps()} knowledgeBases={knowledgeBases} />
+    );
+    expect(screen.getByText("Approval workflow")).toBeVisible();
+    expect(screen.getByText("knowledgeBase.description.default")).toBeVisible();
+  });
+
+  it("keeps synchronization without a toolbar tag management or card menu", () => {
     render(<KnowledgeBaseList {...baseProps()} />);
     expect(
       screen.getByRole("button", { name: /knowledgeBase.button.sync/ })
@@ -115,42 +120,166 @@ describe("local knowledge catalog", () => {
       })
     ).not.toBeInTheDocument();
     expect(
-      screen.getAllByRole("button", {
+      screen.queryByRole("button", {
         name: "skillRepository.common.moreActions",
       })
-    ).toHaveLength(2);
+    ).not.toBeInTheDocument();
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    tagDefinitions.mockReset().mockReturnValue([]);
     menuPermissions.clear();
     menuPermissions.add("kb:update");
     menuPermissions.add("kb:delete");
+    vi.mocked(knowledgeBaseService.previewBoundAgents).mockReset();
+    vi.mocked(knowledgeBaseService.deleteKnowledgeBase).mockReset();
   });
 
-  it("hides menu actions without the corresponding permission", async () => {
-    menuPermissions.delete("kb:update");
-    const props = { ...baseProps(), knowledgeBases: [knowledge(1)] };
-    render(<KnowledgeBaseList {...props} />);
+  it("hides bulk management without delete permission", () => {
+    menuPermissions.delete("kb:delete");
+    render(<KnowledgeBaseList {...baseProps()} />);
+    expect(
+      screen.queryByRole("button", { name: "knowledgeBase.batch.manage" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("selects only deletable knowledge bases and clears selection on page change", () => {
+    const props = {
+      ...baseProps(),
+      knowledgeBases: [
+        knowledge(1),
+        knowledge(2, "READ_ONLY"),
+        { ...knowledge(3), source: "datamate" },
+      ],
+      totalCount: 6,
+      serverFiltered: true,
+    };
+    const { rerender } = render(
+      <KnowledgeBaseList {...props} page={1} pageSize={3} />
+    );
     fireEvent.click(
-      screen.getByRole("button", { name: "skillRepository.common.moreActions" })
+      screen.getByRole("button", { name: "knowledgeBase.batch.manage" })
     );
-    await waitFor(() =>
-      expect(
-        screen.getByRole("menuitem", { name: "common.delete" })
-      ).toBeVisible()
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "knowledgeBase.batch.selectPage" })
     );
+    expect(screen.getByRole("checkbox", { name: "Knowledge 1" })).toBeChecked();
     expect(
-      screen.queryByRole("menuitem", { name: "common.edit" })
-    ).not.toBeInTheDocument();
+      screen.getByRole("checkbox", { name: "Knowledge 2" })
+    ).toBeDisabled();
     expect(
-      screen.queryByRole("menuitem", {
-        name: "knowledgeBase.action.assignTags",
-      })
-    ).not.toBeInTheDocument();
+      screen.getByRole("checkbox", { name: "Knowledge 3" })
+    ).toBeDisabled();
+    expect(
+      screen.getByText("knowledgeBase.batch.selectedCount:1")
+    ).toBeVisible();
+    rerender(<KnowledgeBaseList {...props} page={2} pageSize={3} />);
+    expect(
+      screen.getByText("knowledgeBase.batch.selectedCount:0")
+    ).toBeVisible();
+    expect(props.onClick).not.toHaveBeenCalled();
   });
 
-  it("has one create entry and independent card/document/menu interactions", async () => {
+  it("previews deletion, cancels without mutations, and keeps failed targets selected after confirmation", async () => {
+    const refresh = vi.fn();
+    vi.mocked(knowledgeBaseService.previewBoundAgents).mockResolvedValue({
+      agents: [{ agent_id: 5, display_name: "Bound agent" }],
+    });
+    vi.mocked(knowledgeBaseService.deleteKnowledgeBase).mockImplementation(
+      async (id) => {
+        if (id === "2") throw new Error("Blocked");
+      }
+    );
+    render(<KnowledgeBaseList {...baseProps()} onCatalogRefresh={refresh} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "knowledgeBase.batch.manage" })
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "knowledgeBase.batch.selectPage" })
+    );
+    const toolbar = screen.getByRole("toolbar", {
+      name: "knowledgeBase.batch.manage",
+    });
+    const deleteButton = within(toolbar).getByRole("button", {
+      name: "knowledgeBase.batch.deleteSelected",
+    });
+    fireEvent.click(deleteButton);
+    let dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findAllByText("Bound agent")).toHaveLength(2);
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "common.cancel" })
+    );
+    expect(knowledgeBaseService.deleteKnowledgeBase).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("knowledgeBase.batch.selectedCount:2")
+    ).toBeVisible();
+    fireEvent.click(deleteButton);
+    dialog = await screen.findByRole("dialog");
+    const confirm = within(dialog).getByRole("button", {
+      name: "knowledgeBase.batch.deleteSelected",
+    });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+
+    expect(
+      await screen.findByText("knowledgeBase.batch.partialFailure:1")
+    ).toBeVisible();
+    expect(knowledgeBaseService.deleteKnowledgeBase).toHaveBeenNthCalledWith(
+      1,
+      "1"
+    );
+    expect(knowledgeBaseService.deleteKnowledgeBase).toHaveBeenNthCalledWith(
+      2,
+      "2"
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "Knowledge 1" })
+    ).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Knowledge 2" })).toBeChecked();
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("applies one tag from the dropdown and clears it with All tags", async () => {
+    tagDefinitions.mockReturnValue([
+      {
+        definition_id: 10,
+        definition_key: "topic",
+        status: "active",
+        values: [
+          { value_id: 11, display_value: "Engineering", status: "active" },
+          { value_id: 12, display_value: "Archived", status: "disabled" },
+        ],
+      },
+    ]);
+    vi.mocked(tagManagementApi.filterResourceIds).mockResolvedValue({
+      resource_type: "knowledge_base",
+      matched_resource_ids: ["1"],
+    });
+    const props = baseProps();
+    render(<KnowledgeBaseList {...props} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "knowledgeBase.tagFilter.all" })
+    );
+    expect(screen.queryByText("Archived")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByText("Engineering"));
+
+    await waitFor(() => expect(screen.queryByText("Knowledge 2")).toBeNull());
+    expect(screen.getByText("Knowledge 1")).toBeVisible();
+    expect(tagManagementApi.filterResourceIds).toHaveBeenCalledWith(
+      "knowledge_base",
+      ["1", "2"],
+      [{ definition_id: 10, value_ids: [11] }]
+    );
+    expect(props.onPageChange).toHaveBeenCalledWith(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Engineering" }));
+    fireEvent.click(await screen.findByText("knowledgeBase.tagFilter.all"));
+    expect(await screen.findByText("Knowledge 2")).toBeVisible();
+  });
+
+  it("opens a card directly and keeps creation and card metadata available", () => {
     const props = baseProps();
     const { container } = render(<KnowledgeBaseList {...props} />);
     expect(
@@ -169,21 +298,15 @@ describe("local knowledge catalog", () => {
     expect(props.onClick).toHaveBeenCalledExactlyOnceWith(
       props.knowledgeBases[0]
     );
-    props.onClick.mockClear();
-    fireEvent.click(
-      within(card).getByRole("button", {
+    expect(
+      within(card).queryByRole("button", {
         name: "skillRepository.common.moreActions",
       })
-    );
-    const deleteItem = await screen.findByRole("menuitem", {
-      name: "common.delete",
-    });
-    expect(deleteItem.querySelector("svg")).toBeNull();
-    fireEvent.click(deleteItem);
-    expect(within(card).getAllByText("|")).toHaveLength(2);
+    ).not.toBeInTheDocument();
+    expect(within(card).getByText(/knowledgeBase.tag.documents/)).toBeVisible();
+    expect(within(card).getByText(/knowledgeBase.tag.chunks/)).toBeVisible();
+    expect(within(card).getByText(/knowledgeBase.tag.updatedAt/)).toBeVisible();
     expect(within(card).getByText("model").className).not.toContain("rounded");
-    expect(props.onDelete).toHaveBeenCalledWith("1");
-    expect(props.onClick).not.toHaveBeenCalled();
   });
 
   it("shows limited and unlimited capacity inline without progress", () => {
@@ -228,30 +351,6 @@ describe("local knowledge catalog", () => {
   it("reserves a single fixed-height tag row", () => {
     render(<KnowledgeBaseList {...baseProps()} />);
     expect(screen.getAllByTestId("knowledge-tags")[0]).toHaveClass("h-6");
-  });
-
-  it("retains read-only tag assignment while hiding edit and delete", async () => {
-    const props = {
-      ...baseProps(),
-      knowledgeBases: [knowledge(1, "READ_ONLY")],
-    };
-    render(<KnowledgeBaseList {...props} />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "skillRepository.common.moreActions" })
-    );
-    expect(
-      screen.queryByRole("menuitem", { name: "common.delete" })
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("menuitem", { name: "common.edit" })
-    ).not.toBeInTheDocument();
-    fireEvent.click(
-      await screen.findByRole("menuitem", {
-        name: "knowledgeBase.action.assignTags",
-      })
-    );
-    expect(screen.getByTestId("assign-dialog")).toHaveTextContent("false");
-    expect(props.onClick).not.toHaveBeenCalled();
   });
 
   it("pages a supplied local collection and clamps an out-of-range page", () => {

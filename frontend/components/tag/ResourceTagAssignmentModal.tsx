@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  Alert,
   App,
   Badge,
   Button,
@@ -215,10 +216,11 @@ export default function ResourceTagAssignmentModal({
   const assignmentsReady =
     assignmentKey !== null &&
     loadedAssignmentKey === assignmentKey &&
-    !assignmentState.loading;
+    !assignmentState.loading &&
+    !assignmentState.error;
 
   const saveSingle = useCallback(async () => {
-    if (!assignmentsReady || definitionsLoading) return;
+    if (!canEdit || !assignmentsReady || definitionsLoading) return;
     const valueIds = Object.values(selected).flat();
     if (valueIds.length > 100) {
       message.warning(t("tagManagement.warning.assignmentCapacity"));
@@ -246,6 +248,7 @@ export default function ResourceTagAssignmentModal({
   }, [
     assignmentState,
     assignmentsReady,
+    canEdit,
     definitionsLoading,
     message,
     onClose,
@@ -255,7 +258,7 @@ export default function ResourceTagAssignmentModal({
   ]);
 
   const saveBulk = useCallback(async () => {
-    if (!assignmentsReady || definitionsLoading) return;
+    if (!canEdit || !assignmentsReady || definitionsLoading) return;
     const targets = bulkTargets.filter((target) => target.resourceId.trim());
     if (targets.length === 0) return;
     const valueIds = Object.values(selected).flat();
@@ -294,6 +297,7 @@ export default function ResourceTagAssignmentModal({
   }, [
     assignmentsReady,
     bulkTargets,
+    canEdit,
     definitionsLoading,
     message,
     onClose,
@@ -419,7 +423,7 @@ export default function ResourceTagAssignmentModal({
       cancelText={t("common.cancel")}
       confirmLoading={saving}
       okButtonProps={{
-        disabled: saving || !assignmentsReady || definitionsLoading,
+        disabled: !canEdit || saving || !assignmentsReady || definitionsLoading,
       }}
       width={880}
       zIndex={1100}
@@ -427,6 +431,21 @@ export default function ResourceTagAssignmentModal({
       destroyOnHidden
     >
       <div className="flex flex-col gap-3">
+        {assignmentState.error && (
+          <Alert
+            type="error"
+            showIcon
+            title={t("tagManagement.message.assignmentsLoadFailed")}
+            action={
+              <Button
+                size="small"
+                onClick={() => void assignmentState.refresh()}
+              >
+                {t("repository.common.retry")}
+              </Button>
+            }
+          />
+        )}
         <Progress
           percent={capacityPercent}
           size="small"

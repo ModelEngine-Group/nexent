@@ -12,7 +12,10 @@ import React, {
 import { useTranslation } from "react-i18next";
 
 import {
+  Alert,
   Button,
+  Card,
+  Checkbox,
   Dropdown,
   InputNumber,
   Popover,
@@ -29,23 +32,26 @@ import {
   FilterOutlined,
 } from "@ant-design/icons";
 import {
+  ChevronDown,
   PencilRuler,
   Eye,
   Glasses,
   CircleOff,
-  MoreHorizontal,
   Search,
   Clock3,
   FolderOpen,
+  ListChecks,
+  Plus,
+  Tag as TagIcon,
+  Trash2,
+  X,
 } from "lucide-react";
 import { Can } from "@/components/permission/Can";
 import { usePermission } from "@/hooks/permission/usePermission";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
-import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
+import KnowledgeBaseBatchDeleteDialog from "./KnowledgeBaseBatchDeleteDialog";
 import PersonalKnowledgeBaseCapacityBar from "./PersonalKnowledgeBaseCapacityBar";
-import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
-import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import TagFilterControls from "@/components/tag/TagFilterControls";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
@@ -58,6 +64,10 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { formatDateOrFallback } from "@/lib/date";
 import { formatFileSize } from "@/lib/utils";
 import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
+import {
+  getTagDefinitionDisplayName,
+  getTagValueDisplayName,
+} from "@/lib/systemTagLabels";
 
 import log from "@/lib/logger";
 import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
@@ -224,7 +234,6 @@ interface KnowledgeBaseListProps {
   serverFiltered?: boolean;
   initialLoadPending?: boolean;
   onClick: (kb: KnowledgeBase) => void;
-  onDelete: (id: string) => void;
   onSync: () => void;
   onCreateNew: () => void;
   onDataMateConfig?: () => void;
@@ -233,7 +242,6 @@ interface KnowledgeBaseListProps {
   containerHeight?: string; // Container total height, consistent with DocumentList
   onKnowledgeBaseChange?: () => void; // Callback when knowledge base switches
   onCatalogRefresh?: () => void; // Callback to reload the catalog page after tag changes
-  onKnowledgeBaseUpdate?: (updatedKnowledgeBase: KnowledgeBase) => void; // Callback when knowledge base is updated
   // Optional controlled search / filter props (if parent wants to control filters)
   tagFilter?: TagResourcePredicate[];
   onTagFilterChange?: (values: TagResourcePredicate[]) => void;
@@ -263,7 +271,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   serverFiltered = false,
   initialLoadPending = false,
   onClick,
-  onDelete,
   onSync,
   onCreateNew,
   onDataMateConfig,
@@ -272,7 +279,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   containerHeight = "70vh", // Default container height consistent with DocumentList
   onKnowledgeBaseChange, // New: callback function when knowledge base switches
   onCatalogRefresh,
-  onKnowledgeBaseUpdate, // Callback when knowledge base is updated
   tagFilter,
   onTagFilterChange,
   searchQuery,
@@ -299,6 +305,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [gridColumnCount, setGridColumnCount] = useState(1);
   const [jumpPage, setJumpPage] = useState<number | null>(null);
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchSelection, setBatchSelection] = useState<string[]>([]);
+  const [batchFailures, setBatchFailures] = useState<string[]>([]);
+  const [batchDeleteTargets, setBatchDeleteTargets] = useState<KnowledgeBase[]>(
+    []
+  );
+  const canBatchDelete = permissionsReady && can("kb:delete");
+  const isBatchMode = batchMode && canBatchDelete;
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(tenantId);
@@ -354,13 +368,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
 
-  // Edit modal states
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [assignTarget, setAssignTarget] = useState<{
-    indexName: string;
-    canEdit: boolean;
-  } | null>(null);
-  const [tagManagementOpen, setTagManagementOpen] = useState(false);
   const [internalTagPredicates, setInternalTagPredicates] = useState<
     TagResourcePredicate[]
   >([]);
@@ -382,6 +389,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const {
     data: assignDefinitions,
     loading: assignDefinitionsLoading,
+    error: assignDefinitionsError,
     refresh: refreshAssignDefinitions,
   } = useTagDefinitions(defaultLibrary?.bucket_id ?? null, {
     enabled: tagsUiRequested,
@@ -393,21 +401,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const [tagLoading, setTagLoading] = useState(false);
   const [tagError, setTagError] = useState(false);
   const [tagRetry, setTagRetry] = useState(0);
-  const [editingKnowledge, setEditingKnowledge] =
-    useState<KnowledgeBase | null>(null);
-
-  // Open edit modal
-  const openEditModal = (kb: KnowledgeBase) => {
-    setEditingKnowledge(kb);
-    setEditModalVisible(true);
-  };
-
-  // Close edit modal
-  const closeEditModal = () => {
-    setEditModalVisible(false);
-    setEditingKnowledge(null);
-  };
-
   // Effective (controlled or uncontrolled) values
   const effectiveSearchKeyword =
     typeof searchQuery !== "undefined" ? searchQuery : searchKeyword;
@@ -433,6 +426,49 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             : [],
     [modelFilter, selectedModels]
   );
+  const quickTagOptions = (assignDefinitions ?? [])
+    .filter((definition) => definition.status === "active")
+    .flatMap((definition) =>
+      (definition.values ?? [])
+        .filter((value) => value.status === "active")
+        .map((value) => ({
+          key: `${definition.definition_id}:${value.value_id}`,
+          label:
+            definition.selection_mode === "no_value"
+              ? getTagDefinitionDisplayName(
+                  definition.definition_key,
+                  definition.definition_name,
+                  t
+                )
+              : getTagValueDisplayName(
+                  definition.definition_key,
+                  value.display_value,
+                  t
+                ),
+          predicate: {
+            definition_id: definition.definition_id,
+            value_ids: [value.value_id],
+          },
+        }))
+    );
+  const quickTagKey =
+    tagPredicates.length === 1 && tagPredicates[0].value_ids?.length === 1
+      ? `${tagPredicates[0].definition_id}:${tagPredicates[0].value_ids[0]}`
+      : null;
+  const quickTag = quickTagOptions.find(({ key }) => key === quickTagKey);
+  const allTagsLabel = t("knowledgeBase.tagFilter.all");
+  const quickTagStatus =
+    tagLibrariesError || assignDefinitionsError
+      ? { key: "retry", label: t("repository.common.retry") }
+      : !tagsUiRequested || tagLibrariesLoading || assignDefinitionsLoading
+        ? { key: "loading", label: t("common.loading"), disabled: true }
+        : quickTagOptions.length === 0
+          ? {
+              key: "empty",
+              label: t("tagManagement.empty.noActiveDefinitions"),
+              disabled: true,
+            }
+          : null;
 
   useEffect(() => {
     if (tagPredicates.length === 0) {
@@ -631,6 +667,32 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           currentPage * pageSize
         );
   const loading = isLoading || initialLoadPending || tagLoading;
+  const selectionScope = JSON.stringify([
+    currentPage,
+    pageSize,
+    effectiveSearchKeyword,
+    effectiveSelectedSources,
+    effectiveSelectedModels,
+    tagPredicates,
+  ]);
+  const selectableBatchItems = isBatchMode
+    ? pagedKnowledgeBases.filter(
+        (kb) =>
+          kb.permission !== "READ_ONLY" &&
+          (!kb.source ||
+            kb.source === "nexent" ||
+            kb.source === "elasticsearch")
+      )
+    : [];
+  const selectedBatchItems = selectableBatchItems.filter((kb) =>
+    batchSelection.includes(kb.id)
+  );
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- A new page or filter discards the previous selection.
+    setBatchSelection([]);
+    setBatchFailures([]);
+  }, [selectionScope, isBatchMode]);
 
   useEffect(() => {
     if (!loading && !error && !tagError && page > pageCount)
@@ -652,24 +714,73 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white">
-      <header className="flex h-12 shrink-0 items-center py-[10px]">
-        <h1 className="text-[20px] font-medium leading-7 text-[#191919]">
+      <header className="flex shrink-0 items-center pb-1 pt-2">
+        <h1 className="text-xl font-semibold leading-7 text-[var(--color-text-primary)]">
           {t("sidebar.knowledgeBaseConfig")}
         </h1>
       </header>
       <div
         data-testid="knowledge-catalog-toolbar"
-        className="mb-3 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-3"
+        className="my-4 flex shrink-0 flex-wrap items-center justify-between gap-3"
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+        <div className="flex min-w-0 flex-[1_1_22rem] items-center gap-2">
           <Input
-            placeholder={t("knowledgeBase.search.placeholder")}
-            prefix={<Search className="size-4 text-[#777777]" />}
+            aria-label={t("knowledgeBase.catalog.search")}
+            placeholder={t("knowledgeBase.catalog.search")}
+            prefix={
+              <Search
+                className="size-4 text-[var(--color-icon-secondary)]"
+                aria-hidden
+              />
+            }
             value={effectiveSearchKeyword}
             onChange={(event) => handleSearchChange(event.target.value)}
-            className="!h-8 !w-full sm:!w-[280px] lg:!w-[360px]"
+            className="!min-w-0 !max-w-96 !flex-1"
             allowClear
           />
+          <Dropdown
+            trigger={["click"]}
+            onOpenChange={(open) => {
+              if (open) setTagsUiRequested(true);
+            }}
+            menu={{
+              selectable: true,
+              selectedKeys: quickTag
+                ? [quickTag.key]
+                : tagPredicates.length === 0
+                  ? ["all"]
+                  : [],
+              items: [
+                { key: "all", label: allTagsLabel },
+                ...quickTagOptions.map(({ key, label }) => ({ key, label })),
+                ...(quickTagStatus ? [quickTagStatus] : []),
+              ],
+              onClick: ({ key }) => {
+                if (key === "retry") {
+                  if (tagLibrariesError) void refreshTagLibraries();
+                  else void refreshAssignDefinitions();
+                  return;
+                }
+                const option = quickTagOptions.find((item) => item.key === key);
+                setTagPredicates(option ? [option.predicate] : []);
+                onPageChange?.(1);
+              },
+            }}
+          >
+            <Button
+              className="shrink-0"
+              icon={<TagIcon className="size-4" aria-hidden />}
+              aria-haspopup="menu"
+            >
+              <span className="max-w-32 truncate">
+                {quickTag?.label ??
+                  (tagPredicates.length
+                    ? t("knowledgeBase.tagFilter.placeholder")
+                    : allTagsLabel)}
+              </span>
+              <ChevronDown className="size-3 shrink-0" aria-hidden />
+            </Button>
+          </Dropdown>
           <Popover
             trigger="click"
             placement="bottomRight"
@@ -678,7 +789,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               if (open) setTagsUiRequested(true);
             }}
             content={
-              <div className="w-[300px] space-y-3">
+              <div className="w-[300px] max-w-[calc(100vw-48px)] space-y-3">
                 {availableSources.length > 0 && (
                   <div>
                     <div className="mb-1 text-xs text-gray-500">
@@ -800,6 +911,16 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           </Popover>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canBatchDelete && (
+            <Button
+              icon={<ListChecks className="size-4" aria-hidden />}
+              aria-pressed={isBatchMode}
+              disabled={loading && !isBatchMode}
+              onClick={() => setBatchMode(!isBatchMode)}
+            >
+              {t("knowledgeBase.batch.manage")}
+            </Button>
+          )}
           <Button
             onClick={onSync}
             loading={syncLoading}
@@ -812,12 +933,33 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               {t("knowledgeBase.button.dataMateConfig")}
             </Button>
           )}
-          <Button type="primary" onClick={onCreateNew}>
+          <Button
+            type="primary"
+            icon={<Plus className="size-4" aria-hidden />}
+            onClick={onCreateNew}
+          >
             {t("knowledgeBase.card.create")}
           </Button>
         </div>
       </div>
-      <div className="min-h-0 max-h-[calc(100%-160px)] flex-none overflow-y-auto overflow-x-hidden px-px pb-3 pt-px">
+      {isBatchMode && batchFailures.length > 0 && (
+        <Alert
+          className="mb-3 shrink-0"
+          type="error"
+          showIcon
+          title={t("knowledgeBase.batch.partialFailure", {
+            count: batchFailures.length,
+          })}
+          description={
+            <ul className="max-h-24 list-inside list-disc overflow-y-auto">
+              {batchFailures.map((failure, index) => (
+                <li key={index}>{failure}</li>
+              ))}
+            </ul>
+          }
+        />
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-1 pb-4">
         {error || tagError ? (
           <div
             role="alert"
@@ -843,7 +985,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         <div
           ref={gridRef}
           data-testid="knowledge-catalog-grid"
-          className="grid gap-x-4 gap-y-3"
+          className="grid gap-4"
           style={{
             gridTemplateColumns: `repeat(${gridColumnCount}, minmax(0, 1fr))`,
           }}
@@ -853,6 +995,9 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             !tagError &&
             pagedKnowledgeBases.map((kb) => {
               const isActive = activeKnowledgeBase?.id === kb.id;
+              const batchSelectable = selectableBatchItems.includes(kb);
+              const batchChecked =
+                batchSelectable && batchSelection.includes(kb.id);
               const description =
                 kb.description?.trim() &&
                 kb.description !== "Elasticsearch index"
@@ -868,226 +1013,211 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 quotaData,
                 t
               );
-
               return (
                 <article
                   key={kb.id}
                   data-knowledge-base-row
                   aria-label={kb.name}
-                  role="button"
-                  tabIndex={0}
-                  className={`group relative flex h-full min-h-[220px] min-w-0 cursor-pointer flex-col gap-2 rounded-[12px] bg-white p-4 ring-1 transition-colors hover:ring-[#a8a8a8] focus-visible:ring-[#777777] ${isActive ? "ring-[#a8a8a8]" : "ring-[rgba(201,201,201,0.4)]"}`}
-                  onClick={() => handleKnowledgeBaseSelect(kb)}
+                  role={isBatchMode ? undefined : "button"}
+                  tabIndex={isBatchMode ? undefined : 0}
+                  className={`group min-w-0 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus)] ${!isBatchMode || batchSelectable ? "cursor-pointer" : ""}`}
+                  onClick={() => {
+                    if (!isBatchMode) handleKnowledgeBaseSelect(kb);
+                    else if (batchSelectable)
+                      setBatchSelection((current) =>
+                        current.includes(kb.id)
+                          ? current.filter((id) => id !== kb.id)
+                          : [...current, kb.id]
+                      );
+                  }}
                   onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
+                    if (isBatchMode || event.target !== event.currentTarget)
+                      return;
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       handleKnowledgeBaseSelect(kb);
                     }
                   }}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                        <FolderOpen className="h-5 w-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <h3
-                          className="truncate text-[16px] font-medium leading-6 text-[#191919]"
-                          title={kb.name}
-                        >
-                          {kb.name}
-                        </h3>
-                        <span className="mt-1 block truncate text-xs text-gray-400">
-                          {t("knowledgeBase.tag.source", { source })}
-                        </span>
-                      </div>
-                    </div>
-
-                    <Dropdown
-                      trigger={["click"]}
-                      menu={{
-                        items: [
-                          ...(permissionsReady && can("kb:update")
-                            ? [
-                                {
-                                  key: "tags",
-                                  label: t("knowledgeBase.action.assignTags"),
-                                },
-                                ...((!kb.source ||
-                                  kb.source === "nexent" ||
-                                  kb.source === "elasticsearch") &&
-                                kb.permission !== "READ_ONLY"
-                                  ? [{ key: "edit", label: t("common.edit") }]
-                                  : []),
-                              ]
-                            : []),
-                          ...(permissionsReady &&
-                          can("kb:delete") &&
-                          kb.permission !== "READ_ONLY"
-                            ? [
-                                {
-                                  key: "delete",
-                                  label: t("common.delete"),
-                                  danger: true,
-                                },
-                              ]
-                            : []),
-                        ],
-                        onClick: ({ key, domEvent }) => {
-                          domEvent.stopPropagation();
-                          if (key === "tags") {
-                            setTagsUiRequested(true);
-                            setAssignTarget({
-                              indexName: kb.id,
-                              canEdit: kb.permission !== "READ_ONLY",
-                            });
-                          } else if (key === "edit") {
-                            openEditModal(kb);
-                          } else if (key === "delete") {
-                            onDelete(kb.id);
-                          }
-                        },
-                      }}
-                    >
-                      <button
-                        type="button"
-                        aria-label={t("skillRepository.common.moreActions")}
-                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-[#191919] hover:bg-[#f0f0f0]"
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                      >
-                        <MoreHorizontal className="size-4" aria-hidden />
-                      </button>
-                    </Dropdown>
-                  </div>
-
-                  <p className="line-clamp-2 text-sm leading-5 text-[#1a1a1a]">
-                    {description}
-                  </p>
-
-                  <div className="flex min-w-0 items-center justify-start gap-3 text-xs leading-5 text-gray-500">
-                    <span className="shrink-0">
-                      {t("knowledgeBase.create.field.embeddingModel")}
-                    </span>
-                    <span
-                      className="min-w-0 truncate text-sm text-[#1a1a1a]"
-                      title={getModelDisplayName(kb.embeddingModel)}
-                    >
-                      {getModelDisplayName(kb.embeddingModel)}
-                    </span>
-                  </div>
-
-                  {quotaData && (
-                    <Tooltip
-                      title={`${t("knowledgeBase.capacity.available")}: ${getKnowledgeBaseQuotaDisplay(quotaData, t).availableCapacity}`}
-                    >
-                      <div
-                        data-testid="knowledge-capacity"
-                        className="flex min-w-0 items-center justify-start gap-3 text-xs leading-5"
-                      >
-                        <span className="shrink-0 text-gray-500">
-                          {t("knowledgeBase.capacity.title")}
-                        </span>
-                        <span className="min-w-0 truncate text-sm tabular-nums text-[#1a1a1a]">
-                          {quotaData.actual_readable ||
-                            formatFileSize(quotaData.actual_bytes)}
-                          <span className="mx-1 text-gray-300">/</span>
-                          {totalCapacity}
-                        </span>
-                      </div>
-                    </Tooltip>
-                  )}
-
-                  <KnowledgeTagRow>
-                    <Can permission="group:read">
-                      {kb.ingroup_permission !== "PRIVATE" &&
-                        groupNames.slice(0, 2).map((groupName) => (
-                          <span
-                            key={groupName}
-                            className="inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700"
-                            title={groupName}
-                          >
-                            <span className="min-w-0 truncate">
-                              {groupName}
+                  <Card
+                    variant="outlined"
+                    className={`h-full overflow-hidden transition-colors hover:!border-[var(--color-brand-hover)] ${isActive || batchChecked ? "!border-[var(--color-border-focus)]" : ""}`}
+                    styles={{
+                      body: {
+                        display: "flex",
+                        flexDirection: "column",
+                        height: "100%",
+                        padding: 0,
+                      },
+                    }}
+                  >
+                    <div className="flex flex-1 flex-col gap-3 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-select)] text-[var(--color-brand)]">
+                            <FolderOpen className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <h3
+                              className="truncate text-base font-semibold leading-6 text-[var(--color-text-primary)]"
+                              title={kb.name}
+                            >
+                              {kb.name}
+                            </h3>
+                            <span className="block truncate text-xs text-[var(--color-text-secondary)]">
+                              {t("knowledgeBase.tag.source", { source })}
                             </span>
+                          </div>
+                        </div>
+
+                        {isBatchMode && (
+                          <span onClick={(event) => event.stopPropagation()}>
+                            <Checkbox
+                              aria-label={kb.name}
+                              checked={batchChecked}
+                              disabled={!batchSelectable}
+                              onChange={(event) =>
+                                setBatchSelection((current) =>
+                                  event.target.checked
+                                    ? [...current, kb.id]
+                                    : current.filter((id) => id !== kb.id)
+                                )
+                              }
+                            />
                           </span>
-                        ))}
-                    </Can>
-                    <Tooltip
-                      title={t(
-                        getPermissionTooltipKey(kb.ingroup_permission || "")
+                        )}
+                      </div>
+
+                      <p className="line-clamp-2 min-h-10 text-sm leading-5 text-[var(--color-text-secondary)]">
+                        {description}
+                      </p>
+
+                      <div className="flex min-w-0 items-center justify-start gap-3 text-xs leading-5 text-gray-500">
+                        <span className="shrink-0">
+                          {t("knowledgeBase.create.field.embeddingModel")}
+                        </span>
+                        <span
+                          className="min-w-0 truncate text-sm text-[var(--color-text-primary)]"
+                          title={getModelDisplayName(kb.embeddingModel)}
+                        >
+                          {getModelDisplayName(kb.embeddingModel)}
+                        </span>
+                      </div>
+
+                      {quotaData && (
+                        <Tooltip
+                          title={`${t("knowledgeBase.capacity.available")}: ${getKnowledgeBaseQuotaDisplay(quotaData, t).availableCapacity}`}
+                        >
+                          <div
+                            data-testid="knowledge-capacity"
+                            className="flex min-w-0 items-center justify-start gap-3 text-xs leading-5"
+                          >
+                            <span className="shrink-0 text-gray-500">
+                              {t("knowledgeBase.capacity.title")}
+                            </span>
+                            <span className="min-w-0 truncate text-sm tabular-nums text-[var(--color-text-primary)]">
+                              {quotaData.actual_readable ||
+                                formatFileSize(quotaData.actual_bytes)}
+                              <span className="mx-1 text-gray-300">/</span>
+                              {totalCapacity}
+                            </span>
+                          </div>
+                        </Tooltip>
                       )}
-                    >
-                      <span className="inline-flex max-w-[120px] min-w-0 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-normal text-gray-600">
-                        {getPermissionIcon(kb.ingroup_permission || "")}
-                        <span className="min-w-0 truncate">
-                          {t(
+
+                      <KnowledgeTagRow>
+                        <Can permission="group:read">
+                          {kb.ingroup_permission !== "PRIVATE" &&
+                            groupNames.slice(0, 2).map((groupName) => (
+                              <span
+                                key={groupName}
+                                className="inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700"
+                                title={groupName}
+                              >
+                                <span className="min-w-0 truncate">
+                                  {groupName}
+                                </span>
+                              </span>
+                            ))}
+                        </Can>
+                        <Tooltip
+                          title={t(
                             getPermissionTooltipKey(kb.ingroup_permission || "")
                           )}
-                        </span>
-                      </span>
-                    </Tooltip>
-                    {source === "datamate" ? (
-                      <ResourceTagChips
-                        resourceType="knowledge_base"
-                        resourceId={kb.id}
-                        max={99}
-                        singleLine
-                        className="knowledge-tag-more-wrap min-w-0 max-w-full"
-                        tagClassName={CARD_TAG_CLASSNAME}
-                      />
-                    ) : (
-                      <KnowledgeValueTags values={kb.tags ?? []} />
-                    )}
-                    {kb.is_multimodal && hasIndexedDocumentsAndChunks(kb) && (
-                      <span
-                        className={`inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-normal ${KB_TAG_VARIANTS.red}`}
-                      >
-                        <span className="min-w-0 truncate">multimodal</span>
-                      </span>
-                    )}
+                        >
+                          <span className="inline-flex max-w-[120px] min-w-0 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-normal text-gray-600">
+                            {getPermissionIcon(kb.ingroup_permission || "")}
+                            <span className="min-w-0 truncate">
+                              {t(
+                                getPermissionTooltipKey(
+                                  kb.ingroup_permission || ""
+                                )
+                              )}
+                            </span>
+                          </span>
+                        </Tooltip>
+                        {source === "datamate" ? (
+                          <ResourceTagChips
+                            resourceType="knowledge_base"
+                            resourceId={kb.id}
+                            max={99}
+                            singleLine
+                            className="knowledge-tag-more-wrap min-w-0 max-w-full"
+                            tagClassName={CARD_TAG_CLASSNAME}
+                          />
+                        ) : (
+                          <KnowledgeValueTags values={kb.tags ?? []} />
+                        )}
+                        {kb.is_multimodal &&
+                          hasIndexedDocumentsAndChunks(kb) && (
+                            <span
+                              className={`inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-normal ${KB_TAG_VARIANTS.red}`}
+                            >
+                              <span className="min-w-0 truncate">
+                                multimodal
+                              </span>
+                            </span>
+                          )}
 
-                    {kb.preserve_source_file === false && (
-                      <span
-                        className={`inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-normal ${KB_TAG_VARIANTS.warning}`}
-                      >
-                        <span className="min-w-0 truncate">
-                          {t("knowledgeBase.tag.noPreserveSourceFile")}
-                        </span>
-                      </span>
-                    )}
-                  </KnowledgeTagRow>
+                        {kb.preserve_source_file === false && (
+                          <span
+                            className={`inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-normal ${KB_TAG_VARIANTS.warning}`}
+                          >
+                            <span className="min-w-0 truncate">
+                              {t("knowledgeBase.tag.noPreserveSourceFile")}
+                            </span>
+                          </span>
+                        )}
+                      </KnowledgeTagRow>
+                    </div>
 
-                  <div className="mt-1 flex flex-wrap items-center justify-start gap-x-2 gap-y-1 border-t border-gray-100 pt-3 text-xs leading-5 text-gray-500">
-                    <span
-                      className="inline-flex min-w-0 items-center gap-1"
-                      title={updatedDate}
-                    >
-                      <Clock3 className="size-3 shrink-0" />
-                      <span className="truncate">
-                        {t("knowledgeBase.tag.updatedAt", {
-                          date: updatedDate,
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--color-border-separator)] px-4 py-3 text-xs leading-5 text-[var(--color-text-secondary)]">
+                      <span className="whitespace-nowrap">
+                        {t("knowledgeBase.tag.documents", {
+                          count: kb.documentCount || 0,
                         })}
                       </span>
-                    </span>
-                    <span aria-hidden="true" className="text-gray-300">
-                      |
-                    </span>
-                    <span className="whitespace-nowrap">
-                      {t("knowledgeBase.tag.documents", {
-                        count: kb.documentCount || 0,
-                      })}
-                    </span>
-                    <span aria-hidden="true" className="text-gray-300">
-                      |
-                    </span>
-                    <span className="whitespace-nowrap">
-                      {t("knowledgeBase.tag.chunks", {
-                        count: kb.chunkCount || 0,
-                      })}
-                    </span>
-                  </div>
+                      <span aria-hidden="true" className="text-gray-300">
+                        |
+                      </span>
+                      <span className="whitespace-nowrap">
+                        {t("knowledgeBase.tag.chunks", {
+                          count: kb.chunkCount || 0,
+                        })}
+                      </span>
+                      <span
+                        className="ml-auto inline-flex min-w-0 items-center gap-1"
+                        title={updatedDate}
+                      >
+                        <Clock3 className="size-3 shrink-0" aria-hidden />
+                        <span className="truncate">
+                          {t("knowledgeBase.tag.updatedAt", {
+                            date: updatedDate,
+                          })}
+                        </span>
+                      </span>
+                    </div>
+                  </Card>
                 </article>
               );
             })}
@@ -1167,42 +1297,81 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
       {showPersonalCapacity && <PersonalKnowledgeBaseCapacityBar />}
 
-      {/* Edit Knowledge Base Modal */}
-      <KnowledgeBaseEditModal
-        open={editModalVisible}
-        knowledgeBase={editingKnowledge}
-        tenantId={tenantId}
-        onCancel={closeEditModal}
-        onSuccess={(updatedKnowledgeBase) => {
-          if (onKnowledgeBaseUpdate) {
-            onKnowledgeBaseUpdate(updatedKnowledgeBase);
-          }
-        }}
-      />
-      <TagDefinitionManagementModal
-        open={tagManagementOpen}
-        onClose={() => {
-          setTagManagementOpen(false);
-          void refreshAssignDefinitions();
-        }}
-        bucketId={defaultLibrary?.bucket_id ?? 0}
-        bucketName={defaultLibrary?.bucket_name ?? ""}
-        canManage={true}
-      />
-      <ResourceTagAssignmentModal
-        open={assignTarget !== null}
-        onClose={() => setAssignTarget(null)}
-        resourceType="knowledge_base"
-        resourceId={assignTarget?.indexName ?? ""}
-        definitions={assignDefinitions ?? []}
-        definitionsLoading={assignDefinitionsLoading}
-        canEdit={assignTarget?.canEdit ?? false}
-        onSaved={() => onCatalogRefresh?.()}
-        onManageDefinitions={() => {
-          setTagsUiRequested(true);
-          setTagManagementOpen(true);
-        }}
-      />
+      {isBatchMode && (
+        <div
+          role="toolbar"
+          aria-label={t("knowledgeBase.batch.manage")}
+          className="z-10 mx-auto mb-3 flex max-w-full shrink-0 flex-wrap items-center justify-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-2)] px-3 py-2 shadow-lg"
+        >
+          <Checkbox
+            disabled={
+              loading ||
+              Boolean(error) ||
+              tagError ||
+              selectableBatchItems.length === 0
+            }
+            checked={
+              selectedBatchItems.length > 0 &&
+              selectedBatchItems.length === selectableBatchItems.length
+            }
+            indeterminate={
+              selectedBatchItems.length > 0 &&
+              selectedBatchItems.length < selectableBatchItems.length
+            }
+            onChange={(event) =>
+              setBatchSelection(
+                event.target.checked
+                  ? selectableBatchItems.map((kb) => kb.id)
+                  : []
+              )
+            }
+          >
+            {t("knowledgeBase.batch.selectPage")}
+          </Checkbox>
+          <span
+            aria-live="polite"
+            className="text-sm text-[var(--color-text-secondary)]"
+          >
+            {t("knowledgeBase.batch.selectedCount", {
+              count: selectedBatchItems.length,
+            })}
+          </span>
+          <Button
+            danger
+            icon={<Trash2 className="size-4" aria-hidden />}
+            disabled={
+              loading ||
+              Boolean(error) ||
+              tagError ||
+              selectedBatchItems.length === 0
+            }
+            onClick={() => setBatchDeleteTargets(selectedBatchItems)}
+          >
+            {t("knowledgeBase.batch.deleteSelected")}
+          </Button>
+          <Button
+            type="text"
+            icon={<X className="size-4" aria-hidden />}
+            aria-label={t("knowledgeBase.batch.exit")}
+            onClick={() => setBatchMode(false)}
+          />
+        </div>
+      )}
+      {batchDeleteTargets.length > 0 && (
+        <KnowledgeBaseBatchDeleteDialog
+          targets={batchDeleteTargets}
+          canDelete={canBatchDelete}
+          onCancel={() => setBatchDeleteTargets([])}
+          onComplete={(failures) => {
+            setBatchDeleteTargets([]);
+            const failedIds = Object.keys(failures);
+            setBatchSelection(failedIds);
+            setBatchFailures(Object.values(failures));
+            if (failedIds.length < batchDeleteTargets.length)
+              onCatalogRefresh?.();
+          }}
+        />
+      )}
     </div>
   );
 };

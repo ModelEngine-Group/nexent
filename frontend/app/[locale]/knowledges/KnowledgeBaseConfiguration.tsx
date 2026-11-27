@@ -14,7 +14,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { App, Modal, theme, Button, Input } from "antd";
+import { App, Modal, Drawer, theme, Button, Input } from "antd";
+import { FolderPlus } from "lucide-react";
 import {
   ArrowLeftOutlined,
   ExclamationCircleFilled,
@@ -622,7 +623,11 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Handle knowledge base deletion
   const handleDelete = async (id: string) => {
     // Find the knowledge base to check its source
-    const kb = kbState.knowledgeBases.find((kb) => kb.id === id);
+    const kb =
+      kbState.knowledgeBases.find((kb) => kb.id === id) ??
+      (kbState.activeKnowledgeBase?.id === id
+        ? kbState.activeKnowledgeBase
+        : undefined);
 
     if (kb?.source === "datamate") {
       // Show informational message for DataMate knowledge bases
@@ -832,7 +837,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     ? `Storage full — ${quotaUsage?.total_readable || "0"} / ${quotaUsage?.hard_limit_readable || "?"}. Uploads are blocked.`
     : undefined;
 
-  // Refresh the catalog page after card tags change, keeping the current
+  // Refresh the catalog page after detail changes, keeping the current
   // keyword, filters and page.
   const refreshKnowledgeBaseCatalog = useCallback(() => {
     void fetchKnowledgeBases(false, true, false, {
@@ -1206,7 +1211,6 @@ function DataConfig({ isActive }: DataConfigProps) {
                 serverFiltered
                 initialLoadPending={initialListPending}
                 onClick={handleKnowledgeBaseClick}
-                onDelete={handleDelete}
                 onSync={handleSync}
                 onCreateNew={handleCreateNew}
                 onDataMateConfig={handleDataMateConfig}
@@ -1215,16 +1219,6 @@ function DataConfig({ isActive }: DataConfigProps) {
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                 onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
                 onCatalogRefresh={refreshKnowledgeBaseCatalog}
-                onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
-                  // Update knowledge base in list and active knowledge base
-                  updateKnowledgeBase(updatedKnowledgeBase);
-                  if (
-                    kbState.activeKnowledgeBase &&
-                    kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id
-                  ) {
-                    setActiveKnowledgeBase(updatedKnowledgeBase);
-                  }
-                }}
                 // Search and filter props
                 tagFilter={tagFilter}
                 onTagFilterChange={(values) => {
@@ -1251,9 +1245,23 @@ function DataConfig({ isActive }: DataConfigProps) {
                   setListPage(1);
                 }}
               />
-              <Modal
+              <Drawer
                 open={isCreatingMode}
-                title={null}
+                title={
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-select)] text-[var(--color-brand)]">
+                      <FolderPlus size={21} aria-hidden />
+                    </span>
+                    <div>
+                      <h2 className="text-lg font-semibold">
+                        {t("document.title.createNew")}
+                      </h2>
+                      <p className="mt-1 text-sm font-normal text-[var(--color-text-secondary)]">
+                        {t("knowledgeBase.create.subtitle")}
+                      </p>
+                    </div>
+                  </div>
+                }
                 footer={
                   <div className="flex justify-end gap-3">
                     <Button
@@ -1272,72 +1280,73 @@ function DataConfig({ isActive }: DataConfigProps) {
                         hasClickedUpload ||
                         docState.isUploading
                       }
-                      onClick={() => void handleFileUpload(uploadFiles)}
+                      onClick={() => {
+                        void handleFileUpload(uploadFiles).catch(() => {
+                          // The upload handler reports creation and upload errors.
+                        });
+                      }}
                     >
                       {t("knowledgeBase.create.submit")}
                     </Button>
                   </div>
                 }
-                width={640}
-                centered
+                placement="right"
+                size="min(640px, 100vw)"
+                closable={{
+                  placement: "end",
+                  disabled: hasClickedUpload || docState.isUploading,
+                }}
+                keyboard={!hasClickedUpload && !docState.isUploading}
                 mask={{ closable: false }}
                 destroyOnHidden
-                onCancel={handleCloseCreateModal}
+                onClose={handleCloseCreateModal}
                 styles={{
-                  container: { padding: 0 },
                   body: { padding: 0 },
-                  footer: {
-                    margin: 0,
-                    padding: "12px 20px 16px",
-                    borderTop: "1px solid #f0f0f0",
-                  },
+                  header: { padding: "20px 24px" },
+                  footer: { padding: "12px 24px" },
                 }}
-                getContainer={() => contentRef.current || document.body}
               >
-                <div className="overflow-visible">
-                  <DocumentList
-                    key="create-mode"
-                    documents={[]}
-                    onDelete={() => {}}
-                    knowledgeBaseSource=""
-                    isCreatingMode={true}
-                    knowledgeBaseId=""
-                    knowledgeBaseName={newKbName}
-                    onNameChange={handleNameChange}
-                    selectedFiles={uploadFiles}
-                    containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
-                    hasDocuments={hasClickedUpload || docState.isUploading}
-                    // Group permission and user groups for create mode
-                    ingroupPermission={newKbIngroupPermission}
-                    onIngroupPermissionChange={setNewKbIngroupPermission}
-                    selectedGroupIds={newKbGroupIds}
-                    onSelectedGroupIdsChange={setNewKbGroupIds}
-                    preserveSourceFile={newKbPreserveSourceFile}
-                    onPreserveSourceFileChange={setNewKbPreserveSourceFile}
-                    quotaLimitBytes={newKbQuotaBytes}
-                    onQuotaLimitBytesChange={setNewKbQuotaBytes}
-                    // Embedding model for create mode
-                    availableEmbeddingModels={availableEmbeddingModels}
-                    selectedEmbeddingModel={newKbEmbeddingModel}
-                    onEmbeddingModelChange={setNewKbEmbeddingModel}
-                    // v2.6.0: embedding model params override
-                    embeddingModelParamsOverride={newKbEmbeddingParamsOverride}
-                    onEmbeddingModelParamsOverrideChange={
-                      setNewKbEmbeddingParamsOverride
-                    }
-                    // Upload related props
-                    isDragging={uiState.isDragging}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onFileSelect={handleFileSelect}
-                    onUpload={handleFileUpload}
-                    isUploading={docState.isUploading}
-                    uploadStorageBlocked={uploadStorageBlocked}
-                    uploadStorageBlockedMessage={uploadStorageBlockedMessage}
-                  />
-                </div>
-              </Modal>
+                <DocumentList
+                  key="create-mode"
+                  documents={[]}
+                  onDelete={() => {}}
+                  knowledgeBaseSource=""
+                  isCreatingMode={true}
+                  knowledgeBaseId=""
+                  knowledgeBaseName={newKbName}
+                  onNameChange={handleNameChange}
+                  selectedFiles={uploadFiles}
+                  hasDocuments={hasClickedUpload || docState.isUploading}
+                  // Group permission and user groups for create mode
+                  ingroupPermission={newKbIngroupPermission}
+                  onIngroupPermissionChange={setNewKbIngroupPermission}
+                  selectedGroupIds={newKbGroupIds}
+                  onSelectedGroupIdsChange={setNewKbGroupIds}
+                  preserveSourceFile={newKbPreserveSourceFile}
+                  onPreserveSourceFileChange={setNewKbPreserveSourceFile}
+                  quotaLimitBytes={newKbQuotaBytes}
+                  onQuotaLimitBytesChange={setNewKbQuotaBytes}
+                  // Embedding model for create mode
+                  availableEmbeddingModels={availableEmbeddingModels}
+                  selectedEmbeddingModel={newKbEmbeddingModel}
+                  onEmbeddingModelChange={setNewKbEmbeddingModel}
+                  // v2.6.0: embedding model params override
+                  embeddingModelParamsOverride={newKbEmbeddingParamsOverride}
+                  onEmbeddingModelParamsOverrideChange={
+                    setNewKbEmbeddingParamsOverride
+                  }
+                  // Upload related props
+                  isDragging={uiState.isDragging}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onFileSelect={handleFileSelect}
+                  onUpload={handleFileUpload}
+                  isUploading={docState.isUploading}
+                  uploadStorageBlocked={uploadStorageBlocked}
+                  uploadStorageBlockedMessage={uploadStorageBlockedMessage}
+                />
+              </Drawer>
             </>
           ) : (
             <div className="flex h-full min-h-0 flex-col gap-3">
@@ -1364,11 +1373,19 @@ function DataConfig({ isActive }: DataConfigProps) {
                   knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
                   knowledgeBaseId={kbState.activeKnowledgeBase.id}
                   knowledgeBaseName={viewingKbName}
+                  catalogKnowledgeBase={kbState.activeKnowledgeBase}
+                  onCatalogRefresh={refreshKnowledgeBaseCatalog}
+                  onDeleteKnowledgeBase={() =>
+                    void handleDelete(kbState.activeKnowledgeBase!.id)
+                  }
+                  onCatalogKnowledgeBaseChange={(updatedKnowledgeBase) => {
+                    updateKnowledgeBase(updatedKnowledgeBase);
+                    setActiveKnowledgeBase(updatedKnowledgeBase);
+                  }}
                   quotaStatus={activeKnowledgeBaseQuota}
                   knowledgeBaseModel={
                     kbState.activeKnowledgeBase.embeddingModel
                   }
-                  containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                   hasDocuments={viewingDocuments.length > 0}
                   isNewlyCreatedAndWaiting={isNewlyCreatedAndWaiting}
                   onChunkCountChange={() => {

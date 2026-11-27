@@ -36,7 +36,7 @@ case:
     expected: 卡片行内直接渲染投影的 kb.tags 值（KnowledgeValueTags），不再逐卡请求 ResourceTagChips/getAssignments。
   - order: 4
     action: 断言 tagManagementApi.filterResourceIds 以 resource_type="knowledge_base"、当前 KB id 字符串数组、当前 tagPredicates 为参数被调用。
-    expected: kb:update 权限才展示“编辑标签”行菜单入口；READ_ONLY 权限 KB 的分配为只读禁用（canEdit=false）。
+    expected: 卡片直接打开详情。详情中的标签入口受 kb:update 权限控制，READ_ONLY 知识库只能查看标签（canEdit=false）。
   - order: 5
     action: 注入 filterResourceIds 返回部分 KB 的 matched_resource_ids，断言列表仅渲染匹配 KB；点击清空后 tagPredicates 置空、列表恢复全量。
     expected: 标签定义管理 Modal 从分配弹窗的“标签管理”链接打开，使用 default_resource 库的 bucketId，关闭时触发标签定义刷新。
@@ -44,7 +44,7 @@ case:
     action: 断言每行按 kb.tags 渲染投影标签值，且不调用 getAssignments；标签元数据在打开标签 UI 前保持懒加载。
     expected: 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。
   - order: 7
-    action: '在 kb:update 权限下通过行内“更多操作”→“编辑标签”打开分配弹窗，断言 canEdit=kb.permission !== "READ_ONLY"；对
+    action: '在 kb:update 权限下从知识库详情点击“编辑标签”或“查看标签”打开分配弹窗，断言 canEdit=kb.permission !== "READ_ONLY"；对
       permission=READ_ONLY 的 KB 断言 canEdit=false 且 ResourceTagAssignmentModal 只读禁用。'
     expected: 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。
   - order: 8
@@ -55,10 +55,27 @@ case:
   - 无谓词时标签筛选按钮 aria-pressed=false 且列表不过滤；选择谓词后 aria-pressed=true 并出现清空入口。
   - filterResourceIds 以 resource_type=knowledge_base 和当前 KB id 列表为参数调用，其 matched_resource_ids 驱动列表过滤，谓词清空后恢复全量。
   - 卡片行内直接渲染投影的 kb.tags 值（KnowledgeValueTags），不再逐卡请求 ResourceTagChips/getAssignments。
-  - kb:update 权限才展示“编辑标签”行菜单入口；READ_ONLY 权限 KB 的分配为只读禁用（canEdit=false）。
+  - 卡片直接打开详情。详情中的标签入口受 kb:update 权限控制，READ_ONLY 知识库只能查看标签（canEdit=false）。
   - 标签定义管理 Modal 从分配弹窗的“标签管理”链接打开，使用 default_resource 库的 bucketId，关闭时触发标签定义刷新。
   - 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。
   forbidden_side_effects: []
+  acceptance:
+  - id: AC-01
+    description: 保留组合筛选、按资源匹配和清空恢复。
+    steps: [1, 2, 3, 4, 5]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: 列表使用投影标签并延迟读取标签定义。
+    steps: [6]
+    expected_results: [3]
+  - id: AC-03
+    description: 卡片直达详情；标签分配遵循编辑权限和只读规则。
+    steps: [7]
+    expected_results: [4]
+  - id: AC-04
+    description: 从详情的标签分配入口管理标签定义并在关闭后刷新。
+    steps: [8]
+    expected_results: [5, 6]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
@@ -72,6 +89,6 @@ case:
   - 无谓词时标签筛选按钮 aria-pressed=false 且列表不过滤；选择谓词后 aria-pressed=true 并出现清空入口。
   - filterResourceIds 以 resource_type=knowledge_base 和当前 KB id 列表为参数调用，其 matched_resource_ids 驱动列表过滤，谓词清空后恢复全量。
   - 卡片行内直接渲染投影的 kb.tags 值（KnowledgeValueTags），不再逐卡请求 ResourceTagChips/getAssignments。
-  - kb:update 权限才展示“编辑标签”行菜单入口；READ_ONLY 权限 KB 的分配为只读禁用（canEdit=false）。
+  - 卡片直接打开详情。详情中的标签入口受 kb:update 权限控制，READ_ONLY 知识库只能查看标签（canEdit=false）。
   - 标签定义管理 Modal 从分配弹窗的“标签管理”链接打开，使用 default_resource 库的 bucketId，关闭时触发标签定义刷新。
   - 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。

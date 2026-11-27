@@ -13,6 +13,7 @@ Main features include:
 """
 
 import asyncio
+import json
 import time
 import uuid
 from datetime import datetime, timezone
@@ -175,11 +176,13 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 try:
                     # Stream the summary character by character
                     for char in final_summary:
-                        yield f'data: {{"status": "success", "message": "{char}"}}\n\n'
+                        payload = json.dumps({"status": "success", "message": char}, ensure_ascii=False)
+                        yield f"data: {payload}\n\n"
                         await asyncio.sleep(0.01)
                     yield 'data: {"status": "completed"}\n\n'
                 except Exception as e:
-                    yield f'data: {{"status": "error", "message": "{e}"}}\n\n'
+                    payload = json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
+                    yield f"data: {payload}\n\n"
 
             return StreamingResponse(generate_summary(), media_type="text/event-stream")
 

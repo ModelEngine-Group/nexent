@@ -3,11 +3,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
+import KnowledgeBaseDetailTags from '@/app/[locale]/knowledges/components/knowledge/KnowledgeBaseDetailTags';
 import KnowledgeBaseList from '@/app/[locale]/knowledges/components/knowledge/KnowledgeBaseList';
 import { tagManagementApi } from '@/services/tagManagementService';
 import type { KnowledgeBase } from '@/types/knowledgeBase';
 import type { TagDefinition, TagLibrary } from '@/types/tagManagement';
 
+const permissions = vi.hoisted(() => ({ edit: true }));
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-i18next')>()),
   useTranslation: () => ({ t: (key: string) => key }),
@@ -44,7 +46,7 @@ vi.mock('@/hooks/group/useGroupList', () => ({
 }));
 
 vi.mock('@/components/permission/Can', () => ({
-  Can: ({ children }: any) => children,
+  Can: ({ children, permission }: any) => permission !== 'kb:update' || permissions.edit ? children : null,
 }));
 
 vi.mock('@/hooks/permission/usePermission', () => ({
@@ -76,7 +78,7 @@ vi.mock('@/components/tag/ResourceTagAssignmentModal', () => ({
   default: ({ open, canEdit, resourceId, onManageDefinitions }: any) =>
     open ? (
       <div data-testid='resource-tag-assignment-modal' data-can-edit={String(canEdit)} data-resource-id={resourceId}>
-        <button onClick={onManageDefinitions}>open-tag-definitions</button>
+        {onManageDefinitions && <button onClick={onManageDefinitions}>open-tag-definitions</button>}
       </div>
     ) : null,
 }));
@@ -89,10 +91,6 @@ vi.mock('@/components/tag/TagDefinitionManagementModal', () => ({
         <button onClick={onClose}>close-def-modal</button>
       </div>
     ) : null,
-}));
-
-vi.mock('@/app/[locale]/knowledges/components/knowledge/KnowledgeBaseEditModal', () => ({
-  KnowledgeBaseEditModal: () => null,
 }));
 
 vi.mock('@/app/[locale]/knowledges/components/knowledge/PersonalKnowledgeBaseCapacityBar', () => ({
@@ -158,14 +156,14 @@ const baseProps = {
   knowledgeBases,
   activeKnowledgeBase: null,
   onClick: vi.fn(),
-  onDelete: vi.fn(),
   onSync: vi.fn(),
   onCreateNew: vi.fn(),
   getModelDisplayName: (modelId: string) => modelId,
 };
 
 beforeEach(() => {
-  vi.resetAllMocks();
+  vi.clearAllMocks();
+  permissions.edit = true;
   vi.mocked(tagManagementApi.listLibraries).mockResolvedValue([defaultLibrary]);
   vi.mocked(tagManagementApi.listDefinitions).mockResolvedValue(definitions);
   vi.mocked(tagManagementApi.filterResourceIds).mockResolvedValue({
@@ -196,6 +194,8 @@ describe('KnowledgeBaseList tag filtering and assignment', () => {
 
     const filterButton = screen.getByRole('button', { name: /knowledgeBase\.filter\.button/ });
     expect(filterButton.className).toContain('ant-btn-default');
+    expect(filterButton).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: 'knowledgeBase.filter.clear' })).toBeNull();
     fireEvent.click(filterButton);
     expect(await screen.findByText('knowledgeBase.tagFilter.placeholder')).toBeTruthy();
   });
@@ -253,48 +253,44 @@ describe('KnowledgeBaseList tag filtering and assignment', () => {
     const chips = screen.getAllByLabelText('tag-a');
     expect(chips).toHaveLength(3);
     expect(tagManagementApi.getAssignments).not.toHaveBeenCalled();
+    expect(tagManagementApi.listDefinitions).not.toHaveBeenCalled();
   });
 
-  it('sets assignTarget canEdit=false for READ_ONLY KB and opens the assignment modal read-only', async () => {
+  it('opens the selected knowledge base without a card menu and reads its tags in detail', async () => {
     await renderList();
+    const row = screen.getByRole('button', { name: 'Beta KB' });
+    expect(within(row).queryByRole('button', { name: 'skillRepository.common.moreActions' })).toBeNull();
+    fireEvent.click(row);
+    expect(baseProps.onClick).toHaveBeenCalledWith(knowledgeBases[1]);
 
-    const betaRow = screen.getByText('Beta KB').closest('[data-knowledge-base-row]') as HTMLElement;
-    expect(betaRow).toBeTruthy();
-    const betaButtons = within(betaRow).getAllByRole('button');
-    expect(betaButtons).toHaveLength(1);
-    fireEvent.click(betaButtons[0]);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'knowledgeBase.action.assignTags' }));
-
-    await waitFor(() => {
-      const modal = screen.getByTestId('resource-tag-assignment-modal');
-      expect(modal.getAttribute('data-can-edit')).toBe('false');
-      expect(modal.getAttribute('data-resource-id')).toBe('kb-2');
-    });
+    render(<KnowledgeBaseDetailTags knowledgeBaseId="kb-2" readOnly />);
+    fireEvent.click(screen.getByRole('button', { name: 'knowledgeBase.action.viewTags' }));
+    const modal = await screen.findByTestId('resource-tag-assignment-modal');
+    expect(modal.getAttribute('data-can-edit')).toBe('false');
+    expect(modal.getAttribute('data-resource-id')).toBe('kb-2');
+    expect(within(modal).queryByRole('button', { name: 'open-tag-definitions' })).toBeNull();
   });
 
-  it('sets assignTarget canEdit=true for an editable KB', async () => {
-    await renderList();
+  it('opens editable resource tags from the detail view', async () => {
+    render(<KnowledgeBaseDetailTags knowledgeBaseId="kb-1" readOnly={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'knowledgeBase.action.assignTags' }));
+    const modal = await screen.findByTestId('resource-tag-assignment-modal');
+    expect(modal.getAttribute('data-can-edit')).toBe('true');
+    expect(modal.getAttribute('data-resource-id')).toBe('kb-1');
+  });
 
-    const alphaRow = screen.getByText('Alpha KB').closest('[data-knowledge-base-row]') as HTMLElement;
-    const alphaButtons = within(alphaRow).getAllByRole('button');
-    expect(alphaButtons.length).toBeGreaterThan(0);
-    fireEvent.click(alphaButtons[0]);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'knowledgeBase.action.assignTags' }));
-
-    await waitFor(() => {
-      const modal = screen.getByTestId('resource-tag-assignment-modal');
-      expect(modal.getAttribute('data-can-edit')).toBe('true');
-      expect(modal.getAttribute('data-resource-id')).toBe('kb-1');
-    });
+  it('hides detail tag actions without update permission', () => {
+    permissions.edit = false;
+    render(<KnowledgeBaseDetailTags knowledgeBaseId="kb-1" readOnly={false} />);
+    expect(screen.queryByRole('button', { name: 'knowledgeBase.action.assignTags' })).toBeNull();
+    expect(tagManagementApi.listDefinitions).not.toHaveBeenCalled();
   });
 
   it('opens tag definitions from the assignment modal after lazy-loading metadata', async () => {
-    await renderList();
+    render(<KnowledgeBaseDetailTags knowledgeBaseId="kb-1" readOnly={false} />);
     expect(vi.mocked(tagManagementApi.listDefinitions).mock.calls.length).toBe(0);
 
-    const alphaRow = screen.getByText('Alpha KB').closest('[data-knowledge-base-row]') as HTMLElement;
-    fireEvent.click(within(alphaRow).getAllByRole('button')[0]);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'knowledgeBase.action.assignTags' }));
+    fireEvent.click(screen.getByRole('button', { name: 'knowledgeBase.action.assignTags' }));
     fireEvent.click(await screen.findByRole('button', { name: 'open-tag-definitions' }));
 
     await waitFor(() => {

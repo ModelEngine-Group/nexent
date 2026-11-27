@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "generated-607-rows",
+  "revision": "generated-609-rows",
   "routes": [
     {
       "method": "GET",
@@ -5052,6 +5052,28 @@
       "target": "management",
       "source": "backend/management/api/tag/tag_management.py",
       "route_id": "route-e390a3f486aec837",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tag-libraries/documents/assignments",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-910a51755deb83c1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tag-libraries/documents/assignments",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-565e806d92309a9c",
       "credential_kinds": [
         "session"
       ]

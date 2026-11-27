@@ -29,6 +29,7 @@ import type {
 } from "@/types/agentConfig";
 import type { QuotaStatusResponse } from "@/types/quota";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
+import { unwrapKnowledgeBaseSummary } from "@/lib/knowledgeBaseSummary";
 import { emitQuotaUsageChanged } from "@/lib/quotaEvents";
 import log from "@/lib/logger";
 
@@ -910,8 +911,6 @@ class KnowledgeBaseService {
             estimatedItemHeights: data.estimated_item_heights,
           };
 
-          log.log("Elasticsearch indices response:", data);
-
           if (data.indices && data.indices_info) {
             log.log(
               "Processing indices_info:",
@@ -935,7 +934,12 @@ class KnowledgeBaseService {
                 name: kbName,
                 index_name: kbId, // Internal index_name for API calls
                 display_name: indexInfo.display_name || indexInfo.name,
-                description: "Elasticsearch index",
+                description:
+                  typeof indexInfo.description === "string"
+                    ? unwrapKnowledgeBaseSummary(
+                        indexInfo.description
+                      ).trim() || null
+                    : null,
                 documentCount: stats.doc_count || 0,
                 chunkCount: stats.chunk_count || 0,
                 createdAt: stats.creation_date || null,
@@ -972,7 +976,6 @@ class KnowledgeBaseService {
                 preserve_source_file: indexInfo.preserve_source_file ?? true,
               };
             });
-            log.log("Converted knowledge bases:", esKnowledgeBases);
             knowledgeBases.push(...esKnowledgeBases);
           } else {
             log.log(
@@ -1503,62 +1506,56 @@ class KnowledgeBaseService {
         throw new Error("Response body is null");
       }
 
-      // Handle streaming response
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
+      let buffer = "";
       let summary = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        // Decode binary data to text
-        const chunk = decoder.decode(value, { stream: true });
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split(/\r?\n\r?\n/);
+          buffer = events.pop() ?? "";
+          for (const event of events) {
+            const data = event
+              .split(/\r?\n/)
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n");
+            if (!data) continue;
 
-        // Handle SSE format data
-        const lines = chunk.split("\n\n");
-        for (const line of lines) {
-          if (line.trim().startsWith("data:")) {
-            try {
-              // Extract JSON data
-              const jsonStr = line.substring(line.indexOf("{"));
-              const data = JSON.parse(jsonStr);
-
-              if (data.status === "success") {
-                // Accumulate message part to summary
-                summary += data.message;
-
-                // If progress callback is provided, call it
-                if (onProgress) {
-                  onProgress(data.message);
-                }
-              } else if (data.status === "completed") {
-                // On completed, check if the accumulated summary is empty
-                if (!summary || summary.trim() === "") {
-                  // No summary was generated, throw internationalized error
-                  const errorMessage = i18n.t(
-                    "knowledgeBase.summary.notGenerated"
-                  );
-                  throw new Error(errorMessage);
-                }
-                // If there is a final message, append it
-                if (data.message && data.message.trim() !== "") {
-                  summary += data.message;
-                  if (onProgress) {
-                    onProgress(data.message);
-                  }
-                }
-              } else if (data.status === "error") {
-                throw new Error(data.message);
+            const frame: { status?: string; message?: unknown } =
+              JSON.parse(data);
+            if (frame.status === "error") {
+              throw new Error(
+                typeof frame.message === "string"
+                  ? frame.message
+                  : i18n.t("document.summary.error")
+              );
+            }
+            if (frame.status === "success" || frame.status === "completed") {
+              if (typeof frame.message === "string") {
+                summary += frame.message;
+                onProgress?.(frame.message);
+              } else if (frame.status === "success") {
+                throw new Error(i18n.t("document.summary.error"));
               }
-            } catch (e) {
-              log.error("Failed to parse SSE data:", e, line);
+            }
+            if (frame.status === "completed") {
+              if (!summary.trim())
+                throw new Error(i18n.t("knowledgeBase.summary.notGenerated"));
+              return summary;
             }
           }
         }
+        throw new Error(i18n.t("document.summary.error"));
+      } finally {
+        void reader.cancel().catch(() => undefined);
+        reader.releaseLock();
       }
-
-      return summary;
     } catch (error) {
       log.error("Error summarizing index:", error);
       throw error;

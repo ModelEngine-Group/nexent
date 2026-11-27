@@ -665,6 +665,8 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         keyword: str | None,
         sources: List[str] | None,
         models: List[str] | None,
+        *,
+        search_summary: bool = True,
     ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """Apply list filters and optional pagination to ordered visible records."""
         facets = {
@@ -693,6 +695,15 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                 not normalized_keyword
                 or normalized_keyword in str(record.get("knowledge_name") or "").lower()
                 or normalized_keyword in str(record.get("description") or "").lower()
+                or (
+                    search_summary
+                    and normalized_keyword in (
+                        str(record.get("knowledge_describe") or "")
+                        .replace("<p>", "")
+                        .replace("</p>", " ")
+                        .lower()
+                    )
+                )
                 or normalized_keyword in str(record.get("nickname") or "").lower()
             )
             and (
@@ -866,6 +877,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                 keyword=keyword,
                 sources=sources,
                 models=models,
+                search_summary=not inventory_read,
             )
         )
 
@@ -924,6 +936,10 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                             "name": index_name,
                             # User-facing knowledge base name from PostgreSQL (fallback to index_name)
                             "display_name": record.get("knowledge_name", index_name),
+                            **(
+                                {"description": record.get("knowledge_describe")}
+                                if not inventory_read else {}
+                            ),
                             "permission": record["permission"],
                             "group_ids": record["group_ids"],
                             # knowledge source and ingroup permission from DB record

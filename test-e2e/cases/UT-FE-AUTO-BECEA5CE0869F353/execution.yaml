@@ -4,4 +4,17 @@ implementations:
 - framework: vitest
   file: test.test.tsx
   selector: UT-FE-AUTO-BECEA5CE0869F353
+acceptance_bindings:
+  AC-01:
+  - UT-FE-AUTO-BECEA5CE0869F353 renders the full list and exposes tag filters in the combined filter popover
+  - selecting a predicate switches the filter to primary, shows clear, and calls filterResourceIds
+  - matched_resource_ids filters the list and clearing restores the full list
+  AC-02:
+  - renders the projected tag values per row without extra tag requests
+  AC-03:
+  - opens the selected knowledge base without a card menu and reads its tags in detail
+  - opens editable resource tags from the detail view
+  - hides detail tag actions without update permission
+  AC-04:
+  - opens tag definitions from the assignment modal after lazy-loading metadata
 notes: V5 source binding migrated; runtime parity is not yet certified.

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import base64
@@ -24,13 +26,8 @@ def _resolve_resource(resource_type):
     return {'resource_id': value}
 
 
-async def _get_assignments(api, resource_type, resource_id, provider=None, knowledge_base_id=None):
-    params = {}
-    if provider:
-        params['provider'] = provider
-    if knowledge_base_id:
-        params['knowledge_base_id'] = knowledge_base_id
-    return await api.get(f'/tag-libraries/assignments/{resource_type}/{resource_id}', params=params)
+async def _get_assignments(api, resource_type, resource_id):
+    return await api.get(f'/tag-libraries/assignments/{resource_type}/{resource_id}')
 
 
 @pytest.mark.asyncio
@@ -243,10 +240,19 @@ async def test_resource_tag_assignment_contract(super_admin, tenant_a_admin, ten
     doc_id = str(document['resource_id'])
     provider = str(document['provider'])
     knowledge_base_id = str(document['knowledge_base_id'])
+    endpoint = '/tag-libraries/documents/assignments'
+    params = {'document_id': doc_id, 'provider': provider, 'knowledge_base_id': knowledge_base_id}
     async with client('config', token=tenant_a_admin.access_token) as api:
-        document_read = await _get_assignments(api, 'knowledge_document', doc_id, provider=provider, knowledge_base_id=knowledge_base_id)
-    assert_status(document_read, 200)
-    document_body = document_read.json()
+        document_read = await api.get(endpoint, params=params)
+        assert_status(document_read, 200)
+        document_body = document_read.json()
+        value_ids = [item['value_id'] for item in document_body['assignments']]
+        document_write = await api.put(endpoint, params=params, json={'value_ids': value_ids})
+        assert_status(document_write, 200)
+        document_read_back = await api.get(endpoint, params=params)
+        assert_status(document_read_back, 200)
     assert document_body['resource_type'] == 'knowledge_document'
     canonical = json.loads(base64.urlsafe_b64decode(document_body['resource_id']).decode('utf-8'))
     assert canonical == [provider, knowledge_base_id, doc_id]
+    assert document_write.json()['resource_id'] == document_body['resource_id']
+    assert sorted(item['value_id'] for item in document_read_back.json()['assignments']) == sorted(value_ids)

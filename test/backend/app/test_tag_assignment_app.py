@@ -4,7 +4,10 @@ import pytest
 from management.api.tag import tag_management as tag_management_app
 from contracts.errors.exceptions import TagManagementNotFoundError
 from contracts.tag import TagAssignmentBulkTarget, TagAssignmentReplaceRequest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from gateway.application import create_gateway_app
+from gateway.configuration import GatewaySettings
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 from starlette.routing import Match
 
@@ -154,6 +157,75 @@ def test_document_assignment_routes_accept_slash_containing_resource_ids():
         "resource_type": "knowledge_document",
         "resource_id": "knowledge_base/file.pdf",
     }
+
+
+@pytest.mark.asyncio
+async def test_document_assignment_query_preserves_file_path(monkeypatch):
+    monkeypatch.setattr(
+        tag_management_app,
+        "get_current_user_context",
+        lambda authorization: ("user-a", "tenant-a", "DEV"),
+    )
+    document_id = "ingest/中文 100%.txt"
+    expected_context = {"provider": "local", "knowledge_base_id": "kb-1"}
+    reads = []
+    writes = []
+
+    async def read(caller, resource_type, resource_id, **kwargs):
+        assert caller.authenticated_tenant_id == "tenant-a"
+        reads.append((resource_type, resource_id, kwargs))
+        if resource_id == "missing/file.txt":
+            raise TagManagementNotFoundError("missing document")
+        return {
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "assignment_count": 0,
+            "assignment_capacity": 100,
+            "assignments": [],
+        }
+
+    async def replace(caller, resource_type, resource_id, value_ids, **kwargs):
+        writes.append(value_ids)
+        return await read(caller, resource_type, resource_id, **kwargs)
+
+    monkeypatch.setattr(tag_management_app.TagManagementService, "get_resource_assignments", read)
+    monkeypatch.setattr(tag_management_app.TagManagementService, "replace_resource_assignments", replace)
+    app = FastAPI()
+    app.include_router(tag_management_app.router, prefix="/api")
+    gateway = create_gateway_app(
+        authentication=False,
+        settings=GatewaySettings(),
+        upstreams={"management": "http://management"},
+        transport=ASGITransport(app=app),
+    )
+    endpoint = "/api/tag-libraries/documents/assignments"
+
+    async with gateway.router.lifespan_context(gateway), AsyncClient(
+        transport=ASGITransport(app=gateway),
+        base_url="http://test",
+        headers={"Authorization": "Bearer token"},
+    ) as client:
+        params = {**expected_context, "document_id": document_id}
+        get_response = await client.get(endpoint, params=params)
+        put_response = await client.put(endpoint, params=params, json={"value_ids": [9]})
+        incomplete = await client.get(endpoint, params=expected_context)
+        missing = await client.get(endpoint, params={**params, "document_id": "missing/file.txt"})
+        encoded_path = await client.get(
+            "/api/tag-libraries/assignments/knowledge_document/ingest%2Ffile.txt",
+            params=expected_context,
+        )
+
+    assert get_response.status_code == put_response.status_code == 200
+    assert get_response.json()["resource_id"] == put_response.json()["resource_id"] == document_id
+    assert incomplete.status_code == 422
+    assert missing.status_code == 404
+    assert encoded_path.status_code == 404
+    assert reads == [
+        ("knowledge_document", document_id, expected_context),
+        ("knowledge_document", document_id, expected_context),
+        ("knowledge_document", "missing/file.txt", expected_context),
+    ]
+    assert writes == [[9]]
 
 
 @pytest.mark.asyncio

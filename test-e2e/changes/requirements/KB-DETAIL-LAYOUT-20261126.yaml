@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: KB-DETAIL-LAYOUT-20261126
+  change_type: requirement
+  requirement_id: KB-DETAIL-LAYOUT
+  title: Reorganize the local knowledge base detail view
+  description: Use the existing detail entry and services to show overview metadata, document search and chunks, summary controls, and access settings.
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-098]
+    retired: []
+  affected_cases:
+    existing: [UT-FE-AUTO-5F56608DED5B2126, API-099, API-100]
+    added: []
+    modified: [UT-FE-AUTO-BECEA5CE0869F353]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - frontend/tests/component/knowledgeDetail.test.tsx
+      - frontend/tests/component/knowledgeChunks.test.tsx
+      - frontend/tests/component/knowledgeCatalog.test.tsx
+      - frontend/tests/workbench/KnowledgeCatalog.test.ts
+      - frontend/tests/workbench/KnowledgeSummary.test.ts
+      - test/backend/services/test_vectordatabase_service.py
+    behaviors:
+      - Document name searches handle whitespace, case and empty results.
+      - A document's chunks open with the intended document selected and the summary still visible.
+      - Header upload opens the file picker and submits files without a persistent drop zone. Read-only access hides mutation controls.
+      - Chunk browsing defaults to all documents, supports opening a requested document, and keeps search and stale responses scoped to the selected view.
+      - Chunk loading failures retain document navigation and can be retried.
+      - Immediate summary generation saves only after a complete stream. Manual edits save on blur, generation errors preserve the previous draft, and failed saves expose a retry action.
+      - Editors can change group access in the detail card, leave the group set empty, or switch to private access and clear assigned groups. Read-only users see the saved settings.
+      - The local list returns and searches saved summaries within its content-read scope and excludes them from inventory-only access.
+      - Cards show saved descriptions without per-card requests, fall back when summaries are absent, and refresh after a successful save.
+      - Cards open their detail pages directly and expose no more-actions menu regardless of permissions. Detail actions preserve rename, delete and read-only tag access.
+    reason: The detail changes reuse existing APIs. Catalog summaries extend the list response and search after authorization. Existing formal cases cover list, document tags and access contracts. Targeted backend and frontend tests cover summary projection, filtering, fallback and refresh.
+  notes: The sibling Nexent SPEC checkout is unavailable. The screenshot is the basis for the local detail layout.

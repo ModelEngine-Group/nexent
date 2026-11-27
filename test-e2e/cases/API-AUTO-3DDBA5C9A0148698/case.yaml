@@ -59,8 +59,8 @@ case:
       DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
       404。
   - order: 8
-    action: 对 knowledge_base 调用 GET/PUT /tag-libraries/assignments/knowledge_base/{index_name}；对 knowledge_document
-      携带 provider/knowledge_base_id 查询参数读写，断言文档 canonical resource_id 为 base64 编码、所属桶为 knowledge_content。
+    action: 对 knowledge_base 调用 GET/PUT /tag-libraries/assignments/knowledge_base/{index_name}；对 knowledge_document 调用
+      GET/PUT /tag-libraries/documents/assignments，携带 document_id/provider/knowledge_base_id，断言文档 canonical resource_id 为 base64 编码、所属桶为 knowledge_content。
     expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
       DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
       404。
@@ -110,8 +110,8 @@ case:
     - 从 config/users.yaml 读取隔离测试账号（SU/Admin/SPEED/ASSET_OWNER/DEV/USER）与租户关系；密码/Token 仅从 secrets.env 注入。
     - 使用 SU/Admin 角色调用 GET /tag-libraries 与 GET /tag-libraries/{bucket_id}/definitions，读取 default_resource/knowledge_content
       桶及其 active 定义/值，确认统一标签库预置成功。
-    - 以可读账号对六类资源逐一调用 GET /tag-libraries/assignments/{resource_type}/{resource_id}（knowledge_document 携带 provider/knowledge_base_id
-      查询参数），记录 200 响应中的 resource_type、resource_id、assignment_count、assignment_capacity(=100)、assignments[] 结构。
+    - 以可读账号读取六类资源。对 knowledge_document 使用 GET /tag-libraries/documents/assignments 并携带 document_id/provider/knowledge_base_id，
+      对其他资源调用 GET /tag-libraries/assignments/{resource_type}/{resource_id}。记录 200 响应中的 resource_type、resource_id、assignment_count、assignment_capacity(=100)、assignments[] 结构。
     - 以可编辑账号对 agent/skill/tool/mcp_service 调用 PUT /tag-libraries/assignments/{resource_type}/{resource_id}，body
       为 {"value_ids":[...]}，断言 200 后 assignment_count 与 assignments[]（含 definition_id/definition_key/definition_name/selection_mode/value_id/display_value/value_status）与提交一致；随后再次
       GET 校验分配持久化。
@@ -120,8 +120,8 @@ case:
     - 构造提交包含未激活或不属于该资源库的 value_id，断言 400（detail 为 "Each assigned tag value must be active and belong to the resource
       library"）。
     - 构造提交超过 100 个 value_ids，断言 409（Resource tag assignment capacity exceeded，details.scope=assignment）。
-    - 对 knowledge_base 调用 GET/PUT /tag-libraries/assignments/knowledge_base/{index_name}；对 knowledge_document 携带
-      provider/knowledge_base_id 查询参数读写，断言文档 canonical resource_id 为 base64 编码、所属桶为 knowledge_content。
+    - 对 knowledge_base 调用 GET/PUT /tag-libraries/assignments/knowledge_base/{index_name}；对 knowledge_document 调用
+      GET/PUT /tag-libraries/documents/assignments，携带 document_id/provider/knowledge_base_id，断言文档 canonical resource_id 为 base64 编码、所属桶为 knowledge_content。
     - 调用 PUT /tag-libraries/assignments/{resource_type}/bulk，body 为 {"targets":[{"resource_id":"...","value_ids":[...]}]}，断言返回数组且每项
       outcome ∈ {updated, not_found_or_forbidden, validation}：可编辑目标返回 assignment，跨租户/不可编辑目标返回 not_found_or_forbidden。
     - 调用 POST /tag-libraries/assignments/{resource_type}/filter，body 为 {"resource_ids":[...],"predicates":[{"definition_id":...,"value_ids":[...]}]}，断言返回

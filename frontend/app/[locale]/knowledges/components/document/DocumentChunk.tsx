@@ -1,11 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Tabs,
   Card,
-  Badge,
   Button,
   App,
   Spin,
@@ -18,17 +18,15 @@ import {
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   Download,
-  ScanText,
   Trash2,
   SquarePen,
   Search,
   FilePlus2,
+  FileText,
   Goal,
+  Layers,
   X,
-  Server,
-  Database,
 } from "lucide-react";
-import { FieldNumberOutlined } from "@ant-design/icons";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { Document } from "@/types/knowledgeBase";
 import log from "@/lib/logger";
@@ -61,19 +59,13 @@ interface DocumentChunkProps {
   knowledgeBaseName: string; // User-facing knowledge base name (display name)
   knowledgeBaseId: string; // Internal knowledge base ID / Elasticsearch index name
   documents: Document[];
-  getFileIcon: (type: string) => string;
+  initialDocumentId?: string;
+  knowledgeBaseChunkCount?: number;
   onChunkCountChange?: () => void; // Callback when chunk count changes (for updating KnowledgeBaseList)
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
 }
 
 const PAGE_SIZE = 10;
-
-const TABS_ROOT_CLASS = "document-chunk-tabs";
-
-const CHUNK_TAG_LAYOUT_STYLE: React.CSSProperties = {
-  flexShrink: 0,
-  whiteSpace: "nowrap",
-};
 
 const { TextArea } = Input;
 
@@ -81,7 +73,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   knowledgeBaseName,
   knowledgeBaseId,
   documents,
-  getFileIcon,
+  initialDocumentId = "",
+  knowledgeBaseChunkCount,
   onChunkCountChange,
   permission,
 }) => {
@@ -91,7 +84,11 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState(false);
-  const [activeDocumentKey, setActiveDocumentKey] = useState<string>("");
+  const [activeDocumentKey, setActiveDocumentKey] = useState(initialDocumentId);
+  const [allChunkCount, setAllChunkCount] = useState<number>();
+  const [loadError, setLoadError] = useState(false);
+  const loadRequestId = useRef(0);
+  const searchRequestId = useRef(0);
   const [documentChunkCounts, setDocumentChunkCounts] = useState<
     Record<string, number>
   >({});
@@ -117,9 +114,10 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   const [tooltipResetKey, setTooltipResetKey] = useState(0);
   // Ref for scrolling to bottom after creating new chunk
   const contentScrollRef = useRef<HTMLDivElement>(null);
-  const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false);
+  const scrollToBottomAfterLoad = useRef(false);
 
   const resetChunkSearch = React.useCallback(() => {
+    searchRequestId.current += 1;
     setChunkSearchResult(null);
     setChunkSearchLoading(false);
   }, []);
@@ -136,66 +134,62 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
   const effectiveIndexName = knowledgeBaseId || knowledgeBaseName;
 
-  // The knowledge base owns its embedding model, so the global model must not
-  // disable chunk search or editing in this knowledge base.
   const isReadOnlyMode = permission === "READ_ONLY";
-  const isSearchDisabled = false;
-
   useEffect(() => {
-    if (isSearchDisabled) {
-      setSearchValue("");
-      resetChunkSearch();
-    }
-  }, [isSearchDisabled, resetChunkSearch]);
+    return () => {
+      searchRequestId.current += 1;
+    };
+  }, [effectiveIndexName]);
 
-  // Set active document when documents change
+  // Return to the whole index if the selected document was removed.
   useEffect(() => {
-    if (documents.length === 0) {
-      if (activeDocumentKey) {
-        setActiveDocumentKey("");
-      }
-      setChunks([]);
-      setTotal(0);
-      return;
-    }
-
-    const hasActiveDocument = documents.some(
-      (doc) => doc.id === activeDocumentKey
-    );
-
-    if (!hasActiveDocument) {
-      setActiveDocumentKey(documents[0].id);
+    if (
+      activeDocumentKey &&
+      !documents.some((doc) => doc.id === activeDocumentKey)
+    ) {
+      setActiveDocumentKey("");
       setPagination((prev) => ({ ...prev, page: 1 }));
     }
   }, [documents, activeDocumentKey]);
 
-  // Load chunks for active document with server-side pagination
+  // Omit the document filter when browsing the whole knowledge base.
   const loadChunks = React.useCallback(async () => {
-    if (!effectiveIndexName || !activeDocumentKey) {
-      return;
-    }
+    if (!effectiveIndexName) return;
 
+    const requestId = ++loadRequestId.current;
     setLoading(true);
+    setLoadError(false);
     try {
       const result = await knowledgeBaseService.previewChunksPaginated(
         effectiveIndexName,
         pagination.page,
         pagination.pageSize,
-        activeDocumentKey
+        activeDocumentKey || undefined
       );
 
+      if (requestId !== loadRequestId.current) return;
       const loadedChunks = result.chunks || [];
-      setTotal(result.total || 0);
-      setDocumentChunkCounts((prev) => ({
-        ...prev,
-        [activeDocumentKey]: result.total || 0,
-      }));
+      const chunkTotal = result.total || 0;
+      setTotal(chunkTotal);
+      if (activeDocumentKey) {
+        setDocumentChunkCounts((prev) => ({
+          ...prev,
+          [activeDocumentKey]: chunkTotal,
+        }));
+      } else {
+        setAllChunkCount(chunkTotal);
+      }
+      const lastPage = Math.max(1, Math.ceil(chunkTotal / pagination.pageSize));
+      if (pagination.page > lastPage) {
+        setPagination((prev) => ({ ...prev, page: lastPage }));
+        return;
+      }
 
       setChunks(loadedChunks);
 
       // Scroll to bottom after loading if requested (e.g., after creating new chunk)
-      if (scrollToBottomAfterLoad) {
-        setScrollToBottomAfterLoad(false);
+      if (scrollToBottomAfterLoad.current) {
+        scrollToBottomAfterLoad.current = false;
         // Use setTimeout to ensure DOM is updated
         setTimeout(() => {
           if (contentScrollRef.current) {
@@ -205,29 +199,32 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         }, 100);
       }
     } catch (error) {
+      if (requestId !== loadRequestId.current) return;
+      setLoadError(true);
       log.error("Failed to load chunks:", error);
       message.error(t("document.chunk.error.loadFailed"));
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestId.current) setLoading(false);
     }
   }, [
     effectiveIndexName,
     activeDocumentKey,
     pagination.page,
     pagination.pageSize,
-    scrollToBottomAfterLoad,
     message,
     t,
   ]);
 
   useEffect(() => {
     void loadChunks();
+    return () => {
+      loadRequestId.current += 1;
+    };
   }, [loadChunks]);
 
   useEffect(() => {
     if (documents.length === 0) {
       setDocumentChunkCounts({});
-      setActiveDocumentKey("");
       return;
     }
 
@@ -259,10 +256,13 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
   // Handle document tab change
   const handleTabChange = (key: string) => {
+    if (key === activeDocumentKey) return;
+    loadRequestId.current += 1;
     setActiveDocumentKey(key);
     setChunks([]);
-    setTotal(documentChunkCounts[key] ?? 0);
+    setTotal(key ? (documentChunkCounts[key] ?? 0) : (allChunkCount ?? 0));
     setPagination((prev) => ({ ...prev, page: 1 }));
+    if (contentScrollRef.current) contentScrollRef.current.scrollTop = 0;
   };
 
   // Handle pagination change
@@ -285,10 +285,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   }, [resetChunkSearch]);
 
   const handleSearch = React.useCallback(async () => {
-    if (isSearchDisabled) {
-      return;
-    }
-
     const trimmedValue = searchValue.trim();
 
     if (!trimmedValue) {
@@ -301,6 +297,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       return;
     }
 
+    const requestId = ++searchRequestId.current;
     setChunkSearchResult([]);
     setChunkSearchLoading(true);
 
@@ -312,6 +309,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           topK: pagination.pageSize,
         }
       );
+      if (requestId !== searchRequestId.current) return;
 
       const parsedChunks = (response.results || [])
         .map((item) => {
@@ -346,39 +344,19 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
       setChunkSearchResult(parsedChunks);
 
-      const matchedDocumentIds = new Set(
-        parsedChunks
-          .map((chunk) => chunk.path_or_url)
-          .filter((docId): docId is string => Boolean(docId))
-      );
-      if (
-        matchedDocumentIds.size > 0 &&
-        !matchedDocumentIds.has(activeDocumentKey)
-      ) {
-        const firstMatchedDocument = documents.find((doc) =>
-          matchedDocumentIds.has(doc.id)
-        );
-        if (firstMatchedDocument) {
-          setActiveDocumentKey(firstMatchedDocument.id);
-          setPagination((prev) => ({ ...prev, page: 1 }));
-        }
-      }
-
       if (parsedChunks.length === 0) {
         message.info(t("document.chunk.search.noChunk"));
       }
     } catch (error) {
+      if (requestId !== searchRequestId.current) return;
       log.error("Failed to search chunks:", error);
       message.error(t("document.chunk.error.searchFailed"));
       resetChunkSearch();
     } finally {
-      setChunkSearchLoading(false);
+      if (requestId === searchRequestId.current) setChunkSearchLoading(false);
     }
   }, [
     effectiveIndexName,
-    activeDocumentKey,
-    documents,
-    isSearchDisabled,
     message,
     pagination.pageSize,
     resetChunkSearch,
@@ -387,11 +365,10 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   ]);
 
   const refreshChunks = React.useCallback(async () => {
+    await loadChunks();
     if (isChunkSearchActive && searchValue.trim()) {
       await handleSearch();
-      return;
     }
-    await loadChunks();
   }, [handleSearch, isChunkSearchActive, loadChunks, searchValue]);
 
   // Download chunk as txt file
@@ -441,7 +418,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     setEditingChunk(chunk);
     chunkForm.resetFields();
     chunkForm.setFieldsValue({
-      filename: chunk.filename || activeDocument?.name || "",
+      filename: chunk.filename,
       content: chunk.content || "",
     });
     setIsChunkModalOpen(true);
@@ -459,7 +436,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       message.error(t("document.chunk.error.loadFailed"));
       return;
     }
-    if (!activeDocumentKey) {
+    if (chunkModalMode === "create" && !activeDocumentKey) {
       message.warning(t("document.chunk.search.noActiveDocument"));
       return;
     }
@@ -479,11 +456,16 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
         // Navigate to the last page to show the new chunk at the bottom
         const lastPage = Math.ceil((total + 1) / pagination.pageSize);
-        setPagination((prev) => ({ ...prev, page: lastPage }));
-        // Trigger scroll to bottom after data loads
-        setScrollToBottomAfterLoad(true);
+        scrollToBottomAfterLoad.current = true;
+        setAllChunkCount((current) =>
+          current === undefined ? current : current + 1
+        );
         // Notify parent to update knowledge base list (chunk count)
         onChunkCountChange?.();
+        closeChunkModal();
+        if (lastPage === pagination.page) await loadChunks();
+        else setPagination((prev) => ({ ...prev, page: lastPage }));
+        return;
       } else {
         if (!editingChunk?.id) {
           message.error(t("document.chunk.error.missingChunkId"));
@@ -546,15 +528,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           await knowledgeBaseService.deleteChunk(effectiveIndexName, chunk.id);
           message.success(t("document.chunk.success.delete"));
           forceCloseTooltips();
-          // Update chunk count immediately for better UX
-          setTotal((prevTotal) => Math.max(0, prevTotal - 1));
-          setDocumentChunkCounts((prev) => ({
-            ...prev,
-            [chunk.path_or_url || activeDocumentKey]: Math.max(
-              0,
-              (prev[chunk.path_or_url || activeDocumentKey] || 1) - 1
-            ),
-          }));
+          setAllChunkCount((current) =>
+            current === undefined ? current : Math.max(0, current - 1)
+          );
+          const documentId = chunk.path_or_url || activeDocumentKey;
+          setDocumentChunkCounts((prev) =>
+            documentId && prev[documentId] !== undefined
+              ? { ...prev, [documentId]: Math.max(0, prev[documentId] - 1) }
+              : prev
+          );
           // Notify parent to update knowledge base list (chunk count)
           onChunkCountChange?.();
           await refreshChunks();
@@ -573,324 +555,79 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     });
   };
 
-  const renderDocumentLabel = (doc: Document, chunkCount: number) => {
-    const displayName = getDisplayName(doc.name || "");
-
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="flex w-full items-center justify-between gap-2 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span>{getFileIcon(doc.type)}</span>
-              <span className="truncate text-sm font-medium text-gray-800 max-w-[150px]">
-                {displayName}
-              </span>
-            </div>
-            <Badge
-              color="#1677ff"
-              showZero
-              count={chunkCount}
-              className="flex-shrink-0 chunk-count-badge"
-            />
-          </div>
-        </TooltipTrigger>
-        <TooltipContent side="top">{displayName}</TooltipContent>
-      </Tooltip>
-    );
-  };
-
-  const chunkSearchResultMap = React.useMemo(() => {
-    if (!chunkSearchResult) {
-      return null;
-    }
-
-    return chunkSearchResult.reduce<Record<string, Chunk[]>>((acc, chunk) => {
-      const docId = chunk.path_or_url;
-      if (!docId) {
-        return acc;
-      }
-      if (!acc[docId]) {
-        acc[docId] = [];
-      }
-      acc[docId].push(chunk);
-      return acc;
-    }, {});
-  }, [chunkSearchResult]);
-
-  const visibleDocuments =
-    isChunkSearchActive && !chunkSearchLoading
-      ? documents.filter(
-          (doc) => (chunkSearchResultMap?.[doc.id]?.length ?? 0) > 0
+  const displayedChunks = chunkSearchResult
+    ? activeDocumentKey
+      ? chunkSearchResult.filter(
+          (chunk) => chunk.path_or_url === activeDocumentKey
         )
-      : documents;
-
-  const tabItems = visibleDocuments.map((doc) => {
-    const chunkCount = isChunkSearchActive
-      ? (chunkSearchResultMap?.[doc.id]?.length ?? 0)
-      : (documentChunkCounts[doc.id] ?? doc.chunk_num ?? 0);
-    const isActive = doc.id === activeDocumentKey;
-    const chunkSearchChunks = chunkSearchResultMap?.[doc.id] ?? [];
-    const docChunksData = isActive
-      ? isChunkSearchActive
-        ? {
-            chunks: chunkSearchChunks,
-            total: chunkSearchChunks.length,
-            paginatedChunks: chunkSearchChunks,
-          }
-        : { chunks, total, paginatedChunks: chunks }
-      : { chunks: [], total: 0, paginatedChunks: [] };
-
-    const showLoadingState = isActive
-      ? isChunkSearchActive
-        ? chunkSearchLoading && docChunksData.paginatedChunks.length === 0
-        : loading && docChunksData.paginatedChunks.length === 0
-      : false;
-
-    return {
-      key: doc.id,
-      label: renderDocumentLabel(doc, chunkCount),
-      children: (
-        <div className="flex h-full flex-col min-h-0 overflow-hidden">
-          <div
-            ref={contentScrollRef}
-            className="flex-1 min-h-0 overflow-y-auto p-4 pb-8"
-          >
-            {showLoadingState ? (
-              <div className="flex h-52 items-center justify-center">
-                <Spin size="large" />
-              </div>
-            ) : docChunksData.total === 0 ? (
-              <div className="rounded-md border border-dashed border-gray-200 p-10 text-center text-sm text-gray-500">
-                {t("document.chunk.noChunks")}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {docChunksData.paginatedChunks.map((chunk, index) => (
-                  <Card
-                    key={chunk.id || index}
-                    size="small"
-                    className="w-full"
-                    title={
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex flex-wrap gap-1">
-                          <Tag
-                            className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md"
-                            style={CHUNK_TAG_LAYOUT_STYLE}
-                          >
-                            <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
-                              <span className="inline-flex shrink-0 items-center justify-center leading-none">
-                                <FieldNumberOutlined className="text-[12px] leading-none" />
-                              </span>
-                              <span>
-                                {(pagination.page - 1) * pagination.pageSize +
-                                  index +
-                                  1}
-                              </span>
-                            </span>
-                          </Tag>
-                          <Tag
-                            className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md"
-                            style={CHUNK_TAG_LAYOUT_STYLE}
-                          >
-                            <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
-                              <span className="inline-flex shrink-0 items-center justify-center leading-none">
-                                <ScanText size={14} className="block" />
-                              </span>
-                              <span>
-                                {t("document.chunk.characterCount", {
-                                  count: (chunk.content || "").length,
-                                })}
-                              </span>
-                            </span>
-                          </Tag>
-                          {chunk.score !== undefined && (
-                            <Tag
-                              className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium border rounded-md"
-                              style={{
-                                ...CHUNK_TAG_LAYOUT_STYLE,
-                                backgroundColor: getScoreColor(chunk.score),
-                                color: "#000",
-                                borderColor: getScoreColor(chunk.score),
-                              }}
-                            >
-                              <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
-                                <span className="inline-flex shrink-0 items-center justify-center leading-none">
-                                  <Goal size={14} className="block" />
-                                </span>
-                                <span>
-                                  {formatScoreAsPercentage(chunk.score)}
-                                </span>
-                              </span>
-                            </Tag>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {!isReadOnlyMode && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="text"
-                                  icon={<SquarePen size={16} />}
-                                  onClick={() => openEditChunkModal(chunk)}
-                                  size="small"
-                                  className="self-center"
-                                />
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {t("document.chunk.tooltip.edit")}
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                type="text"
-                                icon={<Download size={16} />}
-                                onClick={() => handleDownloadChunk(chunk)}
-                                size="small"
-                                className="self-center"
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {t("document.chunk.tooltip.download")}
-                            </TooltipContent>
-                          </Tooltip>
-                          {!isReadOnlyMode && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="text"
-                                  danger
-                                  icon={<Trash2 size={16} />}
-                                  onClick={() => handleDeleteChunk(chunk)}
-                                  size="small"
-                                  className="self-center"
-                                />
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {t("document.chunk.tooltip.delete")}
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                        </div>
-                      </div>
-                    }
-                  >
-                    {/* Display filename and source type if available */}
-                    {chunk.filename && (
-                      <div className="mb-2 pb-2 border-b border-gray-200">
-                        <div className="flex flex-col">
-                          <div className="flex items-center">
-                            <div className="w-3 h-3 flex-shrink-0 mr-1">
-                              <Database className="w-full h-full" />
-                            </div>
-                            <div className="text-sm font-medium text-gray-700">
-                              {chunk.filename}
-                            </div>
-                          </div>
-                          {chunk.source_type && (
-                            <div className="flex items-center mt-0.5">
-                              <div className="w-3 h-3 flex-shrink-0 mr-1">
-                                <Server className="w-full h-full" />
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                {chunk.source_type === "datamate"
-                                  ? t(
-                                      "document.chunk.source.datamate",
-                                      "\u6765\u6e90: Datamate"
-                                    )
-                                  : chunk.source_type === "file" ||
-                                      chunk.source_type === "minio" ||
-                                      chunk.source_type === "local"
-                                    ? t(
-                                        "document.chunk.source.nexent",
-                                        "\u6765\u6e90: Nexent"
-                                      )
-                                    : ""}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    <div className="max-h-[150px] overflow-y-auto break-words whitespace-pre-wrap text-sm">
-                      {chunk.content || ""}
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      ),
-    };
-  });
-
-  if (!isChunkSearchActive && loading && chunks.length === 0) {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <Spin size="large" />
-      </div>
-    );
+      : chunkSearchResult
+    : chunks;
+  const displayedTotal = chunkSearchResult ? displayedChunks.length : total;
+  const showLoading = isChunkSearchActive ? chunkSearchLoading : loading;
+  const searchCounts = new Map<string, number>();
+  for (const chunk of chunkSearchResult ?? []) {
+    if (chunk.path_or_url) {
+      searchCounts.set(
+        chunk.path_or_url,
+        (searchCounts.get(chunk.path_or_url) ?? 0) + 1
+      );
+    }
   }
-
-  const activeDocumentTotal = isChunkSearchActive
-    ? (chunkSearchResultMap?.[activeDocumentKey]?.length ?? 0)
-    : (documentChunkCounts[activeDocumentKey] ?? total ?? 0);
-  const shouldShowPagination = !isChunkSearchActive && activeDocumentTotal > 0;
+  const allDocumentsCount =
+    chunkSearchResult?.length ??
+    allChunkCount ??
+    knowledgeBaseChunkCount ??
+    documents.reduce(
+      (count, doc) =>
+        count +
+        (documentChunkCounts[doc.id] ??
+          doc.chunk_num ??
+          doc.total_chunk_num ??
+          0),
+      0
+    );
 
   return (
     <TooltipProvider key={tooltipResetKey}>
-      <div className="flex h-full w-full flex-col min-h-0 overflow-hidden">
-        {/* Search and Add Button Bar */}
-        <div className="flex items-center justify-end gap-2 px-2 py-3 border-b border-gray-200 shrink-0">
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder={t(
-                isSearchDisabled
-                  ? "document.chunk.search.disabledPlaceholder"
-                  : "document.chunk.search.placeholder"
-              )}
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              disabled={isSearchDisabled}
-              onPressEnter={() => {
-                void handleSearch();
-              }}
-              style={{ width: 320 }}
-              suffix={
-                <div className="flex items-center gap-1">
-                  {searchValue && (
-                    <Button
-                      type="text"
-                      icon={<X size={16} />}
-                      onClick={handleClearSearch}
-                      size="small"
-                      className="text-gray-500 hover:text-gray-700"
-                    />
-                  )}
+      <div className="flex h-full w-full min-h-0 flex-col gap-3">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Input
+            aria-label={t("document.chunk.search.content")}
+            placeholder={t("document.chunk.search.content")}
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            onPressEnter={() => void handleSearch()}
+            className="!max-w-80"
+            suffix={
+              <div className="flex items-center gap-1">
+                {searchValue && (
                   <Button
                     type="text"
-                    icon={<Search size={16} />}
-                    onClick={() => {
-                      void handleSearch();
-                    }}
+                    aria-label={t("document.chunk.search.clear")}
+                    icon={<X size={16} />}
+                    onClick={handleClearSearch}
                     size="small"
-                    loading={chunkSearchLoading}
-                    disabled={isSearchDisabled}
                   />
-                </div>
-              }
-            />
-          </div>
-          {/* Create Chunk button - hide when user has READ_ONLY permission */}
+                )}
+                <Button
+                  type="text"
+                  aria-label={t("document.chunk.search.submit")}
+                  icon={<Search size={16} />}
+                  onClick={() => void handleSearch()}
+                  size="small"
+                  loading={chunkSearchLoading}
+                />
+              </div>
+            }
+          />
           {!isReadOnlyMode && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  type="text"
                   icon={<FilePlus2 size={16} />}
+                  aria-label={t("document.chunk.tooltip.create")}
                   onClick={openCreateChunkModal}
+                  disabled={!activeDocument || loading}
                 />
               </TooltipTrigger>
               <TooltipContent>
@@ -900,47 +637,209 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           )}
         </div>
 
-        <Tabs
-          tabPosition="left"
-          activeKey={activeDocumentKey}
-          onChange={handleTabChange}
-          items={tabItems}
-          className={`h-full w-full min-h-0 ${TABS_ROOT_CLASS}`}
-          rootClassName="h-full"
-        />
-        {/* Scoped to .document-chunk-tabs only; targets antd v6's renamed
-            content-holder classes (ant-tabs-body-holder / ant-tabs-body) so
-            height: 100% propagates down to the scrollable chunk list. */}
-        <style jsx global>{`
-          .${TABS_ROOT_CLASS} .ant-tabs-body-holder,
-          .${TABS_ROOT_CLASS} .ant-tabs-body {
-            height: 100%;
-          }
-        `}</style>
-        {shouldShowPagination && (
-          <div className="sticky bottom-0 left-0 z-10 flex w-full justify-center bg-white px-8 pb-4 pt-2 shadow-[0_-4px_12px_rgba(15,23,42,0.04)]">
-            <Pagination
-              current={pagination.page}
-              pageSize={pagination.pageSize}
-              total={activeDocumentTotal}
-              onChange={handlePaginationChange}
-              disabled={loading}
-              showQuickJumper
-              locale={{
-                jump_to: t("document.chunk.pagination.jumpTo"),
-                page: t("document.chunk.pagination.page"),
-              }}
-              showTotal={(pageTotal, range) =>
-                t("document.chunk.pagination.range", {
-                  defaultValue: "{{start}}-{{end}} of {{total}}",
-                  start: range[0],
-                  end: range[1],
-                  total: pageTotal,
-                })
-              }
-            />
+        <div className="@container min-h-0 flex-1">
+          <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 @min-[36rem]:grid-cols-[minmax(9rem,22%)_minmax(0,1fr)] @min-[36rem]:grid-rows-[minmax(0,1fr)]">
+            <nav
+              aria-label={t("document.chunk.documents")}
+              className="max-h-36 space-y-1 overflow-auto @min-[36rem]:max-h-none"
+            >
+              <Button
+                block
+                type="text"
+                aria-pressed={!activeDocumentKey}
+                className={`!justify-start ${!activeDocumentKey ? "!bg-[var(--color-select)] !text-[var(--color-brand)]" : ""}`}
+                icon={<Layers size={16} aria-hidden />}
+                onClick={() => handleTabChange("")}
+              >
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {t("document.chunk.allDocuments")}
+                </span>
+                <span className="tabular-nums text-[var(--color-text-secondary)]">
+                  {allDocumentsCount}
+                </span>
+              </Button>
+              {documents.map((doc) => (
+                <Button
+                  key={doc.id}
+                  block
+                  type="text"
+                  aria-pressed={activeDocumentKey === doc.id}
+                  aria-label={doc.name}
+                  title={doc.name}
+                  className={`!justify-start ${activeDocumentKey === doc.id ? "!bg-[var(--color-select)] !text-[var(--color-brand)]" : ""}`}
+                  icon={<FileText size={16} aria-hidden />}
+                  onClick={() => handleTabChange(doc.id)}
+                >
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    {doc.name}
+                  </span>
+                  <span className="tabular-nums text-[var(--color-text-secondary)]">
+                    {chunkSearchResult
+                      ? (searchCounts.get(doc.id) ?? 0)
+                      : (documentChunkCounts[doc.id] ??
+                        doc.chunk_num ??
+                        doc.total_chunk_num ??
+                        0)}
+                  </span>
+                </Button>
+              ))}
+            </nav>
+
+            <section className="flex min-h-0 min-w-0 flex-col gap-2">
+              <p className="shrink-0 text-sm text-[var(--color-text-secondary)]">
+                {t("document.chunk.total", { count: displayedTotal })}
+              </p>
+              <div
+                ref={contentScrollRef}
+                className="@container min-h-0 flex-1 overflow-y-auto"
+              >
+                {showLoading ? (
+                  <div className="flex h-40 items-center justify-center">
+                    <Spin />
+                  </div>
+                ) : loadError && !isChunkSearchActive ? (
+                  <div
+                    role="alert"
+                    className="flex items-center justify-center gap-2 py-8"
+                  >
+                    <span>{t("document.chunk.error.loadFailed")}</span>
+                    <Button onClick={() => void loadChunks()}>
+                      {t("repository.common.retry")}
+                    </Button>
+                  </div>
+                ) : displayedChunks.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-[var(--color-border)] p-8 text-center text-sm text-[var(--color-text-secondary)]">
+                    {t(
+                      isChunkSearchActive
+                        ? "document.chunk.search.noChunk"
+                        : "document.chunk.noChunks"
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 items-start gap-3 @min-[34rem]:grid-cols-2">
+                    {displayedChunks.map((chunk, index) => {
+                      const offset = isChunkSearchActive
+                        ? 0
+                        : (pagination.page - 1) * pagination.pageSize;
+                      const filename =
+                        chunk.filename ||
+                        documents.find((doc) => doc.id === chunk.path_or_url)
+                          ?.name ||
+                        activeDocument?.name;
+                      return (
+                        <Card
+                          key={chunk.id || index}
+                          size="small"
+                          variant="outlined"
+                          className="min-w-0"
+                        >
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <Tag className="!m-0 !border-0 !bg-[var(--color-select)] !text-[var(--color-brand)]">
+                              #{String(offset + index + 1).padStart(3, "0")}
+                            </Tag>
+                            {filename && (
+                              <span
+                                title={filename}
+                                className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-secondary)]"
+                              >
+                                {filename}
+                              </span>
+                            )}
+                            <span className="ml-auto shrink-0 text-xs tabular-nums text-[var(--color-text-secondary)]">
+                              {t("document.chunk.characterCount", {
+                                count: (chunk.content || "").length,
+                              })}
+                            </span>
+                            {(chunk.source_type === "datamate" ||
+                              chunk.source_type === "file") && (
+                              <span className="text-xs text-[var(--color-text-secondary)]">
+                                {t(
+                                  chunk.source_type === "datamate"
+                                    ? "document.chunk.source.datamate"
+                                    : "document.chunk.source.nexent"
+                                )}
+                              </span>
+                            )}
+                            {chunk.score !== undefined && (
+                              <Tag
+                                className="!m-0"
+                                style={{
+                                  backgroundColor: getScoreColor(chunk.score),
+                                }}
+                              >
+                                <span className="flex items-center gap-1">
+                                  <Goal size={12} aria-hidden />
+                                  {formatScoreAsPercentage(chunk.score)}
+                                </span>
+                              </Tag>
+                            )}
+                          </div>
+                          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed">
+                            {chunk.content || ""}
+                          </div>
+                          <div className="mt-2 flex justify-end gap-1">
+                            {!isReadOnlyMode && (
+                              <Button
+                                type="text"
+                                size="small"
+                                title={t("document.chunk.tooltip.edit")}
+                                aria-label={t("document.chunk.tooltip.edit")}
+                                icon={<SquarePen size={15} />}
+                                onClick={() => openEditChunkModal(chunk)}
+                              />
+                            )}
+                            <Button
+                              type="text"
+                              size="small"
+                              title={t("document.chunk.tooltip.download")}
+                              aria-label={t("document.chunk.tooltip.download")}
+                              icon={<Download size={15} />}
+                              onClick={() => handleDownloadChunk(chunk)}
+                            />
+                            {!isReadOnlyMode && (
+                              <Button
+                                type="text"
+                                size="small"
+                                danger
+                                title={t("document.chunk.tooltip.delete")}
+                                aria-label={t("document.chunk.tooltip.delete")}
+                                icon={<Trash2 size={15} />}
+                                onClick={() => handleDeleteChunk(chunk)}
+                              />
+                            )}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {!isChunkSearchActive && total > 0 && (
+                <Pagination
+                  className="justify-center"
+                  current={pagination.page}
+                  pageSize={pagination.pageSize}
+                  total={total}
+                  onChange={handlePaginationChange}
+                  disabled={loading || loadError}
+                  showQuickJumper
+                  locale={{
+                    jump_to: t("document.chunk.pagination.jumpTo"),
+                    page: t("document.chunk.pagination.page"),
+                  }}
+                  showTotal={(pageTotal, range) =>
+                    t("document.chunk.pagination.range", {
+                      defaultValue: "{{start}}-{{end}} of {{total}}",
+                      start: range[0],
+                      end: range[1],
+                      total: pageTotal,
+                    })
+                  }
+                />
+              )}
+            </section>
           </div>
-        )}
+        </div>
       </div>
       <Modal
         centered
@@ -968,7 +867,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
             }
           >
             <div className="pl-4 text-gray-700">
-              {getDisplayName(activeDocument?.name || "")}
+              {getDisplayName(
+                editingChunk
+                  ? editingChunk.filename ||
+                      documents.find(
+                        (doc) => doc.id === editingChunk.path_or_url
+                      )?.name ||
+                      ""
+                  : activeDocument?.name || ""
+              )}
             </div>
           </Form.Item>
           {/* Hidden field to preserve filename value for form submission */}

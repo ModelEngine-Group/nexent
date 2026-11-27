@@ -350,6 +350,46 @@ async def replace_resource_tag_assignments(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
+@router.get("/documents/assignments", response_model=TagAssignmentResponse)
+async def get_document_tag_assignments(
+    document_id: Annotated[str, Query(min_length=1)],
+    provider: Annotated[str, Query(min_length=1)],
+    knowledge_base_id: Annotated[str, Query(min_length=1)],
+    authorization: str | None = Header(None),
+):
+    """Read assignments for a provider document identified by query parameters."""
+    return await get_resource_tag_assignments(
+        "knowledge_document",
+        document_id,
+        authorization,
+        provider=provider,
+        knowledge_base_id=knowledge_base_id,
+    )
+
+
+@router.put(
+    "/documents/assignments",
+    response_model=TagAssignmentResponse,
+    responses=TAG_CONFLICT_RESPONSES,
+)
+async def replace_document_tag_assignments(
+    request: TagAssignmentReplaceRequest,
+    document_id: Annotated[str, Query(min_length=1)],
+    provider: Annotated[str, Query(min_length=1)],
+    knowledge_base_id: Annotated[str, Query(min_length=1)],
+    authorization: str | None = Header(None),
+):
+    """Replace assignments without placing a provider document ID in the route path."""
+    return await replace_resource_tag_assignments(
+        "knowledge_document",
+        document_id,
+        request,
+        authorization,
+        provider=provider,
+        knowledge_base_id=knowledge_base_id,
+    )
+
+
 @router.get("", response_model=list[TagLibraryResponse])
 def list_tag_libraries(authorization: str | None = Header(None)):
     _, tenant_id, _ = _require_read_context(authorization)

@@ -13,37 +13,33 @@ import { useTranslation } from "react-i18next";
 
 import {
   Input,
-  InputNumber,
   Button,
   App,
+  Card,
   Select,
   Popover,
   Progress,
-  Segmented,
   Modal,
   Spin,
+  Tabs,
   Tooltip,
   Pagination,
 } from "antd";
 const { TextArea } = Input;
+import { FilterOutlined, ReloadOutlined } from "@ant-design/icons";
 import {
-  FileTextOutlined,
-  FilterOutlined,
-  ReloadOutlined,
-} from "@ant-design/icons";
-import {
-  BookText,
-  Pilcrow,
-  PencilRuler,
-  Eye,
-  Glasses,
-  CircleOff,
+  Clock3,
+  FileText,
+  FolderOpen,
+  Layers,
+  Search,
+  Sparkles,
+  Trash2,
+  Upload,
+  Pencil,
   AlertCircle,
   Settings2,
   Tag,
-  SlidersHorizontal,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
@@ -61,7 +57,7 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
 import { extractObjectNameFromUrl } from "@/services/storageService";
-import { Document } from "@/types/knowledgeBase";
+import type { Document, KnowledgeBase } from "@/types/knowledgeBase";
 import type { KBQuotaStatus } from "@/types/quota";
 import type {
   TagDocumentPredicate,
@@ -69,7 +65,9 @@ import type {
 } from "@/types/tagManagement";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
+import { formatDateOrFallback } from "@/lib/date";
 import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
+import { unwrapKnowledgeBaseSummary } from "@/lib/knowledgeBaseSummary";
 import log from "@/lib/logger";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
 import {
@@ -88,23 +86,17 @@ import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentMo
 import TagChips from "@/components/tag/TagChips";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import TagFilterControls from "@/components/tag/TagFilterControls";
+import KnowledgeBaseDetailTags from "../knowledge/KnowledgeBaseDetailTags";
+import { KnowledgeBaseEditModal } from "../knowledge/KnowledgeBaseEditModal";
+import KnowledgeBaseAccessCard from "../knowledge/KnowledgeBaseAccessCard";
+import KnowledgeBaseCreateSettings from "../knowledge/KnowledgeBaseCreateSettings";
 
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { tagManagementApi } from "@/services/tagManagementService";
 import { useDocumentContext } from "../../contexts/DocumentContext";
+
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
-
-const CONTAINER_HEIGHT_CLASS_MAP: Record<string, string> = {
-  "83vh": "h-[83vh]",
-  "70vh": "h-[70vh]",
-  "57vh": "h-[57vh]",
-  "100%": "h-full",
-};
-
-const TITLE_BAR_HEIGHT_CLASS_MAP: Record<string, string> = {
-  "56.8px": "min-h-[56.8px]",
-};
 
 interface DocumentListProps {
   documents: Document[];
@@ -113,13 +105,16 @@ interface DocumentListProps {
   knowledgeBaseSource?: string;
   // User-facing knowledge base name (display name)
   knowledgeBaseName?: string;
+  catalogKnowledgeBase?: KnowledgeBase;
+  onDeleteKnowledgeBase?: () => void;
+  onCatalogKnowledgeBaseChange?: (knowledgeBase: KnowledgeBase) => void;
+  onCatalogRefresh?: () => void;
   // Internal knowledge base ID / Elasticsearch index name
   knowledgeBaseId?: string;
   modelMismatch?: boolean;
   currentModel?: string;
   knowledgeBaseModel?: string;
   embeddingModelInfo?: string;
-  containerHeight?: string;
   isCreatingMode?: boolean;
   onNameChange?: (name: string) => void;
   hasDocuments?: boolean;
@@ -195,11 +190,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       knowledgeBaseSource = "",
       knowledgeBaseId = "",
       knowledgeBaseName = "",
+      catalogKnowledgeBase,
+      onDeleteKnowledgeBase,
+      onCatalogKnowledgeBaseChange,
+      onCatalogRefresh,
       modelMismatch = false,
       currentModel = "",
       knowledgeBaseModel = "",
       embeddingModelInfo = "",
-      containerHeight = "57vh",
       isCreatingMode = false,
       onNameChange,
       hasDocuments = false,
@@ -263,13 +261,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       accessibleGroupIds
     );
 
-    const groupOptions = groups.map((group) => ({
-      label: group.group_name,
-      value: group.group_id,
-    }));
-
     // Preview drawer state
-    const [quotaUnit, setQuotaUnit] = useState<"GB" | "MB">("GB");
 
     const [selectedFile, setSelectedFile] = useState<{
       objectName: string;
@@ -282,9 +274,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     }, []);
 
     // Use fixed height instead of percentage
-    const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
     const uploadHeight = UI_CONFIG.UPLOAD_COMPONENT_HEIGHT;
-    const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false);
+    const groupsEdited = useRef(false);
     const [assignTarget, setAssignTarget] = useState<{
       docId: string;
       canEdit: boolean;
@@ -309,6 +300,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     });
     const [documentPage, setDocumentPage] = useState(1);
     const [documentPageSize, setDocumentPageSize] = useState(10);
+    const [documentSearch, setDocumentSearch] = useState("");
+    const [chunkDocumentId, setChunkDocumentId] = useState<string>();
+    const [editingKnowledgeBase, setEditingKnowledgeBase] = useState(false);
 
     const [tagManagementOpen, setTagManagementOpen] = useState(false);
     const [documentPredicates, setDocumentPredicates] = useState<
@@ -409,25 +403,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     };
 
-    // Get permission icon for dropdown options
-    const getPermissionIcon = (permission: string) => {
-      const iconProps = {
-        size: 16,
-        className: "text-gray-500",
-      };
-
-      switch (permission) {
-        case "EDIT":
-          return <PencilRuler {...iconProps} />;
-        case "READ_ONLY":
-          return <Eye {...iconProps} />;
-        case "PRIVATE":
-          return <Glasses {...iconProps} />;
-        default:
-          return <CircleOff {...iconProps} />;
-      }
-    };
-
     // Build model mismatch info
     const getMismatchInfo = (): string => {
       if (embeddingModelInfo) return embeddingModelInfo;
@@ -444,13 +419,19 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     useImperativeHandle(ref, () => ({
       uppy: uploadAreaRef.current?.uppy,
     }));
-    const [showDetail, setShowDetail] = React.useState(false);
+    const showSummary =
+      !isCreatingMode &&
+      !isDataMate &&
+      Boolean(catalogKnowledgeBase && knowledgeBaseId);
     const [showChunk, setShowChunk] = React.useState(false);
     const [nameStatus, setNameStatus] = useState<string>("available");
     const [summary, setSummary] = useState("");
+    const [savedSummary, setSavedSummary] = useState("");
+    const [isLoadingSummary, setIsLoadingSummary] = useState(showSummary);
     const [isSummarizing, setIsSummarizing] = useState(false);
-    const [isEditing, setIsEditing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [summarySaveFailed, setSummarySaveFailed] = useState(false);
+    const summarySavePending = useRef(false);
     const [selectedModel, setSelectedModel] = useState<number>(0);
     const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -467,16 +448,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     });
     const {
       hasQuota,
-      availableCapacity: quotaAvailable,
       totalCapacity: quotaTotal,
       usagePercent: quotaUsagePercent,
     } = getKnowledgeBaseQuotaDisplay(quotaStatus, t);
-    let documentListClassName = "flex-grow min-h-0 overflow-auto px-6 py-5";
-    if (isCreatingMode) {
-      documentListClassName = "w-full bg-white p-2";
-    } else if (showChunk) {
-      documentListClassName = "flex-grow min-h-0 overflow-hidden px-6 pt-5";
-    }
+    const documentListClassName = isCreatingMode ? "w-full" : "min-w-0";
 
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
@@ -556,61 +531,33 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onEmbeddingModelParamsOverrideChange(updated);
     };
 
-    // Permission options with icons shown inside dropdown
-    const permissionOptions = [
-      {
-        value: "EDIT",
-        label: (
-          <span className="flex items-center gap-2">
-            {getPermissionIcon("EDIT")}
-            <span>{t("tenantResources.knowledgeBase.permission.EDIT")}</span>
-          </span>
-        ),
-      },
-      {
-        value: "READ_ONLY",
-        label: (
-          <span className="flex items-center gap-2">
-            {getPermissionIcon("READ_ONLY")}
-            <span>
-              {t("tenantResources.knowledgeBase.permission.READ_ONLY")}
-            </span>
-          </span>
-        ),
-      },
-      {
-        value: "PRIVATE",
-        label: (
-          <span className="flex items-center gap-2">
-            {getPermissionIcon("PRIVATE")}
-            <span>{t("tenantResources.knowledgeBase.permission.PRIVATE")}</span>
-          </span>
-        ),
-      },
-    ];
-
-    // Reset showDetail and showChunk state when knowledge base name changes
-    React.useEffect(() => {
-      setShowDetail(false);
-      setShowChunk(false);
-      setSummary("");
-    }, [knowledgeBaseName]);
-
     // Initialize default group ID when entering create mode
     React.useEffect(() => {
-      if (isCreatingMode && tenantId && onSelectedGroupIdsChange) {
-        const initDefaultGroup = async () => {
-          try {
-            const defaultGroupId = await getTenantDefaultGroupId(tenantId);
-            if (defaultGroupId && accessibleGroupIds.includes(defaultGroupId)) {
-              onSelectedGroupIdsChange([defaultGroupId]);
-            }
-          } catch (error) {
-            log.error("Failed to get tenant default group:", error);
+      if (
+        !isCreatingMode ||
+        !tenantId ||
+        !onSelectedGroupIdsChange ||
+        groupsEdited.current
+      )
+        return;
+      let active = true;
+      void getTenantDefaultGroupId(tenantId)
+        .then((defaultGroupId) => {
+          if (
+            active &&
+            !groupsEdited.current &&
+            defaultGroupId &&
+            accessibleGroupIds.includes(defaultGroupId)
+          ) {
+            onSelectedGroupIdsChange([defaultGroupId]);
           }
-        };
-        initDefaultGroup();
-      }
+        })
+        .catch((error) =>
+          log.error("Failed to get tenant default group:", error)
+        );
+      return () => {
+        active = false;
+      };
     }, [
       isCreatingMode,
       tenantId,
@@ -618,15 +565,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onSelectedGroupIdsChange,
     ]);
 
-    // Clear group IDs when permission is set to PRIVATE
-    React.useEffect(() => {
-      if (ingroupPermission === "PRIVATE" && onSelectedGroupIdsChange) {
-        onSelectedGroupIdsChange([]);
-      }
-    }, [ingroupPermission, onSelectedGroupIdsChange]);
-
-    // Check if group select should be disabled (when permission is PRIVATE)
-    const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
     const embeddingModelsForOptions = availableEmbeddingModels || [];
     const availableEmbeddingModelKeys = new Set(
       embeddingModelsForOptions
@@ -651,7 +589,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     // Load frequency options from backend API
     useEffect(() => {
       const loadFrequencyOptions = async () => {
-        if (showDetail && frequencyOptions.length === 0) {
+        if (showSummary && frequencyOptions.length === 0) {
           try {
             const options =
               await knowledgeBaseService.fetchSummaryFrequencyOptions();
@@ -669,18 +607,18 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         }
       };
       loadFrequencyOptions();
-    }, [showDetail, frequencyOptions.length, t]);
+    }, [showSummary, frequencyOptions.length, t]);
 
     // Load available models when showing detail
     useEffect(() => {
       const loadModels = async () => {
-        if (showDetail && availableModels.length === 0) {
+        if (showSummary && availableModels.length === 0) {
           setIsLoadingModels(true);
           try {
-            const models = await modelService.getLLMModels();
-            setAvailableModels(
-              models.filter((m) => m.connect_status === "available")
+            const models = (await modelService.getLLMModels()).filter(
+              (model) => model.connect_status === "available"
             );
+            setAvailableModels(models);
 
             // Determine initial selection order:
             // 1) Knowledge base's own configured model (server-side config)
@@ -752,27 +690,62 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         }
       };
       loadModels();
-    }, [showDetail]);
+    }, [showSummary]);
 
-    // Get summary when showing detailed content
-    React.useEffect(() => {
-      const fetchSummary = async () => {
-        if (showDetail && knowledgeBaseId) {
-          try {
-            const result =
-              await knowledgeBaseService.getSummary(knowledgeBaseId);
-            setSummary(result);
-          } catch (error) {
-            log.error(t("knowledgeBase.error.getSummary"), error);
-            message.error(t("document.summary.error"));
-          }
-        }
+    useEffect(() => {
+      if (!showSummary) return;
+      let cancelled = false;
+      void knowledgeBaseService
+        .getSummary(knowledgeBaseId)
+        .then((result) => {
+          if (cancelled) return;
+          const editorText = unwrapKnowledgeBaseSummary(result);
+          setSummary(editorText);
+          setSavedSummary(editorText);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          log.error(t("knowledgeBase.error.getSummary"), error);
+          message.error(t("document.summary.error"));
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoadingSummary(false);
+        });
+      return () => {
+        cancelled = true;
       };
-      fetchSummary();
-    }, [showDetail, knowledgeBaseName]);
+    }, [showSummary, knowledgeBaseId, message, t]);
 
-    // Handle auto summary
+    const persistSummary = async (
+      content: string,
+      successMessage = t("document.summary.saveSuccess")
+    ) => {
+      if (summarySavePending.current) return;
+      summarySavePending.current = true;
+      setIsSaving(true);
+      setSummarySaveFailed(false);
+      try {
+        await knowledgeBaseService.changeSummary(knowledgeBaseId, content);
+        setSavedSummary(content);
+        onCatalogRefresh?.();
+        message.success(successMessage);
+      } catch (error) {
+        setSummarySaveFailed(true);
+        log.error(t("document.summary.saveError"), error);
+        message.error(
+          error instanceof Error
+            ? error.message
+            : t("document.summary.saveFailed")
+        );
+      } finally {
+        summarySavePending.current = false;
+        setIsSaving(false);
+      }
+    };
+
+    // Generate a new summary and save it only after the stream finishes.
     const handleAutoSummary = async () => {
+      if (summarySavePending.current || isSummarizing) return;
       if (!knowledgeBaseId) {
         message.warning(t("document.summary.selectKnowledgeBase"));
         return;
@@ -790,14 +763,20 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           },
           selectedModel
         );
-        // Only show success message if summary was actually generated
-        if (result && result.trim()) {
-          message.success(t("document.summary.completed"));
-        } else {
-          // If no summary was generated, show error message
-          message.error(t("knowledgeBase.summary.notGenerated"));
+        const editorText = unwrapKnowledgeBaseSummary(result);
+        if (
+          !editorText.trim() ||
+          /^Failed to generate summary(?::| for )/m.test(editorText)
+        ) {
+          throw new Error(t("knowledgeBase.summary.notGenerated"));
         }
+        setSummary(editorText);
+        await persistSummary(
+          editorText,
+          t("document.summary.generatedAndSaved")
+        );
       } catch (error) {
+        setSummary(summary);
         message.error(t("document.summary.error"));
         log.error(t("document.summary.error"), error);
       } finally {
@@ -805,36 +784,31 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     };
 
-    // Handle save summary
-    const handleSaveSummary = async () => {
-      if (!knowledgeBaseId) {
-        message.warning(t("document.summary.selectKnowledgeBase"));
+    const saveEditedSummary = async (content: string) => {
+      if (
+        !knowledgeBaseId ||
+        isReadOnlyMode ||
+        isSummarizing ||
+        (content === savedSummary && !summarySaveFailed)
+      )
         return;
-      }
-
-      if (!summary.trim()) {
+      if (!content.trim()) {
+        setSummary(savedSummary);
+        setSummarySaveFailed(false);
         message.warning(t("document.summary.emptyContent"));
         return;
       }
 
-      setIsSaving(true);
-      try {
-        await knowledgeBaseService.changeSummary(knowledgeBaseId, summary);
-        message.success(t("document.summary.saveSuccess"));
-      } catch (error: any) {
-        log.error(t("document.summary.saveError"), error);
-        const errorMessage =
-          error?.message || error?.detail || t("document.summary.saveFailed");
-        message.error(errorMessage);
-      } finally {
-        setIsSaving(false);
-        setShowDetail(false);
-      }
+      await persistSummary(content);
     };
 
-    const filteredDocuments = activeDocumentIds
-      ? sortedDocuments.filter((doc) => activeDocumentIds.has(doc.id))
-      : sortedDocuments;
+    const normalizedDocumentSearch = documentSearch.trim().toLocaleLowerCase();
+    const filteredDocuments = sortedDocuments.filter(
+      (doc) =>
+        (!activeDocumentIds || activeDocumentIds.has(doc.id)) &&
+        (!normalizedDocumentSearch ||
+          doc.name.toLocaleLowerCase().includes(normalizedDocumentSearch))
+    );
     const filteredDocumentCount = filteredDocuments.length;
     const documentPageCount = Math.max(
       1,
@@ -854,988 +828,1016 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       if (documentPage > documentPageCount) setDocumentPage(documentPageCount);
     }, [documentPage, documentPageCount]);
 
-    const containerHeightClass =
-      CONTAINER_HEIGHT_CLASS_MAP[containerHeight] ?? "h-full";
-    const titleBarHeightClass =
-      TITLE_BAR_HEIGHT_CLASS_MAP[titleBarHeight] ?? "min-h-[56px]";
-
     return (
       <div
         className={`relative flex w-full flex-col overflow-x-hidden shadow-sm ${
-          isCreatingMode
-            ? "overflow-hidden rounded-2xl border border-gray-200 bg-white"
-            : "h-full overflow-hidden rounded-2xl border border-gray-200 bg-white"
+          isCreatingMode ? "" : "h-full min-h-0 overflow-y-auto p-1"
         }`}
       >
-        {/* Title bar */}
-        <div
-          className={`${
-            isCreatingMode
-              ? "border-b border-gray-200 px-5 pb-5 pt-6"
-              : "border-b border-gray-100 px-6 pb-5 pt-6"
-          } flex-shrink-0 flex items-start ${titleBarHeightClass}`}
-        >
-          <div
-            className="flex w-full items-start justify-between gap-4"
-            style={{ width: "100%" }}
-          >
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 gap-y-2 overflow-hidden">
-              {isCreatingMode ? (
-                <div className="w-full">
-                  <h2 className="text-xl font-semibold tracking-tight text-gray-900">
-                    {t("document.title.createNew")}
+        {!isCreatingMode && (
+          <header className="mb-4 flex flex-wrap items-start justify-between gap-4 border-b border-[var(--color-border-separator)] pb-4">
+            <div className="flex min-w-0 gap-3">
+              <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-[var(--color-select)] text-[var(--color-brand)]">
+                <FolderOpen size={24} aria-hidden />
+              </span>
+              <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-1">
+                  <h2 className="break-words text-xl font-semibold text-[var(--color-text-primary)]">
+                    {knowledgeBaseName}
                   </h2>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {t("knowledgeBase.create.subtitle")}
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="flex min-w-0 flex-[1_1_260px] items-center gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                      <FileTextOutlined />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="truncate text-xl font-semibold tracking-tight text-blue-600">
-                        {knowledgeBaseName}
-                      </h3>
-                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-sm text-gray-500">
-                        <span>
-                          {t("knowledgeBase.tag.documents", {
-                            count: documents.length,
-                          })}
-                        </span>
-                        {modelMismatch && (
-                          <span
-                            className="max-w-full truncate rounded-md border border-yellow-200 bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800"
-                            title={getMismatchInfo()}
-                          >
-                            {getMismatchInfo()}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  {quotaStatus && (
-                    <div className="min-w-[240px] max-w-[420px] flex-[1_1_300px] rounded-lg border border-gray-100 bg-gray-50/80 px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                        <span className="font-medium text-gray-600">
-                          {t("knowledgeBase.capacity.title")}
-                        </span>
-                        <span className="text-gray-500">
-                          {t("knowledgeBase.capacity.available")}:{" "}
-                          {quotaAvailable}
-                        </span>
-                        <span className="text-gray-500">
-                          {t("knowledgeBase.capacity.total")}: {quotaTotal}
-                        </span>
-                        {hasQuota && (
-                          <span className="text-gray-400">
-                            {Math.round(quotaUsagePercent)}%
-                          </span>
-                        )}
-                      </div>
-                      {hasQuota && (
-                        <Progress
-                          className="!mb-0 !mt-1"
-                          percent={quotaUsagePercent}
-                          showInfo={false}
+                  {showSummary &&
+                    !isReadOnlyMode &&
+                    onCatalogKnowledgeBaseChange &&
+                    (!knowledgeBaseSource ||
+                      knowledgeBaseSource === "nexent" ||
+                      knowledgeBaseSource === "elasticsearch") && (
+                      <Can permission="kb:update">
+                        <Button
+                          type="text"
                           size="small"
-                          status={
-                            quotaStatus.kb_warning_level === "exceeded"
-                              ? "exception"
-                              : "normal"
-                          }
+                          aria-label={t("tenantResources.knowledgeBase.edit")}
+                          title={t("tenantResources.knowledgeBase.edit")}
+                          icon={<Pencil size={16} aria-hidden />}
+                          onClick={() => setEditingKnowledgeBase(true)}
                         />
-                      )}
+                      </Can>
+                    )}
+                </div>
+                {catalogKnowledgeBase && (
+                  <div className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
+                    <Clock3 size={14} aria-hidden />
+                    {t("knowledgeBase.tag.updatedAt", {
+                      date: formatDateOrFallback(
+                        catalogKnowledgeBase.updatedAt ??
+                          catalogKnowledgeBase.createdAt
+                      ),
+                    })}
+                  </div>
+                )}
+                {knowledgeBaseModel && (
+                  <div className="flex flex-wrap gap-x-3 text-sm">
+                    <span className="text-[var(--color-text-secondary)]">
+                      {t("knowledgeBase.create.field.embeddingModel")}
+                    </span>
+                    <span className="break-all">{knowledgeBaseModel}</span>
+                  </div>
+                )}
+                {quotaStatus && (
+                  <div className="max-w-md text-sm">
+                    <div className="flex flex-wrap gap-x-3">
+                      <span className="text-[var(--color-text-secondary)]">
+                        {t("knowledgeBase.capacity.title")}
+                      </span>
+                      <span>
+                        {quotaStatus.actual_readable ||
+                          formatFileSize(quotaStatus.actual_bytes)}{" "}
+                        / {quotaTotal}
+                      </span>
                     </div>
-                  )}
-                </>
-              )}
+                    {hasQuota && (
+                      <Progress
+                        percent={quotaUsagePercent}
+                        size="small"
+                        showInfo={false}
+                        status={
+                          quotaStatus.kb_warning_level === "exceeded"
+                            ? "exception"
+                            : "normal"
+                        }
+                      />
+                    )}
+                  </div>
+                )}
+                {modelMismatch && (
+                  <div className="text-sm text-[var(--color-warning)]">
+                    {getMismatchInfo()}
+                  </div>
+                )}
+                {catalogKnowledgeBase && (
+                  <KnowledgeBaseDetailTags
+                    knowledgeBaseId={knowledgeBaseId}
+                    readOnly={isReadOnlyMode}
+                    onChange={onCatalogRefresh}
+                  />
+                )}
+              </div>
             </div>
-            {/* Right: tag filter, Tag Management, overview and detail buttons */}
+            {!isDataMate && (
+              <div className="flex flex-wrap items-center gap-2">
+                {!isReadOnlyMode && (
+                  <UploadArea
+                    indexName={knowledgeBaseId || knowledgeBaseName}
+                    onFileSelect={onFileSelect}
+                    onUpload={onUpload}
+                    isUploading={isUploading}
+                    disabled={uploadStorageBlocked || !knowledgeBaseId}
+                    modelMismatch={modelMismatch}
+                    renderTrigger={({ disabled, loading }) => (
+                      <Tooltip
+                        title={
+                          uploadStorageBlocked
+                            ? uploadStorageBlockedMessage ||
+                              t("quota.uploadBlocked")
+                            : undefined
+                        }
+                      >
+                        <span className="inline-flex">
+                          <Button
+                            type="primary"
+                            icon={<Upload size={16} aria-hidden />}
+                            disabled={disabled}
+                            loading={loading}
+                            onClick={() => setShowChunk(false)}
+                          >
+                            {t("knowledgeBase.detail.upload")}
+                          </Button>
+                        </span>
+                      </Tooltip>
+                    )}
+                  />
+                )}
+                {onRefresh && (
+                  <Button
+                    icon={<ReloadOutlined spin={isUploading} />}
+                    onClick={onRefresh}
+                    disabled={isUploading || docState.isLoadingDocuments}
+                  >
+                    {t("common.refresh")}
+                  </Button>
+                )}
+                {!isReadOnlyMode && onDeleteKnowledgeBase && (
+                  <Can permission="kb:delete">
+                    <Button
+                      danger
+                      icon={<Trash2 size={16} aria-hidden />}
+                      onClick={onDeleteKnowledgeBase}
+                    >
+                      {t("knowledgeBase.detail.delete")}
+                    </Button>
+                  </Can>
+                )}
+              </div>
+            )}
+          </header>
+        )}
+        <div
+          className={
+            showSummary
+              ? "grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,28%)]"
+              : undefined
+          }
+        >
+          <div className="min-w-0">
             {!isCreatingMode && !isDataMate && (
-              <div className="ml-3 flex shrink-0 flex-wrap items-center justify-end gap-2">
-                <Popover
-                  trigger="click"
-                  placement="bottomRight"
-                  title={t("document.tagFilter.placeholder")}
-                  onOpenChange={(open) => {
-                    if (open) setTagsUiRequested(true);
+              <>
+                <Tabs
+                  activeKey={showChunk ? "chunks" : "documents"}
+                  onChange={(key) => {
+                    setChunkDocumentId(undefined);
+                    setShowChunk(key === "chunks");
                   }}
-                  content={
-                    <div className="w-64">
-                      {assignDefinitions ? (
-                        <>
-                          <TagFilterControls
-                            definitions={assignDefinitions}
-                            value={documentPredicates}
-                            onChange={setDocumentPredicates}
-                          />
-                          {documentPredicates.length > 0 && (
+                  items={[
+                    {
+                      key: "documents",
+                      label: t("knowledgeBase.tag.documents", {
+                        count: documents.length,
+                      }),
+                      icon: <FileText size={16} aria-hidden />,
+                    },
+                    {
+                      key: "chunks",
+                      label:
+                        `${t("document.button.detail")} ${catalogKnowledgeBase?.chunkCount ?? ""}`.trim(),
+                      icon: <Layers size={16} aria-hidden />,
+                    },
+                  ]}
+                  tabBarExtraContent={
+                    !showChunk && (
+                      <Input
+                        aria-label={t("knowledgeBase.detail.documentSearch")}
+                        placeholder={t("knowledgeBase.detail.documentSearch")}
+                        prefix={<Search size={16} aria-hidden />}
+                        allowClear
+                        value={documentSearch}
+                        onChange={(event) => {
+                          setDocumentSearch(event.target.value);
+                          setDocumentPage(1);
+                        }}
+                        className="!max-w-56"
+                      />
+                    )
+                  }
+                />
+                {!showChunk && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <Popover
+                      trigger="click"
+                      placement="bottomRight"
+                      title={t("document.tagFilter.placeholder")}
+                      onOpenChange={(open) => {
+                        if (open) setTagsUiRequested(true);
+                      }}
+                      content={
+                        <div className="w-64">
+                          {assignDefinitions ? (
+                            <>
+                              <TagFilterControls
+                                definitions={assignDefinitions}
+                                value={documentPredicates}
+                                onChange={setDocumentPredicates}
+                              />
+                              {documentPredicates.length > 0 && (
+                                <Button
+                                  size="small"
+                                  block
+                                  className="mt-2"
+                                  onClick={() => setDocumentPredicates([])}
+                                >
+                                  {t("document.tagFilter.clear")}
+                                </Button>
+                              )}
+                            </>
+                          ) : tagLibrariesLoading ||
+                            assignDefinitionsLoading ? (
+                            <div className="flex justify-center py-2">
+                              <Spin size="small" />
+                            </div>
+                          ) : (
                             <Button
                               size="small"
                               block
-                              className="mt-2"
-                              onClick={() => setDocumentPredicates([])}
+                              onClick={() => {
+                                if (tagLibrariesError)
+                                  void refreshTagLibraries();
+                                else void refreshAssignDefinitions();
+                              }}
                             >
-                              {t("document.tagFilter.clear")}
+                              {t("repository.common.retry")}
                             </Button>
                           )}
-                        </>
-                      ) : tagLibrariesLoading || assignDefinitionsLoading ? (
-                        <div className="flex justify-center py-2">
-                          <Spin size="small" />
                         </div>
-                      ) : (
-                        <Button
-                          size="small"
-                          block
-                          onClick={() => {
-                            if (tagLibrariesError) void refreshTagLibraries();
-                            else void refreshAssignDefinitions();
-                          }}
-                        >
-                          {t("repository.common.retry")}
-                        </Button>
-                      )}
-                    </div>
-                  }
-                >
-                  <Button
-                    icon={<FilterOutlined />}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    {t("document.tagFilter.placeholder")}
-                  </Button>
-                </Popover>
-                {!isReadOnlyMode && (
-                  <Button
-                    icon={<Tag size={16} />}
-                    onClick={() => {
-                      setTagsUiRequested(true);
-                      setTagManagementOpen(true);
-                    }}
-                  >
-                    {t("knowledgeBase.button.tagManagement")}
-                  </Button>
-                )}
-                <Button
-                  type={showDetail ? "primary" : "default"}
-                  size="middle"
-                  icon={<BookText size={16} />}
-                  onClick={() => {
-                    if (showDetail) {
-                      // Close detail view and reset summary
-                      setShowDetail(false);
-                      setSummary("");
-                    } else {
-                      setShowDetail(true);
-                      setShowChunk(false);
-                    }
-                  }}
-                >
-                  {t("document.button.overview")}
-                </Button>
-                <Button
-                  type={showChunk ? "primary" : "default"}
-                  size="middle"
-                  icon={<Pilcrow size={16} />}
-                  onClick={() => {
-                    if (showChunk) {
-                      setShowChunk(false);
-                    } else {
-                      setShowChunk(true);
-                      setShowDetail(false);
-                    }
-                  }}
-                >
-                  {t("document.button.detail")}
-                </Button>
-                {onRefresh && (
-                  <Tooltip title={t("common.refresh")}>
-                    <Button
-                      aria-label={t("common.refresh")}
-                      className="!h-10 !w-10 !rounded-lg !p-0"
-                      icon={<ReloadOutlined spin={isUploading} />}
-                      onClick={onRefresh}
-                      disabled={isUploading || docState.isLoadingDocuments}
-                    />
-                  </Tooltip>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Document list */}
-
-        <div
-          className={documentListClassName}
-          onDragOver={(e) => {
-            if (!isCreatingMode && knowledgeBaseName) {
-              return;
-            }
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-        >
-          {showChunk ? (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="min-h-0 flex-1">
-                <DocumentChunk
-                  knowledgeBaseName={knowledgeBaseName}
-                  knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
-                  documents={documents}
-                  getFileIcon={getFileIcon}
-                  onChunkCountChange={onChunkCountChange}
-                  permission={permission}
-                />
-              </div>
-              <div className="flex shrink-0 justify-end py-3">
-                <Button
-                  size="large"
-                  onClick={() => {
-                    setShowChunk(false);
-                  }}
-                >
-                  {t("common.back")}
-                </Button>
-              </div>
-            </div>
-          ) : showDetail ? (
-            <div className="flex h-full flex-col">
-              <div className="flex items-center justify-between mb-5">
-                <span className="font-bold text-lg">
-                  {t("document.summary.title")}
-                </span>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">
-                      {t("document.summary.modelLabel")}:
-                    </span>
-                    <Select
-                      value={selectedModel}
-                      onChange={setSelectedModel}
-                      loading={isLoadingModels}
-                      disabled={isSummarizing}
-                      style={{ width: 200 }}
-                      placeholder={t("document.summary.modelPlaceholder")}
-                      options={availableModels.map((model) => ({
-                        value: model.id,
-                        label: model.displayName,
-                        disabled: model.connect_status === "unavailable",
-                      }))}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">
-                      {t("knowledgeBase.tag.autoSummary.label")}
-                    </span>
-                    <Select
-                      value={summaryFrequency || "disabled"}
-                      onChange={(value) => {
-                        const freq = value === "disabled" ? null : value;
-                        if (onSummaryFrequencyChange) {
-                          onSummaryFrequencyChange(freq);
-                        }
-                      }}
-                      disabled={isReadOnlyMode}
-                      style={{ width: 85 }}
-                      placeholder={t("knowledgeBase.tag.autoSummary.off")}
-                      options={frequencyOptions.map((opt) => ({
-                        value: opt.value,
-                        label:
-                          opt.value === "disabled"
-                            ? t("knowledgeBase.tag.autoSummary.off")
-                            : opt.label,
-                      }))}
-                    />
-                  </div>
-                  <Button
-                    type="default"
-                    onClick={handleAutoSummary}
-                    loading={isSummarizing}
-                    disabled={
-                      !knowledgeBaseName ||
-                      isSummarizing ||
-                      !selectedModel ||
-                      isReadOnlyMode
-                    }
-                  >
-                    {t("document.button.autoSummary")}
-                  </Button>
-                </div>
-              </div>
-              <div className="flex-1 min-h-0 mb-5 border border-gray-300 rounded-md overflow-auto">
-                {isReadOnlyMode ? (
-                  <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
-                    <MarkdownRenderer content={summary} />
-                  </div>
-                ) : isSummarizing ? (
-                  <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
-                    <MarkdownRenderer content={summary} />
-                  </div>
-                ) : (
-                  <div
-                    className="w-full h-full cursor-text hover:bg-gray-50"
-                    onClick={() => {
-                      if (!isSummarizing) {
-                        setIsEditing(true);
                       }
-                    }}
-                  >
-                    {isEditing ? (
-                      <TextArea
-                        value={summary}
-                        onChange={(e) => setSummary(e.target.value)}
-                        onBlur={() => setIsEditing(false)}
-                        className="w-full h-full border-0 resize-none focus:shadow-none"
-                        style={{
-                          height: "100%",
-                          padding: "20px",
-                          fontSize: "18px",
-                          lineHeight: "1.7",
-                          whiteSpace: "pre-wrap",
+                    >
+                      <Button
+                        icon={<FilterOutlined />}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {t("document.tagFilter.placeholder")}
+                      </Button>
+                    </Popover>
+                    {!isReadOnlyMode && (
+                      <Button
+                        icon={<Tag size={16} />}
+                        onClick={() => {
+                          setTagsUiRequested(true);
+                          setTagManagementOpen(true);
                         }}
-                        autoFocus
-                        placeholder={t("document.summary.placeholder")}
-                      />
-                    ) : (
-                      <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
-                        <MarkdownRenderer content={summary} />
-                      </div>
+                      >
+                        {t("knowledgeBase.button.tagManagement")}
+                      </Button>
                     )}
                   </div>
                 )}
-              </div>
-              <div className="flex gap-3 justify-end">
-                {!isReadOnlyMode && (
-                  <Button
-                    type="primary"
-                    size="large"
-                    onClick={handleSaveSummary}
-                    loading={isSaving}
-                    disabled={!summary || isSaving}
-                  >
-                    {t("common.save")}
-                  </Button>
-                )}
-                <Button
-                  size="large"
-                  onClick={() => {
-                    setShowDetail(false);
-                    setSummary("");
-                  }}
-                >
-                  {t("common.back")}
-                </Button>
-              </div>
-            </div>
-          ) : docState.isLoadingDocuments || isNewlyCreatedAndWaiting ? (
-            <div className="flex items-center justify-center h-full border border-gray-200 rounded-md">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
-                <p className="text-sm text-gray-600">
-                  {isNewlyCreatedAndWaiting
-                    ? t("document.status.waitingForTask")
-                    : t("document.status.loadingList")}
-                </p>
-              </div>
-            </div>
-          ) : isCreatingMode ? (
-            <div className="flex flex-col">
-              {hasDocuments || isUploading || docState.isLoadingDocuments ? (
-                <div className="flex min-h-[220px] items-center justify-center rounded-md border border-gray-200">
+              </>
+            )}
+
+            {/* Document list */}
+
+            <div
+              className={documentListClassName}
+              onDragOver={(e) => {
+                if (!isCreatingMode && knowledgeBaseName) {
+                  return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
+              {showChunk ? (
+                <div className="flex h-[65vh] min-h-96 flex-col">
+                  <div className="min-h-0 flex-1">
+                    <DocumentChunk
+                      knowledgeBaseName={knowledgeBaseName}
+                      knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
+                      documents={documents}
+                      initialDocumentId={chunkDocumentId}
+                      knowledgeBaseChunkCount={catalogKnowledgeBase?.chunkCount}
+                      onChunkCountChange={onChunkCountChange}
+                      permission={permission}
+                    />
+                  </div>
+                </div>
+              ) : docState.isLoadingDocuments || isNewlyCreatedAndWaiting ? (
+                <div className="flex items-center justify-center h-full border border-gray-200 rounded-md">
                   <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
                     <p className="text-sm text-gray-600">
-                      {t("document.status.waitingForTask")}
+                      {isNewlyCreatedAndWaiting
+                        ? t("document.status.waitingForTask")
+                        : t("document.status.loadingList")}
                     </p>
                   </div>
                 </div>
+              ) : isCreatingMode ? (
+                <div className="flex flex-col">
+                  {hasDocuments ||
+                  isUploading ||
+                  docState.isLoadingDocuments ? (
+                    <div className="flex min-h-[220px] items-center justify-center rounded-md border border-gray-200">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                        <p className="text-sm text-gray-600">
+                          {t("document.status.waitingForTask")}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <section className="space-y-5 px-6 py-5">
+                        <h3 className="text-base font-semibold">
+                          {t("knowledgeBase.create.basicInfo")}
+                        </h3>
+                        <div>
+                          <label
+                            htmlFor="kb-create-name"
+                            className="mb-2 block text-sm font-medium"
+                          >
+                            {t("knowledgeBase.create.field.name")}{" "}
+                            <span className="text-red-500">*</span>
+                          </label>
+                          <Input
+                            id="kb-create-name"
+                            value={knowledgeBaseName}
+                            onChange={(e) =>
+                              onNameChange && onNameChange(e.target.value)
+                            }
+                            placeholder={t(
+                              "knowledgeBase.create.namePlaceholder",
+                              "例如：产品知识中心"
+                            )}
+                            size="large"
+                            status={
+                              nameStatus ===
+                                NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
+                              nameStatus ===
+                                NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT
+                                ? "error"
+                                : undefined
+                            }
+                            autoFocus
+                            disabled={
+                              hasDocuments ||
+                              isUploading ||
+                              docState.isLoadingDocuments
+                            }
+                          />
+                          {(nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
+                            nameStatus ===
+                              NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT) && (
+                            <div className="mt-2 flex items-center gap-1 text-xs text-red-500">
+                              <AlertCircle size={14} />
+                              <span>
+                                {t("tenantResources.knowledgeBase.nameExists")}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {onEmbeddingModelChange && (
+                          <div>
+                            <label
+                              htmlFor="kb-create-model"
+                              className="mb-2 block text-sm font-medium"
+                            >
+                              {t("knowledgeBase.create.field.embeddingModel")}{" "}
+                              <span className="text-red-500">*</span>
+                            </label>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Select
+                                id="kb-create-model"
+                                value={selectedEmbeddingModel}
+                                onChange={onEmbeddingModelChange}
+                                className="min-w-40 flex-1"
+                                size="large"
+                                placeholder={
+                                  t(
+                                    "knowledgeBase.create.embeddingModelPlaceholder"
+                                  ) || "Select embedding model"
+                                }
+                                allowClear={false}
+                                options={[
+                                  {
+                                    label: t(
+                                      "modelConfig.option.embeddingModel"
+                                    ),
+                                    options: embeddingModelsForOptions
+                                      .filter(
+                                        (model) => model.type === "embedding"
+                                      )
+                                      .map((model) => ({
+                                        value: [
+                                          model.displayName,
+                                          model.type,
+                                        ].join("::"),
+                                        label: model.displayName,
+                                        disabled:
+                                          !isEmbeddingModelSelectable(model),
+                                      })),
+                                  },
+                                  {
+                                    label: t(
+                                      "modelConfig.option.multiEmbeddingModel"
+                                    ),
+                                    options: embeddingModelsForOptions
+                                      .filter(
+                                        (model) =>
+                                          model.type === "multi_embedding"
+                                      )
+                                      .map((model) => ({
+                                        value: [
+                                          model.displayName,
+                                          model.type,
+                                        ].join("::"),
+                                        label: model.displayName,
+                                        disabled:
+                                          !isEmbeddingModelSelectable(model),
+                                      })),
+                                  },
+                                ].filter((group) => group.options.length > 0)}
+                              />
+                              <Button
+                                icon={<Settings2 size={14} />}
+                                onClick={() => setEmbeddingAdvancedOpen(true)}
+                                disabled={
+                                  !selectedEmbeddingModel ||
+                                  !availableEmbeddingModels ||
+                                  availableEmbeddingModels.length === 0
+                                }
+                              >
+                                {t("knowledgeBase.create.modelParameters")}
+                              </Button>
+                            </div>
+                            {selectedEmbeddingModelOption && (
+                              <dl className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-[var(--color-select)] sm:grid-cols-4">
+                                {[
+                                  [
+                                    "knowledgeBase.create.vectorDimension",
+                                    selectedEmbeddingModelOption.maxTokens,
+                                  ],
+                                  [
+                                    "modelConfig.slider.expectedChunkSize",
+                                    selectedEmbeddingModelOption.expectedChunkSize,
+                                  ],
+                                  [
+                                    "modelConfig.slider.maximumChunkSize",
+                                    selectedEmbeddingModelOption.maximumChunkSize,
+                                  ],
+                                  [
+                                    "modelConfig.input.chunkingBatchSize",
+                                    selectedEmbeddingModelOption.chunkingBatchSize,
+                                  ],
+                                ].map(([label, value]) => (
+                                  <div
+                                    key={label}
+                                    className="min-w-0 px-3 py-2"
+                                  >
+                                    <dt className="text-xs text-[var(--color-text-secondary)]">
+                                      {t(String(label))}
+                                    </dt>
+                                    <dd className="text-sm font-medium">
+                                      {value || "—"}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            )}
+                            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+                              {t(
+                                selectedEmbeddingModelOption?.type ===
+                                  "multi_embedding"
+                                  ? "knowledgeBase.create.multimodalModelHint"
+                                  : "knowledgeBase.create.modelHint"
+                              )}
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="shrink-0">
+                          <div className="mb-2 text-sm font-medium">
+                            {t("knowledgeBase.create.uploadTitle")}{" "}
+                            <span className="text-red-500">*</span>
+                          </div>
+                          <div className="min-h-36">
+                            <UploadArea
+                              ref={uploadAreaRef}
+                              onFileSelect={onFileSelect}
+                              onUpload={onUpload || (async () => {})}
+                              isUploading={isUploading}
+                              isDragging={isDragging}
+                              onDragOver={onDragOver}
+                              onDragLeave={onDragLeave}
+                              onDrop={onDrop}
+                              disabled={uploadStorageBlocked || isReadOnlyMode}
+                              disabledMessage={
+                                uploadStorageBlocked
+                                  ? uploadStorageBlockedMessage ||
+                                    t(
+                                      "quota.uploadBlocked",
+                                      "Uploads are blocked - storage limit reached"
+                                    )
+                                  : undefined
+                              }
+                              componentHeight={uploadHeight}
+                              isCreatingMode
+                              indexName={
+                                knowledgeBaseId || "new-knowledge-base"
+                              }
+                              newKnowledgeBaseName={knowledgeBaseName}
+                              modelMismatch={modelMismatch}
+                              onNameStatusChange={setNameStatus}
+                              selectedFiles={selectedFiles}
+                              autoUpload={false}
+                            />
+                          </div>
+                          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+                            {t("knowledgeBase.create.uploadHint")}
+                          </p>
+                        </div>
+                      </section>
+                      <KnowledgeBaseCreateSettings
+                        preserveSourceFile={preserveSourceFile}
+                        onPreserveSourceFileChange={onPreserveSourceFileChange}
+                        quotaLimitBytes={quotaLimitBytes}
+                        onQuotaLimitBytesChange={onQuotaLimitBytesChange}
+                        permission={ingroupPermission}
+                        onPermissionChange={(value) => {
+                          if (value === "PRIVATE") {
+                            groupsEdited.current = true;
+                            onSelectedGroupIdsChange?.([]);
+                          }
+                          onIngroupPermissionChange?.(value);
+                        }}
+                        groups={groups}
+                        selectedGroupIds={selectedGroupIds ?? []}
+                        onGroupsChange={(ids) => {
+                          groupsEdited.current = true;
+                          onSelectedGroupIdsChange?.(ids);
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : filteredDocuments.length > 0 ? (
+                <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200">
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    <table className="min-w-full bg-white">
+                      <thead className="sticky top-0 z-10 bg-gray-50">
+                        <tr>
+                          <th
+                            className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.NAME}]`}
+                          >
+                            {t("document.table.header.name")}
+                          </th>
+                          {!isDataMate && (
+                            <th className="min-w-[180px] px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                              {t("document.table.header.tags")}
+                            </th>
+                          )}
+                          <th
+                            className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.STATUS}]`}
+                          >
+                            {t("document.table.header.status")}
+                          </th>
+                          {!isDataMate && (
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500">
+                              {t("knowledgeBase.detail.chunkCount")}
+                            </th>
+                          )}
+                          {!isDataMate && (
+                            <th
+                              className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.SIZE}]`}
+                            >
+                              {t("document.table.header.size")}
+                            </th>
+                          )}
+                          <th
+                            className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.DATE}]`}
+                          >
+                            {t("document.table.header.date")}
+                          </th>
+                          {!isDataMate && (
+                            <th
+                              className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.ACTION}]`}
+                            >
+                              {t("document.table.header.action")}
+                            </th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {pagedDocuments.map((doc) => (
+                          <tr
+                            key={doc.id}
+                            className="transition-colors hover:bg-gray-50"
+                          >
+                            <td className="px-4 py-3">
+                              <div className="flex items-center">
+                                <span
+                                  className={`${LAYOUT.ICON_MARGIN} ${LAYOUT.ICON_SIZE}`}
+                                >
+                                  {getFileIcon(doc.type)}
+                                </span>
+                                <span
+                                  className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate max-w-[${DOCUMENT_NAME_CONFIG.MAX_WIDTH}] whitespace-${DOCUMENT_NAME_CONFIG.WHITE_SPACE} overflow-${DOCUMENT_NAME_CONFIG.OVERFLOW} text-${DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW}`}
+                                  title={doc.name}
+                                >
+                                  {doc.name}
+                                </span>
+                                {(() => {
+                                  const entry = projectionByDocument.get(
+                                    doc.id
+                                  );
+                                  const status =
+                                    entry?.projection_status?.status;
+                                  if (
+                                    status === "pending" ||
+                                    status === "failed"
+                                  ) {
+                                    return (
+                                      <Tooltip
+                                        title={t(
+                                          status === "failed"
+                                            ? "document.tagProjection.failed"
+                                            : "document.tagProjection.pending"
+                                        )}
+                                      >
+                                        <span
+                                          className={`ml-1 inline-flex items-center rounded px-1 text-[10px] leading-4 ${
+                                            status === "failed"
+                                              ? "bg-red-100 text-red-700"
+                                              : "bg-amber-100 text-amber-700"
+                                          }`}
+                                        >
+                                          {status}
+                                        </span>
+                                      </Tooltip>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </div>
+                            </td>
+                            {!isDataMate && (
+                              <td className="px-4 py-3 align-top">
+                                {knowledgeBaseId &&
+                                (doc.tags ?? []).length > 0 ? (
+                                  <TagChips
+                                    assignments={doc.tags ?? []}
+                                    max={5}
+                                    overflowLabel="..."
+                                    singleLine
+                                  />
+                                ) : (
+                                  <span className="text-sm text-gray-400">
+                                    —
+                                  </span>
+                                )}
+                              </td>
+                            )}
+                            <td className="px-4 py-3">
+                              <div className="flex items-center">
+                                <DocumentStatus
+                                  status={doc.status}
+                                  showIcon={true}
+                                  errorCode={doc.error_code}
+                                  errorReason={doc.error_reason}
+                                  kbId={knowledgeBaseId}
+                                  docId={doc.id}
+                                  fileId={doc.file_id}
+                                  processedChunkNum={doc.processed_chunk_num}
+                                  totalChunkNum={doc.total_chunk_num}
+                                />
+                              </div>
+                            </td>
+                            {!isDataMate && (
+                              <td className="px-4 py-3 text-right text-sm tabular-nums text-gray-600">
+                                {doc.chunk_num ?? doc.total_chunk_num ?? "—"}
+                              </td>
+                            )}
+                            {!isDataMate && (
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {formatFileSize(doc.size)}
+                              </td>
+                            )}
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {new Date(doc.create_time).toLocaleString()}
+                            </td>
+                            {!isDataMate && (
+                              <td className="px-4 py-3">
+                                <div className="flex flex-wrap gap-2">
+                                  {(doc.chunk_num ?? doc.total_chunk_num ?? 0) >
+                                    0 && (
+                                    <button
+                                      type="button"
+                                      className={LAYOUT.ACTION_PREVIEW_TEXT}
+                                      onClick={() => {
+                                        setChunkDocumentId(doc.id);
+                                        setShowChunk(true);
+                                      }}
+                                    >
+                                      {t("knowledgeBase.detail.viewChunks")}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => {
+                                      const objectName =
+                                        extractObjectNameFromUrl(doc.id) ||
+                                        undefined;
+                                      if (!objectName) {
+                                        message.warning(
+                                          t("filePreview.previewFailed")
+                                        );
+                                        return;
+                                      }
+
+                                      setSelectedFile({
+                                        objectName,
+                                        fileName: doc.name,
+                                        fileType: doc.type,
+                                        fileSize: doc.size,
+                                      });
+                                    }}
+                                    className={LAYOUT.ACTION_PREVIEW_TEXT}
+                                    title={t("common.preview")}
+                                  >
+                                    {t("common.preview")}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (!knowledgeBaseId) return;
+                                      setTagsUiRequested(true);
+                                      setAssignTarget({
+                                        docId: doc.id,
+                                        canEdit: !isReadOnlyMode,
+                                      });
+                                    }}
+                                    className={LAYOUT.ACTION_PREVIEW_TEXT}
+                                    title={t("document.action.assignTags")}
+                                  >
+                                    {t("document.action.assignTags")}
+                                  </button>
+                                  {!isReadOnlyMode && (
+                                    <button
+                                      onClick={() =>
+                                        onDelete(doc.id, doc.file_id)
+                                      }
+                                      className={LAYOUT.ACTION_DELETE_TEXT}
+                                      title={
+                                        doc.status ===
+                                          DOCUMENT_STATUS.PROCESSING ||
+                                        doc.status ===
+                                          DOCUMENT_STATUS.FORWARDING
+                                          ? t("document.delete.terminateTask")
+                                          : undefined
+                                      }
+                                    >
+                                      {t("common.delete")}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {!isDataMate && (
+                    <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-2 text-xs">
+                      <span>
+                        {t("agentConfig.list.total", {
+                          count: filteredDocumentCount,
+                        })}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Select
+                          aria-label={t("agentConfig.list.pageSize")}
+                          value={documentPageSize}
+                          options={[10, 20, 50].map((size) => ({
+                            value: size,
+                            label: t("agentConfig.list.perPage", {
+                              count: size,
+                            }),
+                          }))}
+                          onChange={(size) => {
+                            setDocumentPageSize(size);
+                            setDocumentPage(1);
+                          }}
+                          className="!h-8 !w-[116px]"
+                        />
+                        <Pagination
+                          current={currentDocumentPage}
+                          pageSize={documentPageSize}
+                          total={filteredDocumentCount}
+                          showSizeChanger={false}
+                          onChange={setDocumentPage}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
-                <div className="flex flex-col gap-3 px-3 py-4">
-                  <div className="shrink-0">
-                    <label className="mb-2 block text-sm font-medium text-gray-900">
-                      {t("knowledgeBase.create.field.name")}{" "}
-                      <span className="text-red-500">*</span>
-                    </label>
-                    <Input
-                      value={knowledgeBaseName}
-                      onChange={(e) =>
-                        onNameChange && onNameChange(e.target.value)
-                      }
-                      placeholder={t(
-                        "knowledgeBase.create.namePlaceholder",
-                        "例如：产品知识中心"
-                      )}
-                      className="!rounded-xl"
-                      size="large"
-                      status={
-                        nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
-                        nameStatus === NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT
-                          ? "error"
-                          : undefined
-                      }
-                      autoFocus
-                      disabled={
-                        hasDocuments ||
-                        isUploading ||
-                        docState.isLoadingDocuments
-                      }
-                    />
-                    {(nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
-                      nameStatus ===
-                        NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT) && (
-                      <div className="mt-2 flex items-center gap-1 text-xs text-red-500">
-                        <AlertCircle size={14} />
-                        <span>
-                          {t("tenantResources.knowledgeBase.nameExists")}
+                <div className="flex h-full min-h-[180px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/40 text-center text-sm text-gray-400">
+                  {normalizedDocumentSearch || documentPredicates.length > 0
+                    ? t("knowledgeBase.detail.noMatchingDocuments")
+                    : t("document.hint.noDocuments")}
+                </div>
+              )}
+            </div>
+
+            {!isCreatingMode && isDataMate && (
+              <p className="pt-3 text-sm text-[var(--color-text-secondary)]">
+                {t("knowledgeBase.datamate.editDisabled")}
+              </p>
+            )}
+          </div>
+          {showSummary && (
+            <aside className="min-w-0 space-y-4">
+              <Card size="small" variant="outlined">
+                <div className="flex min-w-0 flex-col">
+                  <div className="mb-3 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="flex items-center gap-2 font-semibold">
+                        <Sparkles
+                          size={16}
+                          className="text-[var(--color-brand)]"
+                          aria-hidden
+                        />
+                        {t("document.summary.title")}
+                      </h3>
+                      <Button
+                        icon={<Sparkles size={16} aria-hidden />}
+                        data-summary-action
+                        onClick={handleAutoSummary}
+                        loading={isSummarizing}
+                        disabled={
+                          !knowledgeBaseId ||
+                          isSummarizing ||
+                          isLoadingSummary ||
+                          isSaving ||
+                          !selectedModel ||
+                          isReadOnlyMode
+                        }
+                      >
+                        {t("document.button.autoSummary")}
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(6rem,25%)] gap-2">
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <span className="text-sm text-[var(--color-text-secondary)]">
+                          {t("document.summary.modelLabel")}
                         </span>
+                        <Select
+                          value={selectedModel || undefined}
+                          onChange={setSelectedModel}
+                          loading={isLoadingModels}
+                          disabled={isReadOnlyMode || isSummarizing}
+                          aria-label={t("document.summary.modelLabel")}
+                          className="w-full min-w-0"
+                          placeholder={t("document.summary.modelPlaceholder")}
+                          options={availableModels.map((model) => ({
+                            value: model.id,
+                            label: model.displayName,
+                            disabled: model.connect_status === "unavailable",
+                          }))}
+                        />
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <span className="text-sm text-[var(--color-text-secondary)]">
+                          {t("knowledgeBase.tag.autoSummary.label")}
+                        </span>
+                        <Select
+                          value={summaryFrequency || "disabled"}
+                          aria-label={t("knowledgeBase.tag.autoSummary.label")}
+                          onChange={(value) => {
+                            const freq = value === "disabled" ? null : value;
+                            if (onSummaryFrequencyChange) {
+                              onSummaryFrequencyChange(freq);
+                            }
+                          }}
+                          disabled={isReadOnlyMode}
+                          className="w-full"
+                          placeholder={t("knowledgeBase.tag.autoSummary.off")}
+                          options={frequencyOptions.map((opt) => ({
+                            value: opt.value,
+                            label:
+                              opt.value === "disabled"
+                                ? t("knowledgeBase.tag.autoSummary.off")
+                                : opt.label,
+                          }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  {isLoadingSummary || isReadOnlyMode || isSummarizing ? (
+                    <div className="min-h-48 max-h-96 overflow-auto rounded-lg border border-[var(--color-border)]">
+                      {isLoadingSummary ? (
+                        <div className="flex justify-center py-10">
+                          <Spin />
+                        </div>
+                      ) : (
+                        <div className="p-3 text-sm leading-relaxed whitespace-pre-wrap">
+                          <MarkdownRenderer content={summary} />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <TextArea
+                      aria-label={t("document.summary.title")}
+                      value={summary}
+                      disabled={isSaving}
+                      onChange={(event) => setSummary(event.target.value)}
+                      onBlur={(event) => {
+                        if (
+                          !(event.relatedTarget instanceof Element) ||
+                          !event.relatedTarget.closest("[data-summary-action]")
+                        ) {
+                          void saveEditedSummary(event.currentTarget.value);
+                        }
+                      }}
+                      className="!min-h-48"
+                      rows={8}
+                      placeholder={t("document.summary.placeholder")}
+                    />
+                  )}
+                  <div className="mt-3 space-y-1">
+                    <p className="text-xs text-[var(--color-text-secondary)]">
+                      {t("document.summary.retrievalHint")}
+                    </p>
+                    {!isReadOnlyMode && (
+                      <div
+                        className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"
+                        role="status"
+                      >
+                        {isSaving ? (
+                          t("common.saving")
+                        ) : summarySaveFailed && !isSummarizing ? (
+                          <>
+                            {t("document.summary.saveFailed")}
+                            <Button
+                              type="link"
+                              size="small"
+                              data-summary-action
+                              disabled={!summary.trim()}
+                              onClick={() => void saveEditedSummary(summary)}
+                            >
+                              {t("repository.common.retry")}
+                            </Button>
+                          </>
+                        ) : (
+                          t("document.summary.editAutosave")
+                        )}
                       </div>
                     )}
                   </div>
-
-                  <div className="shrink-0">
-                    <div className="mb-1 text-xs font-medium text-gray-900">
-                      {t("knowledgeBase.create.uploadTitle")}{" "}
-                      <span className="text-red-500">*</span>
-                    </div>
-                    <div className="h-[146px]">
-                      <UploadArea
-                        ref={uploadAreaRef}
-                        onFileSelect={onFileSelect}
-                        onUpload={onUpload || (async () => {})}
-                        isUploading={isUploading}
-                        isDragging={isDragging}
-                        onDragOver={onDragOver}
-                        onDragLeave={onDragLeave}
-                        onDrop={onDrop}
-                        disabled={uploadStorageBlocked || isReadOnlyMode}
-                        disabledMessage={
-                          uploadStorageBlocked
-                            ? uploadStorageBlockedMessage ||
-                              t(
-                                "quota.uploadBlocked",
-                                "Uploads are blocked - storage limit reached"
-                              )
-                            : undefined
-                        }
-                        componentHeight={uploadHeight}
-                        isCreatingMode
-                        indexName={knowledgeBaseId || "new-knowledge-base"}
-                        newKnowledgeBaseName={knowledgeBaseName}
-                        modelMismatch={modelMismatch}
-                        onNameStatusChange={setNameStatus}
-                        selectedFiles={selectedFiles}
-                        autoUpload={false}
-                      />
-                    </div>
-                  </div>
-
-                  {onEmbeddingModelChange && (
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-gray-900">
-                        {t("knowledgeBase.create.field.embeddingModel")}{" "}
-                        <span className="text-red-500">*</span>
-                      </label>
-                      <Select
-                        value={selectedEmbeddingModel}
-                        onChange={onEmbeddingModelChange}
-                        className="w-full"
-                        size="large"
-                        placeholder={
-                          t("knowledgeBase.create.embeddingModelPlaceholder") ||
-                          "Select embedding model"
-                        }
-                        allowClear={false}
-                        options={[
-                          {
-                            label: t("modelConfig.option.embeddingModel"),
-                            options: embeddingModelsForOptions
-                              .filter((model) => model.type === "embedding")
-                              .map((model) => ({
-                                value: [model.displayName, model.type].join(
-                                  "::"
-                                ),
-                                label: model.displayName,
-                                disabled: !isEmbeddingModelSelectable(model),
-                              })),
-                          },
-                          {
-                            label: t("modelConfig.option.multiEmbeddingModel"),
-                            options: embeddingModelsForOptions
-                              .filter(
-                                (model) => model.type === "multi_embedding"
-                              )
-                              .map((model) => ({
-                                value: [model.displayName, model.type].join(
-                                  "::"
-                                ),
-                                label: model.displayName,
-                                disabled: !isEmbeddingModelSelectable(model),
-                              })),
-                          },
-                        ].filter((group) => group.options.length > 0)}
-                      />
-                      <Button
-                        size="small"
-                        icon={<Settings2 size={14} />}
-                        onClick={() => setEmbeddingAdvancedOpen(true)}
-                        disabled={
-                          !selectedEmbeddingModel ||
-                          !availableEmbeddingModels ||
-                          availableEmbeddingModels.length === 0
-                        }
-                        title={t(
-                          "knowledgeBase.create.embeddingAdvancedSettings",
-                          {
-                            defaultValue: "高级设置",
-                          }
-                        )}
-                      />
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    className={
-                      isAdvancedSettingsOpen
-                        ? "flex w-full items-center justify-between rounded-xl border-2 border-blue-300 bg-gray-50 px-4 py-3 text-left transition-colors"
-                        : "flex w-full items-center justify-between rounded-xl border-2 border-gray-200 bg-gray-50 px-4 py-3 text-left transition-colors hover:border-blue-300"
-                    }
-                    onClick={() =>
-                      setIsAdvancedSettingsOpen((isOpen) => !isOpen)
-                    }
-                  >
-                    <span className="flex items-center gap-2 text-base font-medium text-gray-900">
-                      <SlidersHorizontal size={16} />
-                      {t("knowledgeBase.create.advancedSettings")}
-                    </span>
-                    {isAdvancedSettingsOpen ? (
-                      <ChevronUp size={18} />
-                    ) : (
-                      <ChevronDown size={18} />
-                    )}
-                  </button>
-
-                  {isAdvancedSettingsOpen && (
-                    <div className="grid grid-cols-1 gap-2 rounded-2xl border border-gray-200 bg-gray-50/60 p-3">
-                      <Can permission="kb.groups:update">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-900">
-                            {t("knowledgeBase.create.field.permission")}
-                          </label>
-                          <Select
-                            value={ingroupPermission}
-                            onChange={onIngroupPermissionChange}
-                            className="w-full"
-                            size="middle"
-                            placeholder={t(
-                              "knowledgeBase.ingroup.permission.DEFAULT"
-                            )}
-                            options={permissionOptions}
-                          />
-                        </div>
-                      </Can>
-
-                      <Can permission="kb.groups:update">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-900">
-                            {t("knowledgeBase.create.field.groups")}
-                          </label>
-                          <Select
-                            mode="multiple"
-                            showSearch={{ optionFilterProp: "label" }}
-                            value={
-                              isGroupSelectDisabled ? [] : selectedGroupIds
-                            }
-                            onChange={onSelectedGroupIdsChange}
-                            className="w-full"
-                            size="middle"
-                            placeholder={t(
-                              "knowledgeBase.create.permission.groupPlaceholder"
-                            )}
-                            options={groupOptions}
-                            maxTagCount={2}
-                            allowClear
-                            disabled={isGroupSelectDisabled}
-                          />
-                        </div>
-                      </Can>
-
-                      {onPreserveSourceFileChange && (
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-900">
-                            {t("knowledgeBase.create.field.preserve")}
-                          </label>
-                          <Select
-                            value={preserveSourceFile}
-                            onChange={onPreserveSourceFileChange}
-                            className="w-full"
-                            size="middle"
-                            allowClear={false}
-                            options={[
-                              {
-                                value: true,
-                                label: t(
-                                  "knowledgeBase.create.preserveSourceFile"
-                                ),
-                              },
-                              {
-                                value: false,
-                                label: t(
-                                  "knowledgeBase.tag.noPreserveSourceFile"
-                                ),
-                              },
-                            ]}
-                          />
-                        </div>
-                      )}
-
-                      {onQuotaLimitBytesChange && (
-                        <div>
-                          <label className="mb-2 block text-sm font-medium text-gray-900">
-                            {t("knowledgeBase.create.field.quota")}
-                          </label>
-                          <div className="flex items-center gap-2">
-                            <InputNumber
-                              value={
-                                quotaLimitBytes != null
-                                  ? quotaUnit === "GB"
-                                    ? Math.round(
-                                        quotaLimitBytes / (1024 * 1024 * 1024)
-                                      )
-                                    : Math.round(
-                                        quotaLimitBytes / (1024 * 1024)
-                                      )
-                                  : null
-                              }
-                              onChange={(v) => {
-                                if (v == null) {
-                                  onQuotaLimitBytesChange(null);
-                                } else if (quotaUnit === "GB") {
-                                  onQuotaLimitBytesChange(
-                                    v * 1024 * 1024 * 1024
-                                  );
-                                } else {
-                                  onQuotaLimitBytesChange(v * 1024 * 1024);
-                                }
-                              }}
-                              addonAfter={quotaUnit}
-                              placeholder={t("quota.unlimited", "无限制")}
-                              min={0}
-                              precision={0}
-                              className="min-w-0 flex-1"
-                              size="middle"
-                            />
-                            <Segmented
-                              size="middle"
-                              options={["GB", "MB"]}
-                              value={quotaUnit}
-                              onChange={(val) =>
-                                setQuotaUnit(val as "GB" | "MB")
-                              }
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
+              </Card>
+              {catalogKnowledgeBase && (
+                <KnowledgeBaseAccessCard
+                  knowledgeBase={catalogKnowledgeBase}
+                  groups={groups}
+                  allGroups={groupData?.groups ?? []}
+                  onChange={
+                    isReadOnlyMode ? undefined : onCatalogKnowledgeBaseChange
+                  }
+                />
               )}
-            </div>
-          ) : filteredDocuments.length > 0 ? (
-            <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200">
-              <div className="min-h-0 flex-1 overflow-auto">
-                <table className="min-w-full bg-white">
-                  <thead className="sticky top-0 z-10 bg-gray-50">
-                    <tr>
-                      <th
-                        className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.NAME}]`}
-                      >
-                        {t("document.table.header.name")}
-                      </th>
-                      {!isDataMate && (
-                        <th className="min-w-[180px] px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
-                          {t("document.table.header.tags")}
-                        </th>
-                      )}
-                      <th
-                        className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.STATUS}]`}
-                      >
-                        {t("document.table.header.status")}
-                      </th>
-                      {!isDataMate && (
-                        <th
-                          className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.SIZE}]`}
-                        >
-                          {t("document.table.header.size")}
-                        </th>
-                      )}
-                      <th
-                        className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.DATE}]`}
-                      >
-                        {t("document.table.header.date")}
-                      </th>
-                      {!isDataMate && (
-                        <th
-                          className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.ACTION}]`}
-                        >
-                          {t("document.table.header.action")}
-                        </th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {pagedDocuments.map((doc) => (
-                      <tr
-                        key={doc.id}
-                        className="transition-colors hover:bg-gray-50"
-                      >
-                        <td className="px-4 py-3">
-                          <div className="flex items-center">
-                            <span
-                              className={`${LAYOUT.ICON_MARGIN} ${LAYOUT.ICON_SIZE}`}
-                            >
-                              {getFileIcon(doc.type)}
-                            </span>
-                            <span
-                              className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate max-w-[${DOCUMENT_NAME_CONFIG.MAX_WIDTH}] whitespace-${DOCUMENT_NAME_CONFIG.WHITE_SPACE} overflow-${DOCUMENT_NAME_CONFIG.OVERFLOW} text-${DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW}`}
-                              title={doc.name}
-                            >
-                              {doc.name}
-                            </span>
-                            {(() => {
-                              const entry = projectionByDocument.get(doc.id);
-                              const status = entry?.projection_status?.status;
-                              if (status === "pending" || status === "failed") {
-                                return (
-                                  <Tooltip
-                                    title={t(
-                                      status === "failed"
-                                        ? "document.tagProjection.failed"
-                                        : "document.tagProjection.pending"
-                                    )}
-                                  >
-                                    <span
-                                      className={`ml-1 inline-flex items-center rounded px-1 text-[10px] leading-4 ${
-                                        status === "failed"
-                                          ? "bg-red-100 text-red-700"
-                                          : "bg-amber-100 text-amber-700"
-                                      }`}
-                                    >
-                                      {status}
-                                    </span>
-                                  </Tooltip>
-                                );
-                              }
-                              return null;
-                            })()}
-                          </div>
-                        </td>
-                        {!isDataMate && (
-                          <td className="px-4 py-3 align-top">
-                            {knowledgeBaseId && (doc.tags ?? []).length > 0 ? (
-                              <TagChips
-                                assignments={doc.tags ?? []}
-                                max={5}
-                                overflowLabel="..."
-                                singleLine
-                              />
-                            ) : (
-                              <span className="text-sm text-gray-400">—</span>
-                            )}
-                          </td>
-                        )}
-                        <td className="px-4 py-3">
-                          <div className="flex items-center">
-                            <DocumentStatus
-                              status={doc.status}
-                              showIcon={true}
-                              errorCode={doc.error_code}
-                              errorReason={doc.error_reason}
-                              kbId={knowledgeBaseId}
-                              docId={doc.id}
-                              fileId={doc.file_id}
-                              processedChunkNum={doc.processed_chunk_num}
-                              totalChunkNum={doc.total_chunk_num}
-                            />
-                          </div>
-                        </td>
-                        {!isDataMate && (
-                          <td className="px-4 py-3 text-sm text-gray-600">
-                            {formatFileSize(doc.size)}
-                          </td>
-                        )}
-                        <td className="px-4 py-3 text-sm text-gray-600">
-                          {new Date(doc.create_time).toLocaleString()}
-                        </td>
-                        {!isDataMate && (
-                          <td className="px-4 py-3">
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => {
-                                  const objectName =
-                                    extractObjectNameFromUrl(doc.id) ||
-                                    undefined;
-                                  if (!objectName) {
-                                    message.warning(
-                                      t("filePreview.previewFailed")
-                                    );
-                                    return;
-                                  }
-
-                                  setSelectedFile({
-                                    objectName,
-                                    fileName: doc.name,
-                                    fileType: doc.type,
-                                    fileSize: doc.size,
-                                  });
-                                }}
-                                className={LAYOUT.ACTION_PREVIEW_TEXT}
-                                title={t("common.preview")}
-                              >
-                                {t("common.preview")}
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (!knowledgeBaseId) return;
-                                  setTagsUiRequested(true);
-                                  setAssignTarget({
-                                    docId: doc.id,
-                                    canEdit: !isReadOnlyMode,
-                                  });
-                                }}
-                                className={LAYOUT.ACTION_PREVIEW_TEXT}
-                                title={t("document.action.assignTags")}
-                              >
-                                {t("document.action.assignTags")}
-                              </button>
-                              {!isReadOnlyMode && (
-                                <button
-                                  onClick={() => onDelete(doc.id, doc.file_id)}
-                                  className={LAYOUT.ACTION_DELETE_TEXT}
-                                  title={
-                                    doc.status === DOCUMENT_STATUS.PROCESSING ||
-                                    doc.status === DOCUMENT_STATUS.FORWARDING
-                                      ? t("document.delete.terminateTask")
-                                      : undefined
-                                  }
-                                >
-                                  {t("common.delete")}
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {!isDataMate && (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-2 text-xs">
-                  <span>
-                    {t("agentConfig.list.total", {
-                      count: filteredDocumentCount,
-                    })}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <Select
-                      aria-label={t("agentConfig.list.pageSize")}
-                      value={documentPageSize}
-                      options={[10, 20, 50].map((size) => ({
-                        value: size,
-                        label: t("agentConfig.list.perPage", { count: size }),
-                      }))}
-                      onChange={(size) => {
-                        setDocumentPageSize(size);
-                        setDocumentPage(1);
-                      }}
-                      className="!h-8 !w-[116px]"
-                    />
-                    <Pagination
-                      current={currentDocumentPage}
-                      pageSize={documentPageSize}
-                      total={filteredDocumentCount}
-                      showSizeChanger={false}
-                      onChange={setDocumentPage}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex h-full min-h-[180px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/40 text-center text-sm text-gray-400">
-              {t("document.hint.noDocuments")}
-            </div>
+            </aside>
           )}
         </div>
-
-        {/* Upload area */}
-        {!showDetail && !showChunk && !isCreatingMode && (
-          <div className="shrink-0 px-6 pb-5 pt-2">
-            {isDataMate ? (
-              <div className="flex min-h-[150px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/60 px-6 text-center">
-                <span className="text-sm font-medium leading-[1.7] text-gray-500">
-                  {t("knowledgeBase.datamate.editDisabled")}
-                </span>
-              </div>
-            ) : (
-              <UploadArea
-                key={
-                  isCreatingMode
-                    ? `create-${knowledgeBaseName}`
-                    : `view-${knowledgeBaseName}`
-                }
-                ref={uploadAreaRef}
-                onFileSelect={onFileSelect}
-                onUpload={onUpload || (async () => {})}
-                isUploading={isUploading}
-                isDragging={isDragging}
-                onDragOver={onDragOver}
-                onDragLeave={onDragLeave}
-                onDrop={onDrop}
-                disabled={
-                  uploadStorageBlocked ||
-                  isReadOnlyMode ||
-                  (!isCreatingMode && !knowledgeBaseId)
-                }
-                disabledMessage={
-                  uploadStorageBlocked
-                    ? uploadStorageBlockedMessage ||
-                      t(
-                        "quota.uploadBlocked",
-                        "Uploads are blocked - storage limit reached"
-                      )
-                    : undefined
-                }
-                componentHeight={uploadHeight}
-                isCreatingMode={isCreatingMode}
-                // Use internal ID for backend operations; fall back to name in creation mode
-                indexName={knowledgeBaseId || knowledgeBaseName}
-                newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
-                modelMismatch={modelMismatch}
-                onNameStatusChange={setNameStatus}
-              />
-            )}
-          </div>
-        )}
-
+        {editingKnowledgeBase &&
+          catalogKnowledgeBase &&
+          onCatalogKnowledgeBaseChange && (
+            <KnowledgeBaseEditModal
+              open
+              knowledgeBase={catalogKnowledgeBase}
+              tenantId={tenantId}
+              onCancel={() => setEditingKnowledgeBase(false)}
+              onSuccess={onCatalogKnowledgeBaseChange}
+            />
+          )}
         {/* File preview drawer */}
         <TagDefinitionManagementModal
           open={tagManagementOpen}

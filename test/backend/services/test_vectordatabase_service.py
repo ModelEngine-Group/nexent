@@ -1276,7 +1276,8 @@ class TestElasticSearchService(unittest.TestCase):
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
              "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch",
-             "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "preserve_source_file": False},
+             "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "preserve_source_file": False,
+             "knowledge_describe": "<p>Saved summary for index 1</p>"},
             {"index_name": "index2", "embedding_model_name": "test-model",
              "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY",
              "tenant_id": "test_tenant"}
@@ -1303,6 +1304,8 @@ class TestElasticSearchService(unittest.TestCase):
         assert [row["index_name"] for row in projection.call_args.args[0]] == ["index1", "index2"]
         assert projection.call_args.kwargs["resource_type"] == "knowledge_base"
         assert all(row["tags"] == ["Catalog tag"] for row in result["indices_info"])
+        assert result["indices_info"][0]["description"] == "<p>Saved summary for index 1</p>"
+        assert result["indices_info"][1]["description"] is None
 
         # Verify group_ids are included and correctly parsed
         self.assertEqual(result["indices_info"][0]["group_ids"], [1, 2])
@@ -1317,6 +1320,13 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_indices_detail.assert_called_once_with(
             ["index1", "index2"])
         mock_get_knowledge.assert_called_once_with("test_tenant")
+
+        inventory = ElasticSearchService.list_indices(
+            pattern="*", include_stats=True, target_tenant_id="test_tenant",
+            user_id="test_user", vdb_core=self.mock_vdb_core, inventory_read=True,
+        )
+        assert inventory["indices_info"]
+        assert all("description" not in row for row in inventory["indices_info"])
 
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
@@ -3747,7 +3757,8 @@ class TestElasticSearchService(unittest.TestCase):
             mock_cluster.return_value = {"doc1": 0}  # clusters
             mock_summarize.return_value = {
                 0: "Test cluster summary"}  # cluster_summaries
-            mock_merge.return_value = "Final merged summary"  # final_summary
+            summary = '第一段\n"quoted" \\ paths'
+            mock_merge.return_value = summary
             mock_get_model_internal.return_value = {
                 'api_key': 'test_api_key',
                 'base_url': 'https://api.test.com',
@@ -3765,23 +3776,18 @@ class TestElasticSearchService(unittest.TestCase):
                     tenant_id="test_tenant"
                 )
 
-                # Consume part of the stream to trigger the generator function
-                generator = result.body_iterator
-                # Get at least one item from the generator to trigger execution
-                try:
-                    async for item in generator:
-                        break  # Just get one item to trigger execution
-                except StopAsyncIteration:
-                    pass
+                frames = [
+                    json.loads(frame.removeprefix("data: "))
+                    async for frame in result.body_iterator
+                ]
+                return result, frames
 
-                return result
-
-            result = asyncio.run(run_test())
+            result, frames = asyncio.run(run_test())
 
             # Assert
             self.assertIsInstance(result, StreamingResponse)
-            # Basic functionality test - just verify the response is correct type
-            # The detailed function calls are tested in their own unit tests
+            assert frames[-1] == {"status": "completed"}
+            assert "".join(frame["message"] for frame in frames[:-1]) == summary
 
     def test_summary_index_name_no_tenant_id(self):
         """
@@ -8652,6 +8658,32 @@ def test_prepare_indices_page_requires_limit_when_pagination_is_enabled():
             sources=None,
             models=None,
         )
+
+
+@pytest.mark.parametrize(
+    ("keyword", "search_summary", "expected"),
+    [
+        (" workflow ", True, ["kb-1"]),
+        ("workflow", False, []),
+        ("<p>", True, []),
+    ],
+)
+def test_prepare_indices_page_searches_authorized_summary_text(keyword, search_summary, expected):
+    records, page = ElasticSearchService._prepare_indices_page(
+        visible_knowledgebases=[
+            {"index_name": "kb-1", "knowledge_describe": "<p>Approval Workflow</p>"},
+            {"index_name": "kb-2", "knowledge_describe": None},
+        ],
+        pagination_enabled=True,
+        offset=0,
+        limit=10,
+        keyword=keyword,
+        sources=None,
+        models=None,
+        search_summary=search_summary,
+    )
+    assert [record["index_name"] for record in records] == expected
+    assert page["total"] == len(expected)
 
 
 def test_apply_read_only_returns_unchanged_result_without_indices_info():

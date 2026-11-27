@@ -61,6 +61,25 @@ function jsonBody(body: unknown): { body: string } {
   return { body: JSON.stringify(body) };
 }
 
+function assignmentEndpoint(
+  resourceType: string,
+  resourceId: string,
+  options: { provider?: string | null; knowledgeBaseId?: string | null }
+) {
+  const search = new URLSearchParams();
+  if (options.provider) search.set("provider", options.provider);
+  if (options.knowledgeBaseId)
+    search.set("knowledge_base_id", options.knowledgeBaseId);
+  const isDocument = resourceType === "knowledge_document";
+  if (isDocument) search.set("document_id", resourceId);
+
+  const path = isDocument
+    ? `${TAG_ENDPOINT}/documents/assignments`
+    : `${TAG_ENDPOINT}/assignments/${resourceType}/${encodeURIComponent(resourceId)}`;
+  const query = search.toString();
+  return { url: query ? `${path}?${query}` : path, query };
+}
+
 export const tagManagementApi = {
   listLibraries: () => requestJson<TagLibrary[]>(TAG_ENDPOINT),
 
@@ -203,16 +222,14 @@ export const tagManagementApi = {
     resourceId: string,
     options: { provider?: string | null; knowledgeBaseId?: string | null } = {}
   ) => {
-    const search = new URLSearchParams();
-    if (options.provider) search.set("provider", options.provider);
-    if (options.knowledgeBaseId)
-      search.set("knowledge_base_id", options.knowledgeBaseId);
-    const query = search.toString();
+    const { url, query } = assignmentEndpoint(
+      resourceType,
+      resourceId,
+      options
+    );
     const cacheKey = mergeAssignmentCacheKey(resourceType, resourceId, query);
     return getCachedAssignmentPromise(cacheKey, () =>
-      requestJson<TagAssignment>(
-        `${TAG_ENDPOINT}/assignments/${resourceType}/${encodeURIComponent(resourceId)}${query ? `?${query}` : ""}`
-      )
+      requestJson<TagAssignment>(url)
     );
   },
 
@@ -222,14 +239,7 @@ export const tagManagementApi = {
     payload: TagAssignmentReplacePayload,
     options: { provider?: string | null; knowledgeBaseId?: string | null } = {}
   ) => {
-    const search = new URLSearchParams();
-    if (options.provider) search.set("provider", options.provider);
-    if (options.knowledgeBaseId)
-      search.set("knowledge_base_id", options.knowledgeBaseId);
-    const query = search.toString();
-    const url =
-      `${TAG_ENDPOINT}/assignments/${resourceType}/${encodeURIComponent(resourceId)}` +
-      (query ? `?${query}` : "");
+    const { url } = assignmentEndpoint(resourceType, resourceId, options);
     return requestJson<TagAssignment>(url, {
       method: "PUT",
       ...jsonBody(payload),

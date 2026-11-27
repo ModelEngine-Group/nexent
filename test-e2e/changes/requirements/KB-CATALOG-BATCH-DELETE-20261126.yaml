@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: KB-CATALOG-BATCH-DELETE-20261126
+  change_type: requirement
+  requirement_id: KB-CATALOG-BATCH-DELETE
+  title: Manage local knowledge bases in bulk
+  description: Add page-scoped selection and confirmed deletion to the local catalog using the resource repository interaction and existing single-knowledge-base APIs.
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-098]
+    retired: []
+  affected_cases:
+    existing: [API-099, API-100]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/knowledgeCatalog.test.tsx
+    behaviors:
+      - Global delete permission controls entry, and select-page skips read-only and external knowledge bases.
+      - Confirmation loads deletion impact and cancel leaves the selected knowledge bases intact.
+      - Confirmed deletion refreshes the catalog and retains only failed selections within the same page and filters.
+    reason: Frontend interaction and orchestration over existing deletion and impact-preview endpoints. Component tests cover the batch state and partial failures. Existing formal API cases retain coverage of the single-resource contract.
+  notes: The sibling Nexent SPEC checkout is unavailable. The interaction reference is feat_hzw_261106 frontend/components/resource/ResourceCardGrid.tsx.

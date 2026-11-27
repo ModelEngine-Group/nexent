@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: TAG-DOCUMENT-PATH-20261126
+  change_type: bugfix
+  bug_id: TAG-DOCUMENT-PATH-20261126
+  title: Restore document tag assignment through the gateway
+  description: Carry the provider-scoped document identifier in the assignment query.
+  observed_behavior: The document tag editor cannot load current assignments when the document identifier includes a slash.
+  expected_behavior: Authorized users can read and replace assignments for uploaded documents through the gateway.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Previous management route coverage bypassed gateway path validation and request forwarding.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-177, F-098]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [API-AUTO-357B84F01BA6D321]
+    added: []
+    modified: [API-AUTO-3DDBA5C9A0148698]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Preserve document paths through gateway reads and writes with existing access controls and required task context.
+      - Keep the client save guard in place until assignment loading succeeds and allow retry after a read error.
+    reason: Verify request transport, the fixed gateway allowlist, and the modal failure path locally. The formal D2 case uses its existing owned tag_resources fixture and writes the current value IDs back before verifying them.
+    test_selectors:
+      - test/backend/app/test_tag_assignment_app.py::test_document_assignment_query_preserves_file_path
+      - test/backend/gateway/test_exposure.py::test_web_features_are_exposed_only_to_sessions
+      - frontend/tests/component/resourceTagManagement.test.tsx
+      - frontend/tests/workbench/DocumentTagAssignments.test.ts
+  notes: The existing D2 preparation and owner cleanup remain applicable. Formal runtime execution requires a configured isolated test home.

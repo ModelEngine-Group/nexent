@@ -136,3 +136,45 @@ it("saves assignments through the reachable editor and disables readonly tag inp
   expect(screen.getByRole("combobox")).toBeDisabled();
   expect(tagManagementApi.replaceAssignments).toHaveBeenCalledOnce();
 });
+
+it("shows a document tag load failure and enables saving after retry", async () => {
+  const user = userEvent.setup();
+  vi.mocked(tagManagementApi.getAssignments)
+    .mockRejectedValueOnce(new Error("Request failed"))
+    .mockResolvedValueOnce({
+      resource_type: "knowledge_document",
+      resource_id: "document-id",
+      assignment_count: 0,
+      assignment_capacity: 100,
+      assignments: [],
+    });
+
+  render(
+    <App>
+      <ResourceTagAssignmentModal
+        open
+        resourceType="knowledge_document"
+        resourceId="uploads/file.txt"
+        provider="local"
+        knowledgeBaseId="kb-retry"
+        definitions={[]}
+        canEdit
+        onClose={vi.fn()}
+      />
+    </App>
+  );
+
+  const save = screen.getByRole("button", {
+    name: "tagManagement.action.save",
+  });
+  const retry = await screen.findByRole("button", {
+    name: "repository.common.retry",
+  });
+  expect(
+    screen.getByText("tagManagement.message.assignmentsLoadFailed")
+  ).toBeInTheDocument();
+  expect(save).toBeDisabled();
+  await user.click(retry);
+  await waitFor(() => expect(save).toBeEnabled());
+  expect(retry).not.toBeInTheDocument();
+});

@@ -148,6 +148,8 @@ def test_conversation_snapshot_target_matches_the_mounting_service():
     ("GET", "/api/ops/authorization"),
     ("GET", "/api/ops/scope"),
     ("GET", "/api/indices/kb/documents/error-info"),
+    ("GET", "/api/tag-libraries/documents/assignments"),
+    ("PUT", "/api/tag-libraries/documents/assignments"),
 ])
 def test_web_features_are_exposed_only_to_sessions(method, path):
     match = default_registry().match(method, path)

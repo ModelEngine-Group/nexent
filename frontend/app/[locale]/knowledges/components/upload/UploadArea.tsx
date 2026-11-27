@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React, {
   useState,
   forwardRef,
@@ -40,6 +42,10 @@ interface UploadAreaProps {
   newKnowledgeBaseName?: string;
   modelMismatch?: boolean;
   onNameStatusChange?: (status: string) => void;
+  renderTrigger?: (state: {
+    disabled: boolean;
+    loading: boolean;
+  }) => React.ReactNode;
 }
 
 export interface UploadAreaRef {
@@ -62,6 +68,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       selectedFiles = [],
       modelMismatch = false,
       onNameStatusChange,
+      renderTrigger,
     },
     ref
   ) => {
@@ -295,6 +302,21 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
         return true;
       },
     };
+
+    if (renderTrigger) {
+      const loading = isLoading || isUploading;
+      const triggerDisabled =
+        disabled || loading || !isKnowledgeBaseReady || modelMismatch;
+      return (
+        <Upload
+          {...uploadProps}
+          disabled={triggerDisabled}
+          showUploadList={false}
+        >
+          {renderTrigger({ disabled: triggerDisabled, loading })}
+        </Upload>
+      );
+    }
 
     return (
       <UploadAreaUI

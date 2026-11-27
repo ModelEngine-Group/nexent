@@ -13,6 +13,12 @@ feature:
   - rule_id: F-098-RULE-01
     description: KB list/name exists/update name/权限/quota/auto-summary frequency/delete；KB列表标签筛选/分配/定义管理；删除阻断错误透传blocking_files与EDS
       code
+  - rule_id: F-098-RULE-02
+    description: 知识库批量管理仅允许选中本页可删除的本地知识库。确认时展示删除影响，失败项保留供重试，列表按现有条件刷新。
+  - rule_id: F-098-RULE-03
+    description: 本地知识库详情页提供文档名称搜索以及全部文档和单文档的分片浏览、分页和搜索，并在同页提供知识库总结和访问权限。上传、删除和编辑遵循现有权限与配额约束。
+  - rule_id: F-098-RULE-04
+    description: 本地知识库列表仅在有内容读取权限的列表响应中返回已保存的总结。卡片显示总结摘要，无总结时显示默认描述，保存后按当前列表条件刷新。
   required_test_stages:
   - D1
   - D3
