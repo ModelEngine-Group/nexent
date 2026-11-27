@@ -7,20 +7,17 @@ from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
 
 
-WORKBENCH_SYSTEM_KEY = "workbench_main"
-
-
 def monitored_agent_predicate():
-    """Keep business Agents, including rows without a system identity."""
-    return or_(AgentInfo.system_key.is_(None), AgentInfo.system_key != WORKBENCH_SYSTEM_KEY)
+    """Keep business Agents, including legacy rows without an explicit origin."""
+    return or_(AgentInfo.agent_origin.is_(None), AgentInfo.agent_origin != "SYSTEM")
 
 
 def excluded_monitoring_agent_ids() -> set[int]:
-    """Resolve system IDs across owners, versions and soft-deleted metadata.
+    """Resolve platform-owned Agent IDs across owners, versions and soft-deleted metadata.
 
     System executions carry the requesting tenant, not the asset-owner tenant.
     Parent/root IDs deliberately do not participate in monitoring eligibility.
     """
-    statement = select(AgentInfo.agent_id).where(AgentInfo.system_key == WORKBENCH_SYSTEM_KEY).distinct()
+    statement = select(AgentInfo.agent_id).where(AgentInfo.agent_origin == "SYSTEM").distinct()
     with get_db_session() as session:
         return set(session.scalars(statement))

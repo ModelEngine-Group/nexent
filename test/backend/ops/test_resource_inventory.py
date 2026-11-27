@@ -16,11 +16,11 @@ from permissions.models import CurrentUser
 @pytest.fixture
 def inventory(mocker):
     records = (
-        (AgentInfo, ("agent_id", "name", "version_no", "prompt", "system_key", "group_ids"), [
-            (1, "Agent A", 0, "synthetic prompt", None, "1,2", "a", "N"),
-            (1, "Published snapshot", 1, "snapshot prompt", None, "1", "a", "N"),
-            (2, "Agent B", 0, "synthetic prompt", None, "", "b", "N"),
-            (97, "Renamed Workbench", 0, "synthetic prompt", "workbench_main", None, "a", "N"),
+        (AgentInfo, ("agent_id", "name", "version_no", "prompt", "system_key", "group_ids", "agent_origin"), [
+            (1, "Agent A", 0, "synthetic prompt", None, "1,2", "USER", "a", "N"),
+            (1, "Published snapshot", 1, "snapshot prompt", None, "1", "USER", "a", "N"),
+            (2, "Agent B", 0, "synthetic prompt", None, "", "USER", "b", "N"),
+            (97, "Renamed Workbench", 0, "synthetic prompt", "workbench_main", None, "SYSTEM", "a", "N"),
         ]),
         (KnowledgeRecord, ("knowledge_id", "knowledge_name", "knowledge_describe", "group_ids"), [
             (3, "Knowledge A", "synthetic content", "3", "a", "N"),

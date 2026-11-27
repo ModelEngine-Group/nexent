@@ -276,10 +276,12 @@ def test_skill_refresh_reports_store_failure_and_signed_token_errors(monitoring_
 
 
 @pytest.mark.parametrize("requested, expected", [
-    (0, "timed_out"), (datetime.now(timezone.utc).timestamp(), "running"), (0, "uncovered"),
+    (0, "timed_out"), (None, "running"), (0, "uncovered"),
 ])
 def test_skill_refresh_reports_uncovered_or_pending_publication(monitoring_client, requested, expected):
     client, store = monitoring_client
+    if requested is None:
+        requested = datetime.now(timezone.utc).timestamp()
     day = date(2026, 11, 23)
     store.states.return_value = [] if expected == "uncovered" else [
         {"statistic_date": day, "published_source_revision": 1, "source_snapshot_at": None}
