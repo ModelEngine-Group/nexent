@@ -192,6 +192,54 @@ def test_mcp_tool_rows_group_by_tenant_server_and_tool():
     assert local["metrics"]["request_count"] == 4
 
 
+def test_read_mcp_tool_directory_honors_snapshot_precedence_and_tool_filter(monkeypatch):
+    from ops.monitoring import query
+
+    day = date(2026, 11, 17)
+    records = [
+        {"mcp_id": 3, "mcp_name": "docs", "tenant_id": "tenant-a", "container_id": None,
+         "config_json": None, "group_ids": None,
+         "registry_json": {"_toolNames": ["search_docs", "index_docs", "search_docs", None],
+                           "tools": [{"name": "stale_snapshot"}]}},
+        {"mcp_id": 4, "mcp_name": "empty", "tenant_id": "tenant-a", "container_id": None,
+         "config_json": None, "group_ids": "", "registry_json": {"_toolNames": []}},
+        {"mcp_id": 5, "mcp_name": "docs", "tenant_id": "tenant-b", "container_id": None,
+         "config_json": None, "group_ids": None, "registry_json": None},
+        {"mcp_id": 6, "mcp_name": "described", "tenant_id": "tenant-b", "container_id": None,
+         "config_json": None, "group_ids": "", "registry_json": {"tools": [{"name": "search_docs"}]}},
+    ]
+    statements = []
+
+    @contextmanager
+    def session():
+        def execute(statement):
+            statements.append(statement)
+            if "ag_tool_info_t" in str(statement):
+                return [(5, "search_docs"), (5, "legacy_only"), (5, "search_docs")]
+            return SimpleNamespace(mappings=lambda: records)
+
+        yield SimpleNamespace(execute=execute)
+
+    monkeypatch.setattr(query, "get_db_session", session)
+    monkeypatch.setattr(query, "LOCAL_MCP_SERVER", None)
+    service, _, _ = _tool_service([])
+    _, inventory, _, _ = query.read_mcp_tools(
+        service, tenant=None, start=day, end=day, groups=[], server_id=None, server_type=None,
+        tool_name="search_docs", include_tool_directory=True,
+    )
+    assert {entry["mcp_server_id"]: entry["tool_names"] for entry in inventory} == {
+        3: ("search_docs",), 4: (), 5: ("search_docs",), 6: ("search_docs",),
+    }
+    fallback = statements[1]
+    sql = str(fallback)
+    assert fallback.compile().params["mcp_id_1"] == [5]
+    assert fallback.compile().params["source_1"] == "mcp"
+    assert "ag_tool_info_t.author = nexent.mcp_record_t.tenant_id" in sql
+    assert "ag_tool_info_t.usage = nexent.mcp_record_t.mcp_name" in sql
+    assert "ag_tool_info_t.delete_flag !=" in sql
+    assert "ag_tool_info_t.is_available IS NOT false" in sql
+
+
 def test_mcp_server_rows_aggregate_tools_per_server():
     from ops.monitoring.query import mcp_server_rows
 
@@ -379,14 +427,13 @@ def test_mcp_server_inventory_parses_access_groups_and_synthesizes_the_local_end
     # The fake session ignores the WHERE clause; the compiled params prove the tenant filter.
     assert {entry["mcp_server_id"]: entry for entry in inventory if entry["mcp_server_id"] is not None} == {
         3: {"tenant_id": "tenant-a", "mcp_server_id": 3, "mcp_server_name": "docs",
-            "mcp_server_type": "remote", "group_ids": (5, 7)},
-        # NULL group_ids keeps the public marker; unparsable and out-of-range parts are skipped.
+            "mcp_server_type": "remote", "group_ids": (5, 7), "tool_names": None},
         4: {"tenant_id": "tenant-a", "mcp_server_id": 4, "mcp_server_name": "boxed",
-            "mcp_server_type": "container", "group_ids": None},
+            "mcp_server_type": "container", "group_ids": None, "tool_names": None},
         5: {"tenant_id": "tenant-b", "mcp_server_id": 5, "mcp_server_name": "messy",
-            "mcp_server_type": "remote", "group_ids": (9,)},
+            "mcp_server_type": "remote", "group_ids": (9,), "tool_names": None},
         6: {"tenant_id": "tenant-b", "mcp_server_id": 6, "mcp_server_name": "unassigned",
-            "mcp_server_type": "remote", "group_ids": ()},
+            "mcp_server_type": "remote", "group_ids": (), "tool_names": None},
     }
     # The tenant-local endpoint is synthesized for the requested tenant only.
     assert [entry for entry in inventory if entry["mcp_server_id"] is None] == [

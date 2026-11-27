@@ -8,6 +8,9 @@ from unittest.mock import Mock
 
 import pytest
 
+from ops.api import monitoring
+from test.backend.ops.test_monitoring_api import monitoring_client
+
 
 @contextmanager
 def _fake_db_session(rows):
@@ -76,6 +79,7 @@ def test_mcp_resource_group_filters_registered_integer_ids(monkeypatch):
         {"tenant_id": "tenant", "mcp_server_id": 7, "group_ids": (1,)},
         {"tenant_id": "tenant", "mcp_server_id": 8, "group_ids": ()},
         {"tenant_id": "tenant", "mcp_server_id": 9, "group_ids": None},
+        {"tenant_id": "tenant", "mcp_server_id": None, "group_ids": None, "mcp_server_type": "builtin"},
     ]
     monkeypatch.setattr(query, "mcp_server_inventory", lambda tenant: records)
     monkeypatch.setattr(query, "_publication_status", lambda *args, **kwargs: {})
@@ -89,14 +93,64 @@ def test_mcp_resource_group_filters_registered_integer_ids(monkeypatch):
 
     service = SimpleNamespace(publication_snapshot=snapshot, store=Mock())
     scope = dict(tenant="tenant", start=day, end=day, groups=[], server_id=None, server_type=None, tool_name=None)
-    for group, expected_id in ((1, 7), ("ungrouped", 8)):
+    _, all_inventory, _, _ = query.read_mcp_tools(service, **scope)
+    assert [entry["mcp_server_id"] for entry in all_inventory] == [7, 8, 9, None]
+    for group, expected_ids in ((1, [7]), ("ungrouped", [8, 9])):
         _, inventory, _, _ = query.read_mcp_tools(service, **scope, resource_group=group)
-        assert [entry["mcp_server_id"] for entry in inventory] == [expected_id]
-        assert {"terms": {"mcp_server_id": [expected_id]}} in point.documents.call_args.args[0]["bool"]["filter"]
+        assert [entry["mcp_server_id"] for entry in inventory] == expected_ids
+        assert {"terms": {"mcp_server_id": expected_ids}} in point.documents.call_args.args[0]["bool"]["filter"]
     point.reset_mock()
     _, inventory, _, _ = query.read_mcp_tools(service, **scope, resource_group=2)
     assert not inventory
     point.documents.assert_not_called()
+
+
+def test_mcp_tool_details_isolate_same_name_and_exclude_retired_tools():
+    from ops.monitoring.query import mcp_tool_rows
+
+    def server(tenant, identifier, names):
+        return {"tenant_id": tenant, "mcp_server_id": identifier, "mcp_server_name": "docs",
+                "mcp_server_type": "remote", "tool_names": names}
+
+    directory = [server("a", 3, ("search", "idle")), server("a", 4, ("search",)),
+                 server("b", 3, ("search",))]
+
+    def fact(tenant, identifier, name, count):
+        return {"tenant_id": tenant, "mcp_server_id": identifier, "mcp_server_name": "previous-name",
+                "mcp_server_type": "container", "tool_name": name, "request_count": count,
+                "error_count": 0, "error_eligible_count": count, "duration_ms_sum": 0, "duration_ms_sample_count": 0}
+
+    stats = [fact("a", 3, "search", 2), fact("b", 3, "search", 4),
+             fact("a", 3, "removed", 8), fact("a", 9, "deleted-service", 16),
+             dict(fact("a", None, "local-tool", 1), mcp_server_type="builtin")]
+    for covered, missing_count in [(False, None), (True, 0)]:
+        items = mcp_tool_rows(stats, directory, covered=covered)
+        assert {item["mcp_server_name"] for item in items} == {"docs"}
+        assert {item["mcp_server_type"] for item in items} == {"remote"}
+        assert {(item["tenant_id"], item["mcp_server_id"], item["tool_name"]): item["metrics"]["request_count"]
+                for item in items} == {("a", 3, "search"): 2, ("b", 3, "search"): 4,
+                                       ("a", 4, "search"): missing_count, ("a", 3, "idle"): missing_count}
+
+
+@pytest.mark.parametrize("coverage, calls", [("uncovered", None), ("partial", None), ("covered", 0)])
+def test_mcp_idle_directory_is_visible_independent_of_coverage(monitoring_client, monkeypatch, coverage, calls):
+    client, _ = monitoring_client
+    params = {"start_date": "2026-11-17", "end_date": "2026-11-17", "server_id": 3, "tool_name": "list_docs"}
+    inventory = [{"tenant_id": "tenant", "mcp_server_id": 3, "mcp_server_name": "docs",
+                  "mcp_server_type": "remote", "tool_names": ("list_docs",)}]
+    available = [] if coverage == "uncovered" else [date(2026, 11, 17)]
+    monkeypatch.setattr(monitoring, "read_mcp_tools",
+                        Mock(return_value=([], inventory, available, {"data_as_of": None, "coverage_state": coverage, "is_stale": False})))
+
+    summary = client.get("/ops/v1/monitoring/mcp-tools/summary", params=params).json()["data"]
+    assert summary == {"service_count": 1, "active_services": 0, "tool_count": 1, "active_tools": 0,
+                       "request_count": calls, "error_count": calls, "error_eligible_count": calls,
+                       "error_rate": None, "avg_duration_ms": None}
+    listing = client.get("/ops/v1/monitoring/mcp-tools", params={**params, "dimension": "tools"})
+    assert listing.status_code == 200
+    item, = listing.json()["data"]["items"]
+    assert item["tool_name"] == "list_docs" and item["metrics"]["request_count"] == calls
+    assert monitoring.read_mcp_tools.call_args.kwargs["include_tool_directory"] is True
 
 
 def test_published_query_pushes_resource_ids_into_es_and_skips_empty_scope():

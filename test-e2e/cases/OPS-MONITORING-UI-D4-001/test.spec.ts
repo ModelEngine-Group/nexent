@@ -12,7 +12,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     { tenant_id: "a", kind: "agent", id: 1, name: "智能问答助手", group_ids: [10] },
     { tenant_id: "b", kind: "agent", id: 1, name: "研发助手" },
     { tenant_id: "a", kind: "model", id: 2, name: "文本生成模型" },
-    { tenant_id: "a", kind: "mcp", id: 3, name: "知识库服务", group_ids: [] },
+    { tenant_id: "a", kind: "mcp", id: 3, name: "知识库服务", group_ids: null },
     { tenant_id: "a", kind: "mcp", id: 4, name: "文件服务", group_ids: [10] },
     { tenant_id: "b", kind: "mcp", id: 5, name: "研发服务" },
   ];
@@ -295,7 +295,9 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           await route.fulfill({ status: 422, json: { detail: "Controlled MCP failure" } });
           return;
         }
-        const uncovered = tenantId === "b" && !serviceId;
+        const ungrouped = searchParams.get("resource_group") === "ungrouped";
+        const uncoveredService = ungrouped && serviceId === "3";
+        const uncovered = uncoveredService || (tenantId === "b" && !serviceId);
         const calls = uncovered
           ? null
           : toolName === "查阅文件"
@@ -323,7 +325,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           is_stale: false,
         };
         if (view === "summary") {
-          json = { ...publication, data: { tool_count: uncovered ? 0 : 2, request_count: calls } };
+          json = { ...publication, data: { tool_count: uncovered && !serviceId ? 0 : 2, request_count: calls } };
         } else if (view === "trends") {
           json = { ...publication, data: daily };
         } else if (view === "overview") {
@@ -355,20 +357,22 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
               ? ["查阅文件"]
               : serviceId === "5" ? ["研发工具"] : [];
           const service = serviceRows.find((row) => String(row.mcp_server_id) === serviceId);
-          const onlyUngrouped = view === "list" && dimension === "services" &&
-            searchParams.get("resource_group") === "ungrouped";
+          const onlyUngrouped = view === "list" && dimension === "services" && ungrouped;
           const rows = onlyUngrouped
             ? serviceRows.filter((row) => row.mcp_server_id === 3).map((row) => ({
                 ...row, active_tools: null, metrics: { request_count: null, avg_duration_ms: null },
               }))
-            : uncovered
+            : uncovered && !(uncoveredService && view === "list" && dimension === "tools")
             ? []
             : dimension === "services"
               ? [...serviceRows].reverse().concat(historical)
               : toolNames.filter((name) => !toolName || name === toolName).map((name, index) => ({
                   ...service!,
                   tool_name: name,
-                  metrics: { request_count: name === "查阅文件" ? 0 : 9 - index, avg_duration_ms: 3 },
+                  metrics: {
+                    request_count: uncovered ? null : name === "查阅文件" ? 0 : 9 - index,
+                    avg_duration_ms: uncovered ? null : 3,
+                  },
                 }));
           if (view === "rankings") {
             json = { ...publication, data: rows.slice(0, 5) };
@@ -381,7 +385,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
               .sort((left, right) =>
                 searchParams.get("sort_by") === "name"
                   ? compareNames(left.tool_name ?? left.mcp_server_name, right.tool_name ?? right.mcp_server_name)
-                  : descending * (left.metrics[metric] - right.metrics[metric]),
+                  : descending * ((left.metrics[metric] ?? 0) - (right.metrics[metric] ?? 0)),
               );
             const pageSize = Number(searchParams.get("page_size"));
             const offset = (Number(searchParams.get("page")) - 1) * pageSize;
@@ -1482,6 +1486,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(option("知识库服务")).toBeVisible();
     await expect(option("内置服务")).toHaveCount(0);
     await page.keyboard.press("Escape");
+    await choose("MCP", "知识库服务");
+    await expectCards(["工具数", "工具调用量"], ["2", "—"]);
+    const idleRow = toolDetails.getByRole("row", { name: /读索引/ });
+    await expect(idleRow.getByRole("cell").nth(1)).toHaveText("—");
+    await expect(idleRow.getByRole("cell").nth(2)).toHaveText("—");
     await choose("租户", "研发中心");
     await expect(mcp.getByText("全部用户组", { exact: true })).toBeVisible();
     await expect(

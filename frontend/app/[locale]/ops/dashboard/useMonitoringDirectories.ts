@@ -10,7 +10,7 @@ import {
 } from "@/services/operationsService";
 import { fetchSkillsList } from "@/services/skillService";
 import { getTenant, listTenants, type Tenant } from "@/services/tenantService";
-import { matchesGroupScope, type MonitoringTab } from "./monitoringFilters";
+import { matchesMcpGroupScope, type MonitoringTab } from "./monitoringFilters";
 
 export function resourceKey(tenantId: string, id: number | string): string {
   return JSON.stringify([tenantId, id]);
@@ -99,7 +99,7 @@ export function useMonitoringDirectories({
       (item) => item.kind === "mcp" && item.id === service.service_id
     )?.tenant_id;
   const mcpServices = mcpCatalog.data?.filter((item) =>
-    matchesGroupScope(item.group_ids, resourceGroup)
+    matchesMcpGroupScope(item, resourceGroup)
   );
   const catalogService =
     tab === "mcp"

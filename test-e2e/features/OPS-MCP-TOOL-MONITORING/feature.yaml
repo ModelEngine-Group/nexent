@@ -19,7 +19,7 @@ feature:
   - rule_id: OPS-MCP-TOOL-MONITORING-RULE-05
     description: The monitoring API serves tenant-scoped MCP tool statistics with coverage and staleness consistent with the shared day-state model.
   - rule_id: OPS-MCP-TOOL-MONITORING-RULE-06
-    description: Group filtering matches MCP servers explicitly configured for the requested access groups from the registered inventory; public servers and unresolved endpoints never match, registered never-called servers stay visible with empty metrics, and the service catalog for filter dropdowns applies the same matching.
+    description: MCP group filtering uses current registered service configuration. The ungrouped selection includes SQL NULL and empty group lists. A specific group requires explicit membership. The synthetic built-in service appears only with all groups. Registered tool details and counts use the persisted directory, and published calls supply metrics. Built-in tool details and counts use published calls within the selected scope. Registered tools without calls have zero counters under full coverage and unavailable counters otherwise.
   required_test_stages: [D3]
   source:
     requirement_ids: [OPS-MCP-TOOL-MONITORING-20261118, OPS-MCP-TOOL-GROUP-INVENTORY-20261126]

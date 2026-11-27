@@ -22,7 +22,7 @@ from management.services.permission.identity.session import authenticate
 from ops.monitoring.agent_tokens import read_agent_tokens
 from ops.monitoring.model import summarize
 from ops.monitoring.mcp_tool import summarize as summarize_mcp_tool
-from ops.monitoring.query import (ResourceGroup, days_inclusive, mcp_server_catalog, mcp_server_rows,
+from ops.monitoring.query import (ResourceGroup, days_inclusive, is_local_mcp_tool, mcp_server_catalog, mcp_server_rows,
                                   mcp_services_by_tenant, mcp_tool_rows, metric_value, model_rows,
                                   read_agent_views, read_agents, read_mcp_tools, read_models, read_skills,
                                   skill_metric_value, skill_rows)
@@ -503,9 +503,8 @@ class ToolSelection(BaseModel):
     tenant_id: str | None
     start_date: date
     end_date: date
-    # Group filtering matches MCPs explicitly configured for these groups (the
-    # management access groups); public servers and the tenant-local endpoint
-    # never match an active group filter.
+    # Explicit group IDs match registered service configuration.
+    # The ungrouped selection is expressed through resource_group.
     group_ids: list[int]
     resource_group: str | None = None
     server_id: int | None
@@ -527,7 +526,7 @@ def tool_selection(start_date: date, end_date: date, tenant_id: str | None = Non
                          resource_group=resource_group, server_id=server_id, server_type=server_type, tool_name=tool_name)
 
 
-def _read_tools(request, scope, tenant):
+def _read_tools(request, scope, tenant, *, include_tool_directory=False):
     resource_group = _resource_group(scope, tenant)
     service = getattr(request.app.state, "monitoring", None)
     if service is None:
@@ -535,15 +534,15 @@ def _read_tools(request, scope, tenant):
     try:
         return read_mcp_tools(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
                               groups=scope.group_ids, server_id=scope.server_id, server_type=scope.server_type,
-                              tool_name=scope.tool_name,
+                              tool_name=scope.tool_name, include_tool_directory=include_tool_directory,
                               **({"resource_group": resource_group} if resource_group is not None else {}))
     except Exception as error:
         logger.warning("MCP tool monitoring query failed error=%s", type(error).__name__)
         raise HTTPException(503, "MCP tool monitoring is temporarily unavailable") from None
 
 
-def _tool_items(rows, status, metric, search="", descending=True):
-    items = mcp_tool_rows(rows)
+def _tool_items(rows, metric, search="", descending=True, *, inventory=None, covered=False):
+    items = mcp_tool_rows(rows, inventory, covered=covered)
     items = [item for item in items if search.casefold() in (item.get("tool_name") or "").casefold()]
     items.sort(key=lambda item: (item["tenant_id"], item.get("mcp_server_id") or 0, item["tool_name"]))
     if metric == "name":
@@ -572,11 +571,12 @@ def mcp_tools(request: Request, scope: Annotated[ToolSelection, Depends(tool_sel
               page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
               search: Annotated[str, Query(max_length=100)] = "", sort_by: ToolMetric | Literal["name"] = "request_count",
               descending: bool = True):
-    rows, inventory, _, status = _read_tools(request, scope, tenant)
+    rows, inventory, _, status = _read_tools(request, scope, tenant, include_tool_directory=dimension == "tools")
     if dimension == "services":
         items = _server_items(rows, inventory, status, sort_by, search, descending)
     else:
-        items = _tool_items(rows, status, sort_by, search, descending)
+        items = _tool_items(rows, sort_by, search, descending, inventory=inventory,
+                            covered=status["coverage_state"] == "covered")
     start = (page - 1) * page_size
     return {"data": {"items": items[start:start + page_size], "total": len(items)}, **status}
 
@@ -584,19 +584,21 @@ def mcp_tools(request: Request, scope: Annotated[ToolSelection, Depends(tool_sel
 @ops_router.get("/mcp-tools/summary")
 def mcp_tools_summary(request: Request, scope: Annotated[ToolSelection, Depends(tool_selection)],
                       tenant: Annotated[str | None, Depends(ops_tenant)]):
-    rows, inventory, available, status = _read_tools(request, scope, tenant)
+    rows, inventory, available, status = _read_tools(request, scope, tenant, include_tool_directory=True)
     covered = status["coverage_state"] == "covered"
     servers = mcp_server_rows(rows, inventory, covered=covered)
     tools = mcp_tool_rows(rows)
-    if available:
+    if available and (covered or rows):
         values = summarize_mcp_tool(rows)
         active_servers = sum(1 for server in servers if server["metrics"]["request_count"])
         active_tools = sum(1 for tool in tools if tool["metrics"]["request_count"])
     else:
         values = dict.fromkeys(summarize_mcp_tool(()))
         active_servers = active_tools = 0
+    tool_count = sum(len(entry.get("tool_names") or ()) for entry in inventory)
+    tool_count += sum(is_local_mcp_tool(tool) for tool in tools)
     return {"data": {"service_count": len(servers), "active_services": active_servers,
-                     "tool_count": len(tools), "active_tools": active_tools, **values}, **status}
+                     "tool_count": tool_count, "active_tools": active_tools, **values}, **status}
 
 
 @ops_router.get("/mcp-tools/rankings")
@@ -608,7 +610,7 @@ def mcp_tools_rankings(request: Request, scope: Annotated[ToolSelection, Depends
     if dimension == "services":
         items = _server_items(rows, inventory, status, metric)
     else:
-        items = _tool_items(rows, status, metric)
+        items = _tool_items(rows, metric)
     return {"data": [item for item in items if metric_value(item, metric) is not None][:5], **status}
 
 

@@ -3,8 +3,32 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getMonitoringRange,
   initialMonitoringFilters,
+  matchesGroupScope,
+  matchesMcpGroupScope,
+  UNGROUPED_GROUP,
   updateMonitoringFilters,
 } from "@/app/ops/dashboard/monitoringFilters";
+
+describe("MCP group scope", () => {
+  it.each([
+    [{ type: "remote", group_ids: null }, true, false],
+    [{ type: "container", group_ids: [] }, true, false],
+    [{ type: "remote", group_ids: [12] }, false, true],
+    [{ type: "builtin", group_ids: null }, false, false],
+  ] as const)(
+    "matches registered service %j",
+    (service, ungrouped, assigned) => {
+      expect(matchesMcpGroupScope(service, "")).toBe(true);
+      expect(matchesMcpGroupScope(service, UNGROUPED_GROUP)).toBe(ungrouped);
+      expect(matchesMcpGroupScope(service, "12")).toBe(assigned);
+      expect(matchesMcpGroupScope(service, "99")).toBe(false);
+    }
+  );
+
+  it("preserves the shared null handling outside MCP", () => {
+    expect(matchesGroupScope(null, UNGROUPED_GROUP)).toBe(false);
+  });
+});
 
 describe("monitoring dates", () => {
   afterEach(() => vi.useRealTimers());

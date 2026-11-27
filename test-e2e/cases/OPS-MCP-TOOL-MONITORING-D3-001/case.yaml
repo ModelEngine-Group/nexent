@@ -16,7 +16,7 @@ case:
   observations: [Tool call facts with caller-observed outcomes, resolved server types, published daily aggregates and API responses]
   cleanup: [Close the stub MCP server and remove only test-owned database and index data]
   preconditions: [An isolated Ops database and Elasticsearch are available with OPS_MONITORING_ENABLED=true, A stub MCP server can serve succeeding and failing tool calls, The product code and fixed script for this case are implemented; until then the case stays blocked]
-  test_data: {workload: One succeeding MCP tool call, one deadline-exceeded call and one protocol-level isError=true call on a catalog-resolved endpoint plus one debug run and one catalog-miss endpoint followed by one batch replay, Registered inventory rows for the called server and never-called grouped and public servers plus group-filtered queries}
+  test_data: {workload: One succeeding MCP tool call, one deadline-exceeded call and one protocol-level isError=true call on a catalog-resolved endpoint plus one debug run and one catalog-miss endpoint followed by one batch replay, Registered inventory rows with explicit groups and with NULL or empty groups plus a synthetic built-in endpoint and an idle tool}
   steps:
   - order: 1
     action: Run an agent against the stub MCP server so one tool call succeeds, one exceeds the deadline and one returns isError=true, with the endpoint resolved by the run catalog.
@@ -40,9 +40,9 @@ case:
     action: Block Elasticsearch fact writes for one batch, query the affected date, then unblock and publish the pending batch.
     expected: The affected date is stale while blocked, other dates are unaffected, and recovery clears the staleness.
   - order: 8
-    action: Query the monitoring endpoints and the service catalog with a group filter matching the configured access groups and with a non-matching group, using a registered inventory with never-called and public servers.
-    expected: The matching group keeps the called server plus the never-called grouped server with empty metrics and excludes public servers and unresolved endpoints; the tools dimension drops the unresolved endpoint's calls; a non-matching group returns no servers; the service catalog applies the same matching for filter dropdowns.
-  expected_results: [Caller-observed outcomes with resolved server types are stored, Protocol-level isError results are recorded as failed without changing the returned content, Tenant-scoped aggregates match stored facts, Replay is idempotent, Debug runs emit nothing, Catalog misses degrade to unknown, Facts and spans share identity and measurements, Blocked writes surface as staleness until recovery, Group filtering selects explicitly configured servers with never-called inventory visible and public or unresolved servers excluded]
+    action: Query the monitoring endpoints and the service catalog with matching, non-matching and ungrouped filters. Read the current tools and summary for an idle registered service on covered and uncovered dates.
+    expected: The matching group keeps the called server plus the never-called grouped server with empty metrics and excludes public servers and unresolved endpoints; the tools dimension drops the unresolved endpoint's calls; a non-matching group returns no servers; the service catalog applies the same specific-group matching. Ungrouped includes NULL and empty registered group lists and excludes the synthetic built-in. The idle tool is visible with zero on the covered date and null on the uncovered date, and contributes only to the directory count.
+  expected_results: [Caller-observed outcomes with resolved server types are stored, Protocol-level isError results are recorded as failed without changing the returned content, Tenant-scoped aggregates match stored facts, Replay is idempotent, Debug runs emit nothing, Catalog misses degrade to unknown, Facts and spans share identity and measurements, Blocked writes surface as staleness until recovery, Group filtering uses current registered service metadata and uncalled tools remain inventoried with coverage-aware metrics]
   forbidden_side_effects:
   - Writing tool arguments or results or credentials or headers into facts
   - Publishing a fact under a different tenant or fact kind
@@ -79,7 +79,7 @@ case:
     expected_results: [8]
     forbidden_side_effects: [2, 3]
   - id: AC-07
-    description: Group filtering matches explicitly configured access groups, keeps registered never-called servers visible with empty metrics, and excludes public or unresolved servers.
+    description: Group filtering applies configured groups to registered inventory. Uncalled tools appear as current inventory, with counters based on publication coverage.
     steps: [2, 8]
     expected_results: [9]
     forbidden_side_effects: [1, 2]

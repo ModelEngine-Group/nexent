@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MCP-UI-INVENTORY-20261127
+  change_type: bugfix
+  bug_id: OPS-MCP-UI-INVENTORY-20261127
+  title: Apply MCP group selection and list current tools independently of calls
+  description: Restore registered MCP service and tool inventory in the monitoring dashboard.
+  observed_behavior: Ungrouped excluded SQL NULL registrations and tools without published calls had no detail row.
+  expected_behavior: Ungrouped includes NULL and empty group lists on registered services. Tool details include current tools with zero counters only under full coverage. The built-in service lists tools with published calls in the selected scope.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing Cases used an empty group array or published tool rows and did not require a NULL registration or an unpublished tool to remain visible in the dashboard.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MCP-TOOL-MONITORING, OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MCP-TOOL-MONITORING-D3-001, OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [MCP-only group scope, Persisted snapshot and legacy directory precedence, Tenant and service identity isolation, Coverage-aware detail metrics, Scoped search and pagination, Query failure propagation]
+    reason: Unit and API tests cover directory and metric rules. The existing D3 and D4 Cases cover the published API and dashboard paths.
+    test_selectors: [test/backend/ops/test_monitoring_group_scope.py, test/backend/ops/test_monitoring_query_mcp_tools.py, test/backend/ops/test_monitoring_api_mcp_tools.py, frontend/tests/component/monitoringFilters.test.tsx, frontend/tests/component/mcpMonitoring.test.tsx]

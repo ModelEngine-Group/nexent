@@ -1,5 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { McpMonitoring } from "@/app/ops/dashboard/components/mcp/McpMonitoring";
 import {
   getMcpDrilldownService,
   mcpRowKey,
@@ -19,6 +22,12 @@ import type {
 } from "@/types/mcpMonitoring";
 
 vi.mock("@/lib/auth", () => ({ fetchWithAuth: vi.fn() }));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
+}));
+vi.mock("@/app/ops/dashboard/components/overview/OverviewTrend", () => ({
+  OverviewTrend: () => null,
+}));
 
 describe("MCP monitoring reads", () => {
   const fetch = vi.mocked(fetchWithAuth);
@@ -51,7 +60,9 @@ describe("MCP monitoring reads", () => {
     await expect(
       getMcpMonitoringCatalog(scope.tenantId, scope.groupIds, signal)
     ).resolves.toEqual(data);
-    await expect(getMcpMonitoringCatalog(null, [], signal)).resolves.toEqual(data);
+    await expect(getMcpMonitoringCatalog(null, [], signal)).resolves.toEqual(
+      data
+    );
     expect(fetch.mock.calls).toEqual([
       [
         `${endpoint}/catalog?tenant_id=tenant%2Fa&group_ids=3&group_ids=5`,
@@ -149,6 +160,61 @@ describe("MCP monitoring reads", () => {
       ],
     ]);
   });
+
+  it.each([
+    ["uncovered", null, "—"],
+    ["covered", 0, "0"],
+  ] as const)(
+    "renders current tools when coverage is %s",
+    async (coverage, count, display) => {
+      fetch.mockImplementation(async (input) => {
+        const path = String(input);
+        const row = {
+          tenant_id: "tenant/a",
+          mcp_server_id: 12,
+          mcp_server_name: "docs",
+          mcp_server_type: "remote",
+          tool_name: "list_docs",
+          metrics: { request_count: count, avg_duration_ms: null },
+        };
+        const data = path.includes("/summary?")
+          ? { tool_count: 1, request_count: count }
+          : path.includes("dimension=tools") && !path.includes("/rankings?")
+            ? { items: [row], total: 1 }
+            : [];
+        return Response.json({
+          ...publication,
+          coverage_state: coverage,
+          data,
+        });
+      });
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      render(
+        <QueryClientProvider client={client}>
+          <McpMonitoring
+            scope="service"
+            queryKey={[
+              "mcpMonitoring",
+              "user",
+              "tenant/a",
+              { ...scope, toolName: null },
+            ]}
+            registeredServices={{ count: 1, loading: false }}
+            viewKey="docs"
+            onViewStatistics={vi.fn()}
+            scopeLoading={false}
+            hasRange
+          />
+        </QueryClientProvider>
+      );
+      const row = await screen.findByRole("row", { name: /list_docs/ });
+      expect(within(row).getAllByRole("cell")[1]?.textContent).toBe(display);
+      const title = screen.getByText("ops.monitoring.mcp.currentTools");
+      expect(title.nextElementSibling?.textContent).toBe("1");
+    }
+  );
 
   it("reads the platform overview with tenant and dates only", async () => {
     const data = {

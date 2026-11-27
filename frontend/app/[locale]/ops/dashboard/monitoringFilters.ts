@@ -34,6 +34,17 @@ export function matchesGroupScope(
   return Number.isInteger(id) && groupIds.includes(id);
 }
 
+export function matchesMcpGroupScope(
+  service: { type: string; group_ids?: readonly number[] | null },
+  group: string
+): boolean {
+  return (
+    group === "" ||
+    (service.type !== "builtin" &&
+      matchesGroupScope(service.group_ids ?? [], group))
+  );
+}
+
 export function getMonitoringToday(now = new Date()): string {
   return dayjs.utc(now).format(dateFormat);
 }
