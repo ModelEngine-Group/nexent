@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import bcrypt
 
+from shared.merged_migrations import merged_migration_sql
+
 
 def docker(*args, data=None):
     result = subprocess.run(["docker", *args], input=data.encode() if data is not None else None, capture_output=True, check=False)
@@ -184,7 +186,12 @@ def assert_automatic_upgrade(root, temporary):
             INSERT INTO nexent.tenant_invitation_code_t (code_type) VALUES ('DEV_INVITE');
         """)
         docker("exec", worker, "mkdir", "-p", "/tmp/auth-migrations")
-        docker("cp", str(bundle), worker + ":/tmp/auth-migrations/" + bundle.name)
+        # The account fixture has no Agent, conversation, or model tables.
+        # Exercise the runner with the production account sections and bundle filename.
+        account_sections = ("v2.9.0_001_local_user_accounts.sql", "v2.9.0_010_account_and_ops_roles.sql")
+        account_bundle = "".join(f"-- Source migration: {name}\n{merged_migration_sql(name)}\n"
+                                 for name in account_sections)
+        docker("exec", "-i", worker, "sh", "-c", f"cat > /tmp/auth-migrations/{bundle.name}", data=account_bundle)
         for script in ("run-sql-migrations.sh", "start-backend.sh"):
             docker("cp", str(root / "deploy/common" / script), f"{worker}:/tmp/{script}")
         docker("cp", str(root / "deploy/sql/tools/supabase_to_postgres/preserve_legacy_emails.sql"),
