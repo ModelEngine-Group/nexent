@@ -318,22 +318,49 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/attachments/upload" \
 
 ```json
 {
+  "message": "Processed 2 files",
+  "requestId": "req-uuid-here",
+  "summary": {
+    "total": 2,
+    "uploaded": 2,
+    "failed": 0
+  },
   "files": [
     {
-      "filename": "report.pdf",
-      "s3_url": "s3://nexent/attachments/user123/report.pdf",
-      "size": 1024000
+      "object_name": "attachments/user123/20260609103000_9f1c2e7a5b3d4c6e8a0b1c2d3e4f5a6b.pdf",
+      "name": "report.pdf",
+      "type": "file",
+      "size": 1024000,
+      "url": "/nexent/attachments/user123/20260609103000_9f1c2e7a5b3d4c6e8a0b1c2d3e4f5a6b.pdf",
+      "description": "",
+      "presigned_url": "https://your-nexent-domain.com/api/nb/v1/file/fetch?presigned_url=..."
     },
     {
-      "filename": "diagram.png",
-      "s3_url": "s3://nexent/attachments/user123/diagram.png",
-      "size": 524288
+      "object_name": "attachments/user123/20260609103001_1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6.png",
+      "name": "diagram.png",
+      "type": "image",
+      "size": 524288,
+      "url": "/nexent/attachments/user123/20260609103001_1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6.png",
+      "description": "",
+      "presigned_url": "https://your-nexent-domain.com/api/nb/v1/file/fetch?presigned_url=..."
     }
   ]
 }
 ```
 
-Use the returned `s3_url` as the value of the `attachments` field in the `/nb/v1/chat/run` API.
+Each item in `files` describes one uploaded file:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `object_name` | string | Object key of the file in storage |
+| `name` | string | Original file name |
+| `type` | string | `image` for image files, otherwise `file` |
+| `size` | integer | File size in bytes |
+| `url` | string | Storage path of the file (`/nexent/{object_name}`), accepted by the `attachments` field |
+| `description` | string | Empty after upload |
+| `presigned_url` | string | Time-limited download link for external tools (present when it could be generated) |
+
+Pass each returned `url` (or the whole file object) in the `attachments` field of the `/nb/v1/chat/run` API.
 
 ## Stop Conversation
 
@@ -982,7 +1009,7 @@ upload_response = requests.post(
     files={"files": open("sales-data.csv", "rb")}
 )
 upload_data = upload_response.json()
-s3_url = upload_data["files"][0]["s3_url"]
+attachment_url = upload_data["files"][0]["url"]
 
 # 2. Start conversation (streaming response)
 with requests.post(
@@ -991,7 +1018,7 @@ with requests.post(
     json={
         "agent_name": "data-analyst",
         "query": "Analyze this sales data and find key trends",
-        "attachments": [s3_url],
+        "attachments": [attachment_url],
         "metadata": {"project_id": "Q3-REPORT"},
         "meta_data": {"source": "etl-pipeline", "batch_id": "B001"}
     },
@@ -1062,7 +1089,7 @@ If a parameter name not supported by the tool is passed in `tool_params`, it ret
 
 ### Q: Must attachments be uploaded first?
 
-Yes, attachments need to be uploaded first via `/nb/v1/chat/attachments/upload` to get `s3_url`, which is then passed to the conversation API via the `attachments` field.
+Yes, attachments need to be uploaded first via `/nb/v1/chat/attachments/upload` to get each file's `url`, which is then passed to the conversation API via the `attachments` field.
 
 ### Q: How to access in local development environment?
 

@@ -318,22 +318,49 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/attachments/upload" \
 
 ```json
 {
+  "message": "Processed 2 files",
+  "requestId": "req-uuid-here",
+  "summary": {
+    "total": 2,
+    "uploaded": 2,
+    "failed": 0
+  },
   "files": [
     {
-      "filename": "report.pdf",
-      "s3_url": "s3://nexent/attachments/user123/report.pdf",
-      "size": 1024000
+      "object_name": "attachments/user123/20260609103000_9f1c2e7a5b3d4c6e8a0b1c2d3e4f5a6b.pdf",
+      "name": "report.pdf",
+      "type": "file",
+      "size": 1024000,
+      "url": "/nexent/attachments/user123/20260609103000_9f1c2e7a5b3d4c6e8a0b1c2d3e4f5a6b.pdf",
+      "description": "",
+      "presigned_url": "https://your-nexent-domain.com/api/nb/v1/file/fetch?presigned_url=..."
     },
     {
-      "filename": "diagram.png",
-      "s3_url": "s3://nexent/attachments/user123/diagram.png",
-      "size": 524288
+      "object_name": "attachments/user123/20260609103001_1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6.png",
+      "name": "diagram.png",
+      "type": "image",
+      "size": 524288,
+      "url": "/nexent/attachments/user123/20260609103001_1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6.png",
+      "description": "",
+      "presigned_url": "https://your-nexent-domain.com/api/nb/v1/file/fetch?presigned_url=..."
     }
   ]
 }
 ```
 
-将返回的 `s3_url` 作为 `/nb/v1/chat/run` 接口中 `attachments` 字段的值。
+`files` 中的每一项对应一个已上传的文件：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `object_name` | string | 文件在存储中的对象名 |
+| `name` | string | 原始文件名 |
+| `type` | string | 图片为 `image`，其他为 `file` |
+| `size` | integer | 文件大小（字节） |
+| `url` | string | 文件的存储路径（`/nexent/{object_name}`），可直接用于 `attachments` 字段 |
+| `description` | string | 上传后为空字符串 |
+| `presigned_url` | string | 供外部工具使用的限时下载链接（能生成时才返回） |
+
+将返回的 `url`（或整个文件对象）作为 `/nb/v1/chat/run` 接口中 `attachments` 字段的值。
 
 ## ⏹️ 停止对话
 
@@ -982,7 +1009,7 @@ upload_response = requests.post(
     files={"files": open("sales-data.csv", "rb")}
 )
 upload_data = upload_response.json()
-s3_url = upload_data["files"][0]["s3_url"]
+attachment_url = upload_data["files"][0]["url"]
 
 # 2. 启动对话（流式响应）
 with requests.post(
@@ -991,7 +1018,7 @@ with requests.post(
     json={
         "agent_name": "data-analyst",
         "query": "分析这份销售数据，找出关键趋势",
-        "attachments": [s3_url],
+        "attachments": [attachment_url],
         "metadata": {"project_id": "Q3-REPORT"},
         "meta_data": {"source": "etl-pipeline", "batch_id": "B001"}
     },
@@ -1062,7 +1089,7 @@ streamChat();
 
 ### Q: 附件是否必须先上传？
 
-是的，附件需要先通过 `/nb/v1/chat/attachments/upload` 上传，获取 `s3_url` 后再通过 `attachments` 字段传递给对话接口。
+是的，附件需要先通过 `/nb/v1/chat/attachments/upload` 上传，获取每个文件的 `url` 后再通过 `attachments` 字段传递给对话接口。
 
 ### Q: 本地开发环境如何访问？
 
