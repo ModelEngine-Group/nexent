@@ -147,7 +147,12 @@ export function useMonitoringDirectories({
     mcpServiceCount:
       tenant === undefined || mcpCatalog.isError
         ? undefined
-        : mcpServices?.filter(({ type }) => type !== "builtin").length,
+        : mcpServices?.reduce(
+            (count, service) =>
+              count +
+              (service.type === "builtin" ? (service.instance_count ?? 1) : 1),
+            0
+          ),
     mcpService: service,
     mcpServiceTenant,
     tools,

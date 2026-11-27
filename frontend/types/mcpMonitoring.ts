@@ -12,6 +12,7 @@ export type McpCatalogService =
       service_id: null;
       name: string;
       type: "builtin";
+      instance_count?: number;
       group_ids: number[] | null;
     };
 

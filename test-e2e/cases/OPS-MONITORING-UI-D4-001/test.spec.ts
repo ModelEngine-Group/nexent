@@ -286,7 +286,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
             ...resources
               .filter((row) => row.kind === "mcp" && (!tenantId || tenantId === row.tenant_id))
               .map((row) => ({ service_id: row.id, name: row.name, type: "remote", group_ids: row.group_ids })),
-            { service_id: null, name: "内置服务", type: "builtin", group_ids: null },
+            { service_id: null, name: "内置服务", type: "builtin", group_ids: null,
+              instance_count: tenantId ? 1 : new Set(resources.filter((row) => row.kind === "mcp").map((row) => row.tenant_id)).size },
           ],
         };
       } else {
@@ -932,7 +933,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       reads.filter((entry) => entry.startsWith("resources:"));
     const chart = (panel: typeof agentTrend) =>
       panel.locator(".recharts-area-curve");
-    await expect(cards.locator("dd")).toHaveText(["2", "1", "3", "2"]);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "5", "2"]);
     await expect(chart(mcpTrend)).toBeVisible();
     await expect.poll(() => mcpReads.overview.at(-1)).toEqual({
       start_date: "2026-11-17", end_date: "2026-11-23",
@@ -976,7 +977,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         group: null,
         agent: null,
       });
-    await expect(cards.locator("dd")).toHaveText(["2", "1", "3", "2"]);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "5", "2"]);
     expect(inventoryReads()).toHaveLength(beforeDate);
     expect(skillReads.summary).toHaveLength(skillCountReads);
     expect(mcpReads.catalog).toHaveLength(countReads);
@@ -1002,7 +1003,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(chart(modelTrend)).toHaveCount(0);
     releaseOverviewScope();
     holdOverviewScope = false;
-    await expect(cards.locator("dd")).toHaveText(["1", "0", "1", "1"]);
+    await expect(cards.locator("dd")).toHaveText(["1", "0", "2", "1"]);
     await expect(page.getByText("2026-10-25 – 2026-11-23")).toBeVisible();
     await expect
       .poll(() => modelTrendReads.at(-1))
@@ -1046,11 +1047,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(page.getByText("2026-11-07 – 2026-11-12")).toBeVisible();
     await expect(modelTrend.getByRole("alert")).toHaveText("加载失败，请重试");
     await expect(chart(agentTrend)).toBeVisible();
-    await expect(cards.locator("dd")).toHaveText(["1", "0", "1", "1"]);
+    await expect(cards.locator("dd")).toHaveText(["1", "0", "2", "1"]);
     expect(inventoryReads()).toHaveLength(beforeCustomInventory);
     await choose("租户", "全部租户");
     await expect(chart(modelTrend)).toBeVisible();
-    await expect(cards.locator("dd")).toHaveText(["2", "1", "3", "2"]);
+    await expect(cards.locator("dd")).toHaveText(["2", "1", "5", "2"]);
     overviewModelReads = modelTrendReads.length;
   });
   await contract.step(scope, async () => {
@@ -1335,7 +1336,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       mcp.getByRole("heading", { name: "全部服务 · 运营中心" }),
     ).toBeVisible();
     await expect(select("MCP 工具")).toHaveCount(0);
-    await expectCards(["当前 MCP 总数", "工具调用量"], ["2", "27"]);
+    await expectCards(["当前 MCP 总数", "工具调用量"], ["3", "27"]);
     await expectTrend();
     await expect(serviceTop.getByRole("button")).toHaveText(["文件服务", "知识库服务"]);
     await expect.poll(() => mcpReads.rankings.at(-1)).toMatchObject({
@@ -1493,7 +1494,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(mcp.getByPlaceholder("请选择结束日期")).toHaveValue(
       "2026-11-12",
     );
-    await expectCards(["当前 MCP 总数", "工具调用量"], ["1", "—"]);
+    await expectCards(["当前 MCP 总数", "工具调用量"], ["2", "—"]);
     await expect(trend.getByText("—", { exact: true })).toBeVisible();
     await expect(services.getByText("所选时间范围暂无已发布统计", { exact: true })).toBeVisible();
     await expect(services.locator(".ant-pagination")).toHaveCount(0);

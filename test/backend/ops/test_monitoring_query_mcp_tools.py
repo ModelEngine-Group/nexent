@@ -318,10 +318,15 @@ def test_mcp_server_catalog_appends_the_local_endpoint_when_configured(monkeypat
     catalog = mcp_server_catalog("tenant-a")
     assert catalog == [
         {"service_id": 3, "name": "docs", "type": "remote", "group_ids": None},
-        {"service_id": None, "name": "outer-apis", "type": "builtin", "group_ids": None},
+        {"service_id": None, "name": "outer-apis", "type": "builtin", "group_ids": None,
+         "instance_count": 1},
     ]
-    # One synthesized entry regardless of the tenant scope.
-    assert mcp_server_catalog(None) == catalog
+    rows.append({**rows[0], "mcp_id": 4, "tenant_id": "tenant-b", "mcp_name": "files"})
+    assert mcp_server_catalog(None) == [
+        catalog[0],
+        {"service_id": 4, "name": "files", "type": "remote", "group_ids": None},
+        {**catalog[1], "instance_count": 2},
+    ]
 
 
 def test_mcp_server_catalog_filters_by_configured_access_groups(monkeypatch):
@@ -343,7 +348,8 @@ def test_mcp_server_catalog_filters_by_configured_access_groups(monkeypatch):
         {"service_id": 3, "name": "docs", "type": "remote", "group_ids": [5]},
         {"service_id": 4, "name": "public", "type": "remote", "group_ids": None},
         {"service_id": 6, "name": "unassigned", "type": "remote", "group_ids": []},
-        {"service_id": None, "name": "outer-apis", "type": "builtin", "group_ids": None},
+        {"service_id": None, "name": "outer-apis", "type": "builtin", "group_ids": None,
+         "instance_count": 1},
     ]
     # Public records, unassigned records and the local endpoint never match.
     assert mcp_server_catalog("tenant-a", [5]) == [

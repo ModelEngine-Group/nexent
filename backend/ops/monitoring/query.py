@@ -441,18 +441,22 @@ def mcp_server_catalog(tenant: str | None, groups: list[int] | None = None) -> l
     (servers with published facts) uses a different scope.
     """
     servers = []
-    local_listed = False
+    builtin = None
     for entry in mcp_server_inventory(tenant):
         if groups and not _mcp_group_allowed(entry["group_ids"], groups):
             continue
-        if entry["mcp_server_id"] is None:
-            if local_listed:
-                continue
-            local_listed = True
+        server_id = entry["mcp_server_id"]
+        if server_id is None and builtin is not None:
+            builtin["instance_count"] += 1
+            continue
         group_ids = entry["group_ids"]
-        servers.append({"service_id": entry["mcp_server_id"], "name": entry["mcp_server_name"],
-                        "type": entry["mcp_server_type"],
-                        "group_ids": None if group_ids is None else list(group_ids)})
+        server = {"service_id": server_id, "name": entry["mcp_server_name"],
+                  "type": entry["mcp_server_type"],
+                  "group_ids": None if group_ids is None else list(group_ids)}
+        if server_id is None:
+            server["instance_count"] = 1
+            builtin = server
+        servers.append(server)
     return servers
 
 
