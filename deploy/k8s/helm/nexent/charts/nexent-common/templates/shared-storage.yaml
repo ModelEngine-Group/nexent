@@ -1,7 +1,7 @@
 {{- $global := default dict .Values.global }}
 {{- $shared := default dict $global.sharedStorage }}
-{{- $mode := default "local" $shared.mode }}
-{{- $storageClassName := default "" $shared.storageClassName }}
+{{- $mode := default "dynamic" $shared.mode }}
+{{- $storageClassName := default (ternary "nexent-local" "" (eq $mode "local")) $shared.storageClassName }}
 {{- $accessModes := default (list "ReadWriteMany") $shared.accessModes }}
 {{- $workspace := default dict $shared.workspace }}
 {{- $workspaceSize := default "10Gi" $workspace.size }}
@@ -34,8 +34,15 @@ kind: PersistentVolumeClaim
 metadata:
   name: nexent-workspace
   namespace: {{ .Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  {{- end }}
   annotations:
     "helm.sh/hook-weight": "-3"
+    {{- if eq $mode "dynamic" }}
+    helm.sh/resource-policy: keep
+    {{- end }}
 spec:
   accessModes:
 {{ toYaml $accessModes | indent 4 }}
@@ -81,8 +88,15 @@ kind: PersistentVolumeClaim
 metadata:
   name: nexent-skills
   namespace: {{ .Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  {{- end }}
   annotations:
     "helm.sh/hook-weight": "-3"
+    {{- if eq $mode "dynamic" }}
+    helm.sh/resource-policy: keep
+    {{- end }}
 spec:
   accessModes:
 {{ toYaml $accessModes | indent 4 }}
@@ -128,8 +142,15 @@ kind: PersistentVolumeClaim
 metadata:
   name: nexent-logs
   namespace: {{ .Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  {{- end }}
   annotations:
     "helm.sh/hook-weight": "-3"
+    {{- if eq $mode "dynamic" }}
+    helm.sh/resource-policy: keep
+    {{- end }}
 spec:
   accessModes:
 {{ toYaml $accessModes | indent 4 }}
@@ -176,8 +197,15 @@ kind: PersistentVolumeClaim
 metadata:
   name: nexent-trajectory
   namespace: {{ .Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  {{- end }}
   annotations:
     "helm.sh/hook-weight": "-3"
+    {{- if eq $mode "dynamic" }}
+    helm.sh/resource-policy: keep
+    {{- end }}
 spec:
   accessModes:
 {{ toYaml $accessModes | indent 4 }}
@@ -224,8 +252,15 @@ kind: PersistentVolumeClaim
 metadata:
   name: nexent-memory-plugins
   namespace: {{ .Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  {{- end }}
   annotations:
     "helm.sh/hook-weight": "-3"
+    {{- if eq $mode "dynamic" }}
+    helm.sh/resource-policy: keep
+    {{- end }}
 spec:
   accessModes:
 {{ toYaml $accessModes | indent 4 }}
@@ -271,8 +306,15 @@ kind: PersistentVolumeClaim
 metadata:
   name: nexent-project-config
   namespace: {{ .Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  {{- end }}
   annotations:
     "helm.sh/hook-weight": "-3"
+    {{- if eq $mode "dynamic" }}
+    helm.sh/resource-policy: keep
+    {{- end }}
 spec:
   accessModes:
 {{ toYaml $accessModes | indent 4 }}

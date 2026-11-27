@@ -54,11 +54,14 @@ async def complete(nonce: str, request: Request):
         raise HTTPException(404, 'Unknown sequence')
     body = await request.json()
     state = scenarios[nonce]
-    if body.get('max_tokens') == 4096:
+    messages = body.get('messages', [])
+    # Agent streams include role instructions. A connectivity probe streams a
+    # single user message, and title generation uses a non-streaming invocation.
+    if body.get('stream') and any(message.get('role') in {'system', 'developer'} for message in messages):
         index = state['request_count']
         state['request_count'] += 1
         if state['observation_marker']:
-            state['observation_counts'].append(json.dumps(body.get('messages', []), ensure_ascii=False).count(state['observation_marker']))
+            state['observation_counts'].append(json.dumps(messages, ensure_ascii=False).count(state['observation_marker']))
         text = state['responses'][min(index, len(state['responses']) - 1)]
         finish = state['finish_reason']
     else:

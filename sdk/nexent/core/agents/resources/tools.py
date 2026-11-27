@@ -9,6 +9,7 @@ from copy import copy, deepcopy
 
 import nexent.core.tools as tool_types
 from nexent.core.agents.contracts.config import ToolConfig
+from nexent.core.agents.mcp_citation import wrap_mcp_tool_with_citation
 from nexent.core.agents.resources.compatibility.smolagents_tools import from_langchain
 from nexent.core.agents.resources.tool_parameters import apply_mcp_tool_parameters
 from nexent.core.agents.resources.tool_user_context import apply_user_context_to_mcp_tool
@@ -366,6 +367,16 @@ class ToolResources:
         elif source == "mcp":
             tool_obj = self.create_mcp_tool(class_name)
             tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
+            # Same metadata-driven builder wiring as built-in AIDP search
+            # tools: the backend may inject an image URL builder so image
+            # chunks are rebuilt instead of merely stripped.
+            tool_obj = wrap_mcp_tool_with_citation(
+                tool_obj,
+                self.observer,
+                tool_config.metadata.get("image_url_builder")
+                if tool_config.metadata
+                else None,
+            )
         elif source == "langchain":
             tool_obj = self.create_langchain_tool(tool_config)
         elif source == "builtin":

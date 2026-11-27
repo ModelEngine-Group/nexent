@@ -46,7 +46,9 @@ cd nexent
 bash deploy.sh docker
 ```
 
-The root `deploy.sh` only forwards to the target deploy script; the native Docker implementation is `bash deploy/docker/deploy.sh`. The Docker and Kubernetes deploy scripts share the same deployment configuration model. Interactive runs show Bash TUI menus for component selection, port policy, and image source. `infrastructure` is required; `application` and `data-process` are selected by default and can be disabled when you want a smaller deployment. Use `b`/Backspace to return to the previous TUI step and `q` to quit. Use `--defaults` to skip the TUI and deploy with saved `deploy.options` or built-in defaults. Non-interactive runs can also pass the same choices with `--version`, `--components`, `--port-policy development|production`, and `--image-source general|mainland|local-latest`. Successful deployments save non-sensitive choices to each deploy directory's `deploy.options` for reuse on the next run.
+The root `deploy.sh` prepares deployment and forwards to the target deploy script. The native Docker implementation is `bash deploy/docker/deploy.sh`. The Docker and Kubernetes deploy scripts share the same deployment configuration model. Interactive runs show Bash TUI menus for component selection, port policy, and image source. `infrastructure` is required; `application` and `data-process` are selected by default and can be disabled when you want a smaller deployment. Use `b`/Backspace to return to the previous TUI step and `q` to quit. Use `--defaults` to skip the TUI and deploy with saved `deploy.options` or built-in defaults. Non-interactive runs can also pass the same choices with `--version`, `--components`, `--port-policy development|production`, and `--image-source general|mainland|local-latest`. Successful deployments save non-sensitive choices to each deploy directory's `deploy.options` for reuse on the next run.
+
+Each Docker or Kubernetes deployment creates a `deploy-YYYYMMDD-HHMMSS.log` file in `logs/deploy/` at the root of the checkout or offline package and prints the path at startup. The terminal shows deployment milestones, prompts, and failure summaries. The file contains detailed command output, including SQL migrations and Python bootstrap logs.
 
 Docker and Kubernetes both use `deploy/env/.env` as the runtime configuration file. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`. Monitoring-specific settings are generated from `deploy/env/monitoring.env.example` into `deploy/env/monitoring.env`.
 
@@ -68,7 +70,11 @@ bash deploy.sh k8s
 
 The native Kubernetes implementation is `bash deploy/k8s/deploy.sh`. It installs two independent Helm releases: `nexent-infrastructure` for Elasticsearch, PostgreSQL, Redis, and MinIO, then `nexent` for application services after infrastructure and the Elasticsearch API key are ready. Use `--release-scope all|infrastructure|nexent` to operate both releases or either side independently. The script reads `deploy/env/.env` and renders explicit Helm ConfigMap and Secret overrides. Use `--persistence-mode local|dynamic|existing`, `--storage-class`/`--sc`, `--local-path`, `--local-node-name`, and `--existing-claim-prefix` to control PVC behavior.
 
+New Kubernetes deployments use dynamically provisioned PVCs by default. If `--storage-class` is omitted, Kubernetes selects its default StorageClass. Choose a StorageClass that can provision ReadWriteMany volumes for the shared data. Previously saved persistence settings are reused by the deployment script.
+
 Kubernetes uninstall is handled by `bash uninstall.sh k8s`. By default it removes `nexent` first and `nexent-infrastructure` second. The same `--release-scope` option supports application-only removal and dependency-protected infrastructure removal.
+
+Kubernetes uninstall keeps dynamic PVCs and their namespace by default. An interactive run asks whether to delete the selected releases' dynamic PVCs. Use `--delete-pvc true` to delete them or `--delete-pvc false` to keep them without a prompt.
 
 Kubernetes offline packages use the same builder with `--target k8s` or `--target all`. Run `load-images.sh` on every cluster node that needs the images, or use `--push-images --image-registry-prefix registry.example.com/nexent` to push the images to an internal registry before deploying with the same version, image source, and image registry prefix.
 

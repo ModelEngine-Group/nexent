@@ -23,6 +23,11 @@ Multimodal tools analyze text files, images, videos, and audio with model suppor
 
 ## 🧾 Parameters & Behavior
 
+All four tools support the following optional runtime parameters:
+
+- `selected_model_id`: Model ID to use for this call; when omitted, the platform-configured default model for the tool is used.
+- `validate_url_access`: Validates resource URL accessibility (validation logic is injected at runtime), blocking unreachable or unauthorized resource addresses.
+
 ### analyze_text_file
 - `file_url_list`: List of URLs (`s3://bucket/key`, `/bucket/key`, `http(s)://`).
 - `query`: User question/analysis goal.

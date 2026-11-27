@@ -9,9 +9,6 @@
 {{- if and $enabled (not (has $mode (list "local" "dynamic" "existing"))) -}}
 {{- fail (printf "%s.persistence.mode must be local, dynamic, or existing" $component) -}}
 {{- end -}}
-{{- if and $enabled (eq $mode "dynamic") (eq (default "" (get $persistence "storageClassName")) "") -}}
-{{- fail (printf "%s.persistence.storageClassName is required for dynamic storage" $component) -}}
-{{- end -}}
 {{- if and $enabled (eq $mode "existing") (eq (default "" (get $persistence "existingClaim")) "") -}}
 {{- fail (printf "%s.persistence.existingClaim is required for existing storage" $component) -}}
 {{- end -}}

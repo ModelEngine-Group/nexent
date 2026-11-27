@@ -15,10 +15,12 @@ feature:
   - rule_id: OPS-MCP-TOOL-MONITORING-RULE-03
     description: MCP service identity and the normalized deployment type (container, remote, api_convert, builtin, unknown) are resolved in the backend before the run and stored on each fact.
   - rule_id: OPS-MCP-TOOL-MONITORING-RULE-04
-    description: Daily aggregation counts requests and errors and averages duration per tenant, service, tool, agent and group dimension without inflating replayed events.
+    description: Daily aggregation counts requests and errors and averages duration per tenant, service, tool and agent dimension without inflating replayed events.
   - rule_id: OPS-MCP-TOOL-MONITORING-RULE-05
     description: The monitoring API serves tenant-scoped MCP tool statistics with coverage and staleness consistent with the shared day-state model.
+  - rule_id: OPS-MCP-TOOL-MONITORING-RULE-06
+    description: Group filtering matches MCP servers explicitly configured for the requested access groups from the registered inventory; public servers and unresolved endpoints never match, registered never-called servers stay visible with empty metrics, and the service catalog for filter dropdowns applies the same matching.
   required_test_stages: [D3]
   source:
-    requirement_ids: [OPS-MCP-TOOL-MONITORING-20261118]
+    requirement_ids: [OPS-MCP-TOOL-MONITORING-20261118, OPS-MCP-TOOL-GROUP-INVENTORY-20261126]
     notes: Extends the shared monitoring data plane designed by OPS-MODEL-MONITORING-20261116; SPEC document set lives in the document repository under ops-mcp-tool-monitoring.

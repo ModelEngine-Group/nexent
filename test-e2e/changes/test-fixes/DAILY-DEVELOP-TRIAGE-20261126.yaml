@@ -1,0 +1,92 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-DEVELOP-TRIAGE-20261126
+  change_type: test-fix
+  title: Repair verified test and preparation failures from the November 23 deployment run
+  description: Keep the current Management SSE facade and creator model binding covered. Match the frontend
+    component providers and selectors used at the tested boundaries. Supply required PostgreSQL fixture
+    tables and resolve tenant membership against the owned schema. Create the retrieval conversation through
+    the product API and load the deployed configuration before direct fixture writes. Use per-model preferences
+    for the real final-answer run. Preserve missing authorized real fixtures as explicit blocked outcomes.
+    Match the current authorization payload in browser fixtures and require the public not-found error
+    for an absent Agent on both attempts. Register a temporary streaming health scenario before the CMSR
+    provider health check. Read Debug cancellation state under the tenant-scoped Runtime owner.
+    Classify TPC provider requests by the stream and message shape independently of token budgets.
+    Report the incompatible deployment Core as a missing prerequisite before provisioning TPC and CMSR assets.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: The changed code belongs to the repository-owned formal tests and resource preparation.
+  affected_features:
+    existing:
+    - CHAT-MODEL-CONTROLS
+    - CHAT-SIDEBAR
+    - CMSR-005
+    - F-055
+    - F-057
+    - F-065
+    - F-112
+    - F-118
+    - F-179
+    - FAF-001
+    - JIUWEN-MODEL-BRIDGE
+    - JIUWEN-OUTPUT
+    - JIUWEN-RELEASE
+    - JIUWEN-RESOURCES
+    - SEARCH-DEEPSEEK
+    - TPC-001
+    - V5-REL-AUTO-BCE0AAF43667C67B
+    - V5-SEC-03
+    - WB-CONTROLS
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGT-014
+    - AGT-018
+    - AGT-019
+    - API-AUTO-F1D107013FF5F1A1
+    - CHAT-DETAIL-D4-001
+    - CHAT-MODEL-CONTROLS-D2-001
+    - CHAT-PERSIST-D5-001
+    - CHAT-RETRY-HISTORY-D4-001
+    - CHAT-SIDEBAR-D1-001
+    - CHAT-SIDEBAR-D3-001
+    - CHAT-SIDEBAR-D3-002
+    - CHAT-SIDEBAR-D4-001
+    - CHAT-SIDEBAR-D4-003
+    - CHAT-TITLE-D5-001
+    - CMSR-D3-001
+    - CMSR-D4-001
+    - FAF-D3-001
+    - FAF-D4-001
+    - JIUWEN-CLARIFICATION-D4-001
+    - JIUWEN-CONCURRENCY-D3-001
+    - JIUWEN-DELEGATION-D4-001
+    - JIUWEN-IMAGE-D3-001
+    - JIUWEN-OUTPUT-D4-001
+    - JIUWEN-REAL-UI-D4-001
+    - JIUWEN-RELEASE-D3-001
+    - JIUWEN-RESOURCES-D3-003
+    - JIUWEN-RESOURCES-D5-002
+    - JIUWEN-SKILL-CREATOR-D4-001
+    - JIUWEN-SKILL-FILES-D4-001
+    - JIUWEN-WORKBENCH-HITL-D4-001
+    - REL-AUTO-BCE0AAF43667C67B
+    - SEARCH-DEEPSEEK-D4-001
+    - SEC-003
+    - SEC-03
+    - TPC-D3-001
+    - TPC-D4-001
+    - UT-FE-AUTO-02FA904A1C3AD386
+    - UT-FE-AUTO-ED44D96A53903DD0
+    - WB-CONTROLS-D4-003
+    modified: []
+    added: []
+    retired: []
+  no_case_change_reason: The implementation and fixtures are repaired against the existing Case contracts.
+  notes: Retain Case requirements, profile bindings, and cleanup ownership. The retrieval and sharing
+    fixtures use owned resources and the existing asset journal; isolated database Cases remove their
+    schemas or containers. D4 cases use controlled routes or caller-supplied authorized local fixtures.
+    Real-provider, policy, and product behavior findings remain in the local triage record.

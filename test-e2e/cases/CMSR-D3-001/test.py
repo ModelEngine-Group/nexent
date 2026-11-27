@@ -51,7 +51,7 @@ async def test_cmsr_d3_001():
                         output_index = next(i for i, e in enumerate(events) if e.get('type') == 'model_output_thinking')
                         assert step_index < begin_index < output_index
                     await control(nonce, 'failed')
-                    await wait_paused(nonce, 'success')
+                    await wait_paused(nonce, 'success', stream=task)
                     try:
                         async with asyncio.timeout(15):
                             while not any('CMSR_OK_' + nonce in str(e.get('content', '')) for e in events):

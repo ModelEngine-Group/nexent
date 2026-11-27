@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { FixtureUnavailableError, journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
@@ -41,7 +41,12 @@ journey("TPC-D4-001", async context => {
           const result = await promisify(execFile)(python, [join(repo, "test-e2e/infra/automation/d4/tpc_client.py")],
             { env: process.env, timeout: 180000 });
           cfg = JSON.parse(result.stdout);
-        } catch { throw new Error("TPC owned fixture preparation failed; inspect the case asset journal"); }
+        } catch (error) {
+          if (String((error as { stderr?: string }).stderr ?? "").trim() === "AgentCoreUnavailableError") {
+            throw new FixtureUnavailableError("TPC needs a deployment with NEXENT_AGENT_CORE=smolagents.");
+          }
+          throw new Error("TPC owned fixture preparation failed; inspect the case asset journal");
+        }
         await loginCurrent(page, "tenant_a_admin");
         await chat.openAgent(cfg.agent_display);
         return "authenticated owner and freshly published Skill-bound Agent are ready";
@@ -66,10 +71,18 @@ journey("TPC-D4-001", async context => {
         await chat.selectMode("执行");
         await chat.startMessage(`Read ${cfg.skill_name} and reply with exactly TPC_SKILL_READ_OK`);
         conversationId = chat.currentConversationId();
-        await chat.waitForCompletion();
+        await expect(chat.assistantMessages().last().locator(
+          '[data-slot="aui_assistant-message-completion-indicator"]',
+        )).toBeVisible({ timeout: 90_000 });
         await expandExecution();
         expect(await chat.messageText(chat.assistantMessages().last())).toBe("TPC_SKILL_READ_OK");
-        title = await chat.currentThreadTitle();
+        title = `TPC-${cfg.nonce}`;
+        const renamed = await page.request.post("/api/conversation/rename", {
+          data: { conversation_id: conversationId, name: title },
+        });
+        expect(renamed.ok()).toBe(true);
+        expect((await renamed.json()).code).toBe(0);
+        expect(await chat.persistedThreadTitle(conversationId)).toBe(title);
         return "real Skill action executed once and explicit final answer displayed";
       },
       async () => {

@@ -165,6 +165,15 @@ The following tables show the operation permissions of four roles for various ty
 
 > 💡 **Note**: MCP tools are tenant-level shared resources. All user groups within the same tenant share the same MCP tools, with no group-level isolation. Administrators can add and manage MCP tools, while developers can only add MCP tools.
 
+### 3.6 Skills and repository review
+
+The Agent, MCP, and Skill repositories all adopt a "Repository / Mine / Review Center" three-tab structure:
+
+- **Admins** can use the review centers of all three repositories to review listing applications from developers; the MCP repository review center is also open to the super administrator
+- **Developers** can submit listing applications for their own agents, MCP services, and Skills, or publish them to the repositories for other tenant members to copy and use
+- Review results are pushed to applicants via in-app notifications
+- For detailed repository operations, see [Agent Space](./resource-repository/agent-repository), [MCP Space](./resource-repository/mcp-repository), and [Skill Space](./resource-repository/skill-repository)
+
 ## IV. Permission Configuration
 
 ### 4.1 Agent Permission Settings
@@ -252,7 +261,15 @@ A user-specific quota takes precedence over the tenant default. Users without a 
 
 Quota checks use the persistent source-file storage ledger. Elasticsearch physical index size is displayed as independent observability data. Shared knowledge bases are checked against tenant and individual knowledge-base quotas; private knowledge-base uploads also check the uploader's effective personal quota. Once a limit is reached, subsequent uploads are rejected, but existing knowledge bases and files are not deleted as a result. Lowering a quota also does not automatically remove historical data. To continue uploading, delete files that are no longer needed to release capacity, or ask an administrator to adjust the applicable quota.
 
-### 4.5 Filter and Locate Resources
+### 4.5 Tenant memory settings
+
+On the "Memory Settings" tab of Resource Management, admins can control the **tenant automatic memory** switch. This switch controls automatic memory writing and consolidation for all conversations in the tenant; when disabled, agents in the tenant no longer save and consolidate memory automatically.
+
+- The tab appears only when the selected tenant is the admin's own tenant
+- The switch is controlled by tenant admins and read-only for users
+- It is enabled by default when unset
+
+### 4.6 Filter and Locate Resources
 
 Use the search and filter controls provided by each resource list instead of browsing page by page:
 

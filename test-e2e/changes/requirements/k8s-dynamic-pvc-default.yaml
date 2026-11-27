@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-DYNAMIC-PVC-DEFAULT-20261126
+  change_type: requirement
+  requirement_id: K8S-DYNAMIC-PVC-DEFAULT-20261126
+  title: Provision Kubernetes PVCs dynamically by default
+  description: Fresh Kubernetes deploys and Helm releases use dynamic claims with the cluster default StorageClass when no class is supplied. Saved and explicit storage settings keep their existing precedence.
+  affected_features:
+    existing: [RUNTIME-REPLICAS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [RUNTIME-OFFLINE-DEPLOY-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - The native script defaults to dynamic storage and reuses saved or explicit mode and class values.
+    - The application, infrastructure and monitoring charts render dynamically provisioned claims. Explicit local mode still renders matching hostPath PVs and claims.
+    reason: Exercise option precedence and actual Helm rendering locally. The existing deployment case verifies binding and startup on isolated RWX storage.
+    test_selectors:
+    - test/backend/deploy/test_k8s_version_selection.py
+    - test/backend/deploy/test_k8s_persistence.py
+  notes: The sibling documentation checkout is absent. The product Helm README documents the available baseline. The D5 fixture supplies its dedicated StorageClass and relies on the default mode, then checks the owned claims after bootstrap. The fixture owns its namespace and confirms reclamation during cleanup.

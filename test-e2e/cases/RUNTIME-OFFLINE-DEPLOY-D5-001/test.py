@@ -121,9 +121,15 @@ def write_decision(directory, name, decision):
 
 def test_offline_replica_sequence(isolated_release):
     cluster, script = isolated_release
-    assert cluster.deploy(script, initial=True).returncode == 0
+    assert cluster.deploy(script, 1, initial=True).returncode == 0
     previous = observe_release(cluster)
     assert_ready(cluster, previous, 1)
+    claims = {claim["metadata"]["name"]: claim for claim in cluster.resources("pvc")["items"]}
+    for name in ("nexent-postgresql", "nexent-elasticsearch", "nexent-redis", "nexent-minio",
+                 "nexent-workspace", "nexent-skills", "nexent-logs", "nexent-trajectory", "nexent-memory-plugins"):
+        assert claims[name]["status"]["phase"] == "Bound"
+        assert claims[name]["spec"]["storageClassName"] == cluster.profile.storage_class
+        assert claims[name]["spec"]["volumeName"] != f"{name}-pv"
     pod, = cluster.runtime_pods()
     identity = cluster.seed_runtime_identities(pod)["owner"]
     cluster.create_runtime_model(pod, mode="admission")
@@ -158,7 +164,9 @@ def test_offline_replica_sequence(isolated_release):
         history = conversation_history(gateway, sign_in(gateway, identity), conversation)
     calls = cluster.runtime_model_control("probe")["calls_by_tag"]
     receipts = []
+    log_dir = script.parents[2] / "logs/deploy"
     for count in (3, 2, 1):
+        previous_logs = set(log_dir.glob("deploy-*"))
         with TemporaryDirectory(prefix="idle-activation-", dir=cluster.scratch) as temporary:
             gate = Path(temporary)
             install_gate(gate, "helm", "hold-activation.sh")
@@ -171,10 +179,15 @@ def test_offline_replica_sequence(isolated_release):
                     paused = observe_release(cluster)
                     assert_paused(paused)
                     bootstrap = cluster.bootstrap_image_receipts()
+                    deployment_log, = set(log_dir.glob("deploy-*")) - previous_logs
+                    assert "[sql-migrations] apply __init.sql" in deployment_log.read_text(encoding="utf-8")
                     decision = "allow"
                 finally:
                     write_decision(gate, "decision", decision)
-                assert deployment.result().returncode == 0
+                deployed = deployment.result()
+                assert deployed.returncode == 0, deployed.stderr
+                assert deployment_log.name in deployed.stdout
+                assert "[sql-migrations] apply __init.sql" not in deployed.stdout + deployed.stderr
         ready = observe_release(cluster)
         assert_ready(cluster, ready, count)
         assert not (previous["pods"].keys() & ready["pods"].keys())
@@ -201,10 +214,40 @@ def terminate_deployment_lock(cluster):
     return int(pid)
 
 
+def test_dynamic_pvc_uninstall_retains_then_deletes_claims(isolated_release):
+    cluster, script = isolated_release
+    assert cluster.deploy(script, 1, initial=True).returncode == 0
+
+    def dynamic_claims():
+        return {claim["metadata"]["name"]: claim["metadata"]["uid"] for claim in cluster.resources("pvc")["items"]
+                if claim["metadata"].get("labels", {}).get("nexent.io/persistence-mode") == "dynamic"}
+
+    def uninstall(*args):
+        cluster.require_owned_namespace()
+        result = subprocess.run(
+            ["bash", str(script.with_name("uninstall.sh")), "--namespace", NAMESPACE, *args],
+            env=cluster._command_env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            check=False, timeout=3 * cluster.profile.wait_seconds,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        cluster.require_owned_namespace()
+
+    original = dynamic_claims()
+    assert {"nexent-workspace", "nexent-postgresql"} <= original.keys()
+    uninstall("--remove-namespace")
+    wait_for(lambda: not cluster.resources("deployments")["items"], cluster.profile.wait_seconds,
+             "Deployments remain after uninstall")
+    assert dynamic_claims() == original
+
+    uninstall("--delete-pvc", "true", "--keep-namespace")
+    wait_for(lambda: not dynamic_claims(), cluster.profile.wait_seconds, "Dynamic PVCs remain after explicit cleanup")
+    write_case_evidence("runtime-dynamic-pvc-cleanup", {"preserved": sorted(original), "explicit_delete_completed": True})
+
+
 @pytest.mark.parametrize("fault", ("bootstrap-failed", "lock-lost"))
 def test_activation_waits_for_bootstrap_and_deploy_lock(isolated_release, fault):
     cluster, script = isolated_release
-    assert cluster.deploy(script, initial=True).returncode == 0
+    assert cluster.deploy(script, 1, initial=True).returncode == 0
     initial = observe_release(cluster)
     assert_ready(cluster, initial, 1)
     with TemporaryDirectory(prefix="bootstrap-result-", dir=cluster.scratch) as temporary:
@@ -239,7 +282,7 @@ def test_activation_waits_for_bootstrap_and_deploy_lock(isolated_release, fault)
 
 def test_unfinished_bootstrap_job_does_not_pause_the_running_release(isolated_release):
     cluster, script = isolated_release
-    assert cluster.deploy(script, initial=True).returncode == 0
+    assert cluster.deploy(script, 1, initial=True).returncode == 0
     before = observe_release(cluster)
     assert_ready(cluster, before, 1)
     pod, = cluster.runtime_pods()

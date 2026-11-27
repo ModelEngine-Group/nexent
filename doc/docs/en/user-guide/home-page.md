@@ -47,7 +47,7 @@ If no agents are available, ask your administrator or agent developer to check p
 ### Build your own agent
 
 1. Confirm that a suitable model is available. To connect another model, see [Model Configuration](./agent-development/model-configuration).
-2. Click **Quick Setup**, or open **Agent Development → Agent Configuration**, to create and configure an agent. You can also browse [Agent Space](./resource-repository/agent-repository) for reusable resources.
+2. Click **Quick Setup**, or open **Agent Configuration**, to create and configure an agent. You can also browse [Agent Space](./resource-repository/agent-repository) for reusable resources.
 3. Configure tools, skills, knowledge bases, and memory as needed. **A knowledge base is optional**: prepare one when your agent needs to retrieve information from your own materials.
 4. Debug the agent and check its results before publishing. Then verify the experience on the chat page.
 

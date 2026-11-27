@@ -5,19 +5,22 @@
 import management.services.permission.identity.session as depends_dependencies
 import json
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
+from management.api.agent import conversation_run as conversation_run_api
 from management.api.agent import creator as agent_creator_api
 from management.api.skill import creation as skill_app_creation
 from management.services.skill import creation as skill_service
+from management.services.conversation.model_preferences import merge_model_preferences
 from management.services.model import creator_snapshot
 from gateway.identity.context import identity_context
 from infrastructure import agent_model_config
-from infrastructure.agent_model_overrides import apply_turn_model_generation
 from management.services.model import run_bindings
+from contracts.agent import AgentRequest
 from contracts.errors.exceptions import ForbiddenError
 from management.services.model import run_controls
 from nexent.core.agents.contracts.config import AgentConfig
@@ -46,7 +49,7 @@ class ApiFixture:
             body["agent_id"] = 7
         return body
 
-    def post(self, path, body, token="creator"):
+    def post(self, path, body, token="DEV"):
         return self.client.post(path, json=body, headers={"Authorization": f"Bearer {token}"} if token else {})
 
 
@@ -65,10 +68,9 @@ def install_fixture_gateway_session(app, user_id, tenant_id):
 
 
 def api_fixture(monkeypatch):
-    from runtime.api.agent import execution as agent_app_execution
     app = FastAPI()
     install_fixture_gateway_session(app, "fixture-owner", "tenant")
-    app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+    app.include_router(conversation_run_api.router, prefix="/api")
     app.include_router(agent_creator_api.router, prefix="/api")
     app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
     records = {}
@@ -93,8 +95,8 @@ def api_fixture(monkeypatch):
     app.dependency_overrides[depends_dependencies.authenticate] = authenticate
     monkeypatch.setattr(rbac, "_INITIALIZED", True)
     monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {
-        "CREATOR": {"agent:create", "skill:create"}, "NO-AGENT-CREATE": {"skill:create"},
-        "NO-SKILL-CREATE": {"agent:create"},
+        "DEV": {"agent:create", "skill:create"}, "USER": {"skill:create"},
+        "OPS": {"agent:create"},
     })
     monkeypatch.setattr(agent_creator_api, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
@@ -125,7 +127,6 @@ def api_fixture(monkeypatch):
             raise ForbiddenError("The selected model is not configured for this Agent")
         run_controls.preflight_turn_controls(request, "tenant")
         selected = lookup(request.model_id, "tenant") if request.model_id else records["effort"]
-        from management.services.conversation.model_preferences import merge_model_preferences
         root = merge_model_preferences(profiles[selected["model_id"]], request.model_parameter_preferences.get(str(selected["model_id"]), {}))
         values = root.parameter_values
         payload = {"model_id": selected["model_id"], "enabled": values.get("enable_thinking"),
@@ -136,24 +137,27 @@ def api_fixture(monkeypatch):
             yield f"data: {json.dumps(payload)}\n\n"
         return chunks()
 
-    async def agent_run_stream(agent_request, **kwargs):
-        return StreamingResponse(await stream(agent_request, True), media_type="text/event-stream")
+    async def forward_conversation_run(payload, user_id, tenant_id):
+        assert (user_id, tenant_id) == ("fixture-owner", "tenant")
+        request = AgentRequest.model_validate(payload.request)
+        return StreamingResponse(await stream(request, True), media_type="text/event-stream")
 
     async def compile_agent(request, actor, language):
-        return await stream(request)
+        return SimpleNamespace(conversation_id=None, chunks=await stream(request))
 
-    async def creation_turn(request, *, kind, user_id, tenant_id, stream_factory):
+    async def creation_turn(request, *, kind, user_id, tenant_id, stream_factory, resume=False):
         # The real history service validates this resource declaration before saving it.
         from contracts.agent import WorkbenchSessionConfig
         if request.workbench_config is not None:
             WorkbenchSessionConfig.model_validate(request.workbench_config)
         return await stream_factory(request, None), 1
 
-    monkeypatch.setattr(agent_app_execution, "start_creation_turn", creation_turn)
+    monkeypatch.setattr(agent_creator_api, "start_creation_turn", creation_turn)
     monkeypatch.setattr(skill_app_creation, "start_creation_turn", creation_turn)
-    monkeypatch.setattr(agent_app_execution, "run_agent_stream", agent_run_stream)
+    monkeypatch.setattr(conversation_run_api, "get_current_user_id", lambda _: ("fixture-owner", "tenant"))
+    monkeypatch.setattr(conversation_run_api, "forward_conversation_run", forward_conversation_run)
     monkeypatch.setattr(agent_creator_api, "prepare_nl2agent_snapshot", compile_agent)
-    monkeypatch.setattr(agent_creator_api, "create_nl2agent_stream", lambda prepared, actor: prepared)
+    monkeypatch.setattr(agent_creator_api, "create_nl2agent_stream", lambda prepared, actor, *, request: prepared.chunks)
     def compile_skill(request, *scope):
         snapshot = skill_service.prepare_nl2skill_snapshot(request, *scope)
         state.calls.append(request.model_dump(exclude_unset=True))
@@ -161,12 +165,12 @@ def api_fixture(monkeypatch):
 
     def skill_stream(snapshot, user_id, tenant_id):
         selected = lookup(snapshot.model.model_id, tenant_id)
-        root = run_bindings.create_model_config_from_record(selected)
-        if snapshot.model.turn_generation:
-            root = apply_turn_model_generation(root, snapshot.model.turn_generation, snapshot.model.alias)
-        payload = {"model_id": selected["model_id"], "enabled": root.enable_thinking,
-                   "effort": root.reasoning_effort, "budget": root.reasoning_budget_tokens,
-                   "temperature": root.temperature, "top_p": root.top_p}
+        values = merge_model_preferences(
+            profiles[snapshot.model.model_id], snapshot.model.conversation_parameters or {},
+        ).parameter_values
+        payload = {"model_id": selected["model_id"], "enabled": values.get("enable_thinking"),
+                   "effort": values.get("reasoning_effort"), "budget": values.get("reasoning_budget_tokens"),
+                   "temperature": values.get("temperature"), "top_p": values.get("top_p")}
 
         async def chunks():
             yield f"data: {json.dumps(payload)}\n\n"

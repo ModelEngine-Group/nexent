@@ -4,7 +4,7 @@ title: File Tools
 
 # File Tools
 
-File tools provide safe, workspace-scoped operations for files and folders. All paths must be relative to the workspace root (default `/mnt/nexent`).
+File tools provide safe, workspace-scoped operations for files and folders. All paths must be relative to the workspace root. The initial workspace root defaults to `/mnt/nexent`; the actual working directory injected at runtime is `/mnt/nexent/workdir` beneath it, so trust the paths returned within a session.
 
 ## 🧭 Tool List
 

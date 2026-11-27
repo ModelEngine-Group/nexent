@@ -747,7 +747,7 @@ class RuntimeScalingCluster:
         if not valid_target:
             raise ValueError("Invalid test deployment target")
         command = ["bash", str(script), "--defaults", "--release-scope", "all" if initial else "nexent",
-                   "--components", "infrastructure,application,data-process", "--persistence-mode", "dynamic",
+                   "--components", "infrastructure,application,data-process",
                    "--storage-class", self.profile.storage_class,
                    "--image-source", self.profile.image_source, "--version", self.profile.app_version,
                    "--wait-timeout", str(self.profile.wait_seconds)]

@@ -111,6 +111,11 @@ update_env_file() {
 show_summary() {
   echo "🎉 Environment generation completed!"
 
+  if [ -n "${NEXENT_DEPLOY_LOG_FILE:-}" ]; then
+    echo "Generated credentials were saved to deploy/env/.env."
+    return
+  fi
+
   echo ""
   echo "--------------------------------"
   echo ""

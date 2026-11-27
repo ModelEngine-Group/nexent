@@ -175,21 +175,28 @@ def assert_automatic_upgrade(root, temporary):
         """)
         docker("exec", worker, "mkdir", "-p", "/tmp/auth-migrations")
         docker("cp", str(bundle), worker + ":/tmp/auth-migrations/" + bundle.name)
-        runner = (root / "deploy/common/run-sql-migrations.sh").read_text(encoding="utf-8")
-        docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/run-auth-sql.sh", data=runner)
+        for script in ("run-sql-migrations.sh", "start-backend.sh"):
+            docker("cp", str(root / "deploy/common" / script), f"{worker}:/tmp/{script}")
         docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/init-auth.sql", data="CREATE SCHEMA IF NOT EXISTS nexent;\n")
-        sql_command = ["exec", "-e", "NEXENT_APP_VERSION=2.9.0", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql",
-                       worker, "bash", "/tmp/run-auth-sql.sh", "--migrate"]
+        sql_environment = ["exec", "-e", "NEXENT_APP_VERSION=2.9.0", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql"]
+        sql_command = [*sql_environment, worker, "bash", "/tmp/run-sql-migrations.sh", "--migrate"]
+        startup_command = [*sql_environment, "-e", "NEXENT_SQL_STARTUP_MODE=migrate", "-e", "NEXENT_SQL_SKIP_IF_CURRENT=true",
+                           worker, "bash", "/tmp/start-backend.sh", "printf", "CONFIG_STARTED\\n"]
         docker(*sql_command)
         assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_merged_migrations.sql'") == "1"
         assert query("SELECT roles FROM nexent.tenant_invitation_code_t") == "{DEV}"
         assert query("SELECT count(*) FROM nexent.role_permission_t WHERE user_role='OPS'") == "12"
         # Old 002 execution records are retained even though the file is consolidated.
         query("INSERT INTO nexent.schema_migrations (migration_id,checksum,status,app_version,source_file) VALUES ('v2.9.0_002_account_availability.sql','legacy','applied','2.9.0','legacy-002')")
-        # Normal startup must also support unchanged checksums and forced replay.
-        docker(*sql_command)
+        init_execution = "SELECT executed_at FROM nexent.schema_migrations WHERE migration_id='__init.sql'"
+        bootstrapped_at = query(init_execution)
+        assert docker(*startup_command).endswith("CONFIG_STARTED")
+        assert bootstrapped_at and query(init_execution) == bootstrapped_at
         query("UPDATE nexent.schema_migrations SET checksum='force-replay' WHERE migration_id='v2.9.0_merged_migrations.sql'")
-        docker(*sql_command)
+        startup = docker(*startup_command)
+        assert "[sql-migrations] reapply v2.9.0_merged_migrations.sql" in startup
+        assert startup.endswith("CONFIG_STARTED")
+        assert query(init_execution) != bootstrapped_at
         assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
         assert query("SELECT checksum FROM nexent.schema_migrations WHERE migration_id='v2.9.0_002_account_availability.sql'") == "legacy"
         # A failed historical replay must roll back its schema/data changes,
@@ -197,8 +204,9 @@ def assert_automatic_upgrade(root, temporary):
         query("ALTER TABLE nexent.user_tenant_t ADD COLUMN user_email varchar(255); "
               f"UPDATE nexent.user_tenant_t SET user_email='conflict@example.com' WHERE user_id='{user_id}'; "
               "UPDATE nexent.schema_migrations SET checksum='force-failure' WHERE migration_id='v2.9.0_merged_migrations.sql'")
-        failed = subprocess.run(["docker", *sql_command], capture_output=True, check=False)
+        failed = subprocess.run(["docker", *startup_command], capture_output=True, check=False)
         assert failed.returncode != 0
+        assert b"CONFIG_STARTED" not in failed.stdout
         assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
         assert query(f"SELECT password_hash FROM nexent.user_account_t WHERE user_id='{user_id}'") == encoded
         query("ALTER TABLE nexent.user_tenant_t DROP COLUMN user_email")

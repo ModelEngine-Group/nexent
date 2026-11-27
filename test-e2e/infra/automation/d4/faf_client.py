@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.auth import sign_in
 from shared.faf import prepare_faf_agents, cleanup_faf_agents
+from shared.model_catalog import load_model_catalog
 
 
 async def run(operation):
@@ -18,6 +19,12 @@ async def run(operation):
     path = Path(os.environ['RESULT_DIR']) / 'runtime/faf-fixtures.json'
     if operation == 'setup':
         fixtures = await prepare_faf_agents(identity, 'FAF-D4-001')
+        models, _, _ = await load_model_catalog(identity)
+        names = {int(row.get("model_id") or row["id"]): row.get("display_name") for row in models}
+        for fixture in fixtures.values():
+            fixture["model_display_name"] = names.get(fixture["model_id"])
+            if not fixture["model_display_name"]:
+                raise ValueError("A prepared FAF model has no visible catalog name")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(fixtures, indent=2), encoding='utf-8')
         return fixtures

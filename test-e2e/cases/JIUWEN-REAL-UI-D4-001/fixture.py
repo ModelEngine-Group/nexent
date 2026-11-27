@@ -10,7 +10,8 @@ import zipfile
 from pathlib import Path
 
 import httpx
-from infrastructure.rdb.client import get_db_session, minio_client
+from infrastructure.object_storage.client import minio_client
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentInfo, ConversationMessage, ConversationRecord
 from management.services.permission.identity.session import generate_session_jwt
 
@@ -43,6 +44,7 @@ def main():
             files = json.loads(image.minio_files) if isinstance(image.minio_files, str) else image.minio_files
             reference = next(f for f in files if f.get("type", "").startswith("image/"))
             draft = session.query(AgentInfo).filter_by(agent_id=source, version_no=0, delete_flag="N").one()
+            assert draft.created_by == user, "Source Agent ownership mismatch"
             published = session.query(AgentInfo).filter_by(agent_id=source, version_no=draft.current_version_no).one()
             keys = ["business_logic_model_id", "model_ids", "prompt",
                     "enable_context_manager", "context_policy", "max_steps", "requested_output_tokens",
@@ -68,8 +70,8 @@ def main():
     else:
         state = json.loads(path.read_text())
     headers = {"Authorization": "Bearer " + state["access_token"]}
-    with httpx.Client(base_url="http://nexent-config:5010", headers=headers, trust_env=False, timeout=90) as config, \
-            httpx.Client(base_url="http://nexent-runtime:5014", headers=headers, trust_env=False, timeout=90) as runtime:
+    with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=90) as config, \
+            httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=90) as runtime:
         if mode == "setup":
             exported = checked(config.post("/agent/export", json={"agent_id": state["source"]}))["data"]
             state["source_export_hash"] = digest(exported)
@@ -79,13 +81,12 @@ def main():
             for key, entry in exported["agent_info"].items():
                 entry["name"] = "real_ui_" + suffix + "_" + key
                 entry["display_name"] = "文件解析助手-真实验收-" + suffix + "-" + key
-            info["agent_core"] = "smolagents"
+            assert all("agent_core" not in entry for entry in exported["agent_info"].values())
             result = checked(config.post("/agent/import", json={"agent_info": exported}))
             state["agent_id"] = result["agent_id"]
             state["owned_agents"] = list(result["agent_id_mapping"].values())
             path.write_text(json.dumps(state, default=str))
-            checked(config.post("/agent/update", json={"agent_id": state["agent_id"], **state["copied_fields"],
-                                                       "agent_core": "smolagents"}))
+            checked(config.post("/agent/update", json={"agent_id": state["agent_id"], **state["copied_fields"]}))
             checked(config.post(f"/agent/{state['agent_id']}/publish", json={"version_name": "Real-UI-smol",
                                                                           "release_note": "Owned real UI validation"}))
             cloned = checked(config.post("/agent/export", json={"agent_id": state["agent_id"]}))["data"]
@@ -108,6 +109,7 @@ def main():
             print(json.dumps({"cm_expectation_updated": True}))
         elif mode == "check":
             conversation = int(sys.argv[3])
+            core = checked(config.get("/tenant_config/deployment_version"))["agent_core"]
             with get_db_session() as session:
                 owner = session.query(ConversationRecord).filter_by(conversation_id=conversation).one()
                 assert owner.created_by == state["user"] and owner.agent_id == state["agent_id"]
@@ -115,8 +117,8 @@ def main():
                     ConversationMessage.message_index, ConversationMessage.message_id).all()
                 draft = session.query(AgentInfo).filter_by(agent_id=state["agent_id"], version_no=0).one()
                 published = session.query(AgentInfo).filter_by(agent_id=state["agent_id"], version_no=draft.current_version_no).one()
-                assert all(getattr(published, k) == v for k, v in state["copied_fields"].items()), "Configuration changed beyond Core"
-                print(json.dumps({"core": published.agent_core, "version": published.version_no,
+                assert all(getattr(published, k) == v for k, v in state["copied_fields"].items()), "Configuration changed during deployment switch"
+                print(json.dumps({"core": core, "version": published.version_no,
                                   "messages": [{"id": m.message_id, "index": m.message_index, "role": m.message_role,
                                                 "status": m.status, "hash": digest(m.message_content)} for m in messages]}))
         elif mode == "verify-docx":

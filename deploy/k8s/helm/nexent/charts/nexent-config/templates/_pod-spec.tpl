@@ -1,5 +1,7 @@
 {{/* Shared environment and volumes for the API Deployment and deployment Job. */}}
 {{- define "nexent-config.podSpec" -}}
+{{- $skipCurrentMigrations := .skipCurrentMigrations -}}
+{{- with .context -}}
 {{- $global := default dict .Values.global -}}
 {{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
@@ -35,6 +37,8 @@ containers:
 {{ include "nexent.backendPlatformEnv" . | indent 6 }}
       - name: NEXENT_SQL_STARTUP_MODE
         value: "migrate"
+      - name: NEXENT_SQL_SKIP_IF_CURRENT
+        value: {{ $skipCurrentMigrations | quote }}
       - name: NEXENT_RECOVERY_MODE
         value: "fixed_replicas"
       - name: DEPLOYMENT_VERSION
@@ -112,4 +116,5 @@ volumes:
   - name: nexent-trajectory
     persistentVolumeClaim:
       claimName: {{ default "nexent-trajectory" (default dict .Values.global.sharedStorage.trajectory).existingClaim }}
+{{- end -}}
 {{- end -}}

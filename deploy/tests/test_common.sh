@@ -966,7 +966,9 @@ assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'bash "$script_path" "$password" "$d
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'if bash "$script_path"; then' "Docker should reuse the normal creation path for an existing super admin"
 DOCKER_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../docker/create-su.sh")"
 K8S_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" 'Error: Super admin user creation failed. Deployment aborted.' "K8s deployment should stop when super admin initialization fails"
+K8S_SUPER_ADMIN_FAILURE_BLOCK="$(awk '/if ! bash "\$CREATE_SUADMIN_SCRIPT"; then/{capture=1} capture{print} capture && /^[[:space:]]+fi$/{exit}' "$SCRIPT_DIR/../k8s/deploy.sh")"
+assert_contains "$K8S_SUPER_ADMIN_FAILURE_BLOCK" 'deployment_error "Super admin user creation failed. Deployment aborted."' "K8s deployment should log super admin initialization failures"
+assert_contains "$K8S_SUPER_ADMIN_FAILURE_BLOCK" 'exit 1' "K8s deployment should stop when super admin initialization fails"
 assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "NEXENT_SUPER_ADMIN_PASSWORD=Nexent@123" "deployment env example should define the default super admin password"
 
 ENV_TEST_ROOT="$TMP_DIR/env-root"
@@ -1410,7 +1412,7 @@ else
 fi
 assert_not_contains "$(cat "$SCRIPT_DIR/../sql/init.sql")" 'user_account_t' "database bootstrap must not pre-create the account completion marker"
 assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-postgresql/templates/deployment.yaml")" '/docker-entrypoint-initdb.d/' "PostgreSQL must leave application SQL initialization to Management"
-for renderer in yaml_quote env_or_default render_yaml_literal_file sql_files_checksum render_infrastructure_runtime_values render_k8s_runtime_config_values; do
+for renderer in yaml_quote env_or_default render_yaml_literal_file sql_files_checksum render_infrastructure_runtime_values effective_northbound_api_server render_k8s_runtime_config_values; do
   eval "$(awk "/^${renderer}\\(\\)/,/^}/" "$SCRIPT_DIR/../k8s/deploy.sh")"
 done
 SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"

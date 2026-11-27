@@ -4,9 +4,6 @@
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-import importlib.machinery
-import sys
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -18,33 +15,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 
-# Keep product service initialization inside the controlled test boundary.
-boto3_module = ModuleType("boto3")
-boto3_module.client = MagicMock()
-boto3_module.resource = MagicMock()
-boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
-sys.modules.setdefault("boto3", boto3_module)
-patch("botocore.client.BaseClient._make_api_call", return_value={}).start()
-storage_client_mock = MagicMock()
-minio_mock = MagicMock()
-minio_mock._ensure_bucket_exists = MagicMock()
-minio_mock.client = MagicMock()
-patch(
+# Object storage and search are outside the Agent history database boundary.
+with patch(
     "nexent.storage.storage_client_factory.create_storage_client_from_config",
-    return_value=storage_client_mock,
-).start()
-patch(
-    "nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None
-).start()
-patch("backend.database.client.MinioClient", return_value=minio_mock).start()
-patch("database.client.MinioClient", return_value=minio_mock).start()
-patch("backend.database.client.minio_client", minio_mock).start()
-patch("elasticsearch.Elasticsearch", return_value=MagicMock()).start()
-
-from apps import conversation_management_app as routes
-from database import conversation_agent_history_db
-from database.client import db_client
-from database.db_models import AgentInfo, ConversationRecord
+    return_value=MagicMock(),
+), patch("nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None):
+    from infrastructure.rdb.client import db_client
+    from management.api.conversation import conversation_management as routes
+    from management.db.identity import conversation_agent_history_db
+    from management.db.models import AgentInfo, ConversationRecord
 
 
 @pytest.fixture

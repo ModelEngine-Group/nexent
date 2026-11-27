@@ -23,7 +23,7 @@ SQL 数据库工具组支持连接和查询 MySQL、PostgreSQL、SQL Server 等�
 ### 通用参数
 - `sql`：要执行的 SQL 查询语句，必填
 - `parameters`：参数化查询的参数值列表，可选
-- `max_rows`：最大返回行数，默认 100
+- `max_rows`：最大返回行数，默认 0（不限制）
 - `timeout`：查询超时时间（秒），默认 10
 
 ### 数据库连接参数
@@ -35,9 +35,9 @@ SQL 数据库工具组支持连接和查询 MySQL、PostgreSQL、SQL Server 等�
 | SQL Server | `host`、`user`、`password`、`database`、`port`（默认 1433） |
 
 ### 安全限制
-- 禁止执行 `DROP DATABASE`、`GRANT`、`REVOKE`、`CREATE USER`、`INTO OUTFILE`、`LOAD DATA INFILE` 等危险操作
+- 禁止执行 `DROP DATABASE`、`GRANT`、`REVOKE`、`CREATE USER`、`INTO OUTFILE`、`LOAD DATA INFILE`、`EXEC xp_` 等危险操作
 - `UPDATE` 和 `DELETE` 语句必须包含 `WHERE` 子句
-- 自动添加 `LIMIT` 限制返回行数
+- 返回行数通过结果侧截断控制（按 `max_rows` 读取，不会修改 SQL 语句）；SQL Server 会将语句中的 `LIMIT` 转换为 `TOP` 执行
 
 ### 返回格式
 ```json
@@ -61,7 +61,7 @@ SQL 数据库工具组支持连接和查询 MySQL、PostgreSQL、SQL Server 等�
 
 - 生产环境建议使用只读账号，限制操作权限
 - 敏感信息如数据库密码可通过密钥管理服务存储
-- 合理设置 `max_rows` 避免一次性返回过多数据
+- 合理设置 `max_rows` 避免一次性返回过多数据（默认不限制，大表查询建议显式设置）
 - 建议开启数据库连接的 SSL/TLS 加密选项
 
 ## 常见数据库连接示例

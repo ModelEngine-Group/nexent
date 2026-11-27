@@ -30,4 +30,4 @@ spec:
         checksum/nexent-backend-image: {{ dig "rolloutChecksums" "managementImage" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
-{{ include "nexent-config.podSpec" . | indent 6 }}
+{{ include "nexent-config.podSpec" (dict "context" . "skipCurrentMigrations" true) | indent 6 }}

@@ -9,27 +9,44 @@ import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 
 journey("PW-CHAT-04", async (context) => {
-  const { page, expect, contract } = context;
+  const { page, expect } = context;
   const chat = new ChatPage(page);
   const token = runToken("PW-CHAT-04");
   let title = "";
   let agent = "";
+  let parentModelName = "";
   let childA = "";
   let childB = "";
-  let conversationId = 0;
   let cardCount = 0;
   let cardTexts: string[] = [];
   let persistedCardCount = 0;
   let summaryCount = 0;
-  contract.deferCleanup(async () => { if (conversationId > 0) await chat.deleteConversationById(conversationId); });
   await executeFixedScenario(context, {
     preconditions: [
-      async () => { agent = resolveReadyAsset("agents", "d4_multi_display_name", "PW-CHAT-04"); childA = resolveReadyAsset("agents", "d4_multi_child_a_display_name", "PW-CHAT-04"); childB = resolveReadyAsset("agents", "d4_multi_child_b_display_name", "PW-CHAT-04"); expect(childA).not.toBe(childB); return `main Agent ${agent} has two explicitly named collaborators`; },
+      async () => {
+        agent = resolveReadyAsset("agents", "d4_multi_display_name", "PW-CHAT-04");
+        childA = resolveReadyAsset("agents", "d4_multi_child_a_display_name", "PW-CHAT-04");
+        childB = resolveReadyAsset("agents", "d4_multi_child_b_display_name", "PW-CHAT-04");
+        parentModelName = resolveReadyAsset("models", "d4_multi_model_display_name", "PW-CHAT-04");
+        expect(parentModelName).toBeTruthy();
+        expect(childA).not.toBe(childB);
+        return `main Agent ${agent} has a configured model and two explicitly named collaborators`;
+      },
       async () => `fixed normal and controlled partial-failure prompts use run marker ${token}`,
     ],
     steps: [
-      async () => { await loginCurrent(page, "tenant_a_admin"); await chat.openAgent(agent); await chat.selectMode("执行"); return `selected multi-Agent ${agent}`; },
-      async () => { await chat.startMessage(`请完成以下两个已明确的独立子任务：必须委派 ${childA} 执行任务A，只返回 CHILD_A_OK；必须委派 ${childB} 执行任务B，只返回 CHILD_B_OK。两个任务均不需要额外输入，不要自行代替协作者回答。等待两个协作者返回后汇总它们的结果，并原样包含 MULTI-${token}。`); conversationId = chat.currentConversationId(); return "submitted two concrete collaborator tasks and registered the server conversation ID for cleanup"; },
+      async () => {
+        await loginCurrent(page, "tenant_a_admin");
+        await chat.openAgent(agent);
+        await chat.selectModelByDisplayName(parentModelName);
+        await chat.selectMode("执行");
+        return `selected multi-Agent ${agent} and its bound model`;
+      },
+      async () => {
+        await chat.startMessage(`请完成以下两个已明确的独立子任务：必须委派 ${childA} 执行任务A，只返回 CHILD_A_OK；必须委派 ${childB} 执行任务B，只返回 CHILD_B_OK。两个任务均不需要额外输入，不要自行代替协作者回答。等待两个协作者返回后汇总它们的结果，并原样包含 MULTI-${token}。`);
+        chat.registerOwnedConversation("PW-CHAT-04");
+        return "submitted two concrete collaborator tasks and registered the server conversation ID for cleanup";
+      },
       async () => {
         try {
           await expect(page.locator("[data-subagent-id]")).toHaveCount(2, { timeout: 240000 });
@@ -50,8 +67,8 @@ journey("PW-CHAT-04", async (context) => {
         }
         return "card names match the two configured collaborators";
       },
-      async () => { await chat.waitForCompletion(420000); await expect(page.getByText("Completed", { exact: true })).toHaveCount(cardCount); await expect(chat.assistantMessages().last()).toContainText(`MULTI-${token}`); return "normal run reached terminal cards and a main answer"; },
-      async () => { const response = await chat.sendAndWait(`让 ${childA} 正常完成；让 ${childB} 调用受控失败工具 always_fail，保留成功和失败详情，最后回复 PARTIAL-${token}。`, 420000); await expect(response).toContainText(`PARTIAL-${token}`); await expect(response.getByText(/CONTROLLED_FAILURE|Error|失败/).first()).toBeVisible(); return "controlled partial failure retained both successful and failed details"; },
+      async () => { await chat.waitForDisplayedCompletion(); await expect(page.getByText("Completed", { exact: true })).toHaveCount(cardCount); await expect(chat.assistantMessages().last()).toContainText(`MULTI-${token}`); return "normal run reached terminal cards and a main answer"; },
+      async () => { const response = await chat.sendAndWaitForDisplayedCompletion(`让 ${childA} 正常完成；让 ${childB} 调用受控失败工具 always_fail，保留成功和失败详情，最后回复 PARTIAL-${token}。`); await expect(response).toContainText(`PARTIAL-${token}`); await expect(response.getByText(/CONTROLLED_FAILURE|Error|失败/).first()).toBeVisible(); return "controlled partial failure retained both successful and failed details"; },
       async () => {
         const history = (await chat.persistedMessages()).filter(item => item.role === "assistant");
         expect(history).toHaveLength(2);

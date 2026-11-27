@@ -1,14 +1,15 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
-import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 import { runToken } from "../../infra/automation/d4/runner/runtime-config";
 
 journey("PW-CHART-01", async (context) => {
-  const { page, expect, contract } = context;
+  const { page, expect } = context;
   const chat = new ChatPage(page);
   const title = `chart-${runToken("PW-CHART-01")}`;
   let agentDisplay = "";
@@ -20,16 +21,11 @@ journey("PW-CHART-01", async (context) => {
     alertTriggered = true;
     await dialog.dismiss();
   });
-  contract.deferCleanup(async () => {
-    if (citationConversationId) await chat.deleteConversationById(citationConversationId);
-  });
-
   await executeFixedScenario(context, {
     preconditions: [
       async () => {
         await loginCurrent(page, "tenant_a_admin");
-        agentDisplay = resolveReadyAsset("agents", "d4_chat_display_name", "PW-CHART-01");
-        await chat.openAgent(agentDisplay);
+        agentDisplay = await chat.openPreparedAgent("d4_chat", "PW-CHART-01");
         return `selected real-LLM Agent ${agentDisplay} for controlled Markdown output`;
       },
       async () => "using inline deterministic Mermaid and XSS fixtures; no external service is required",
@@ -37,8 +33,8 @@ journey("PW-CHART-01", async (context) => {
     steps: [
       async () => {
         await chat.startMessage("严格只输出下面代码块，不要解释：\n```mermaid\ngraph LR\n  NX_A[Alpha] --> NX_B[Beta]\n```");
-        citationConversationId = chat.currentConversationId();
-        await chat.waitForCompletion();
+        citationConversationId = chat.registerOwnedConversation("PW-CHART-01");
+        await chat.waitForDisplayedCompletion();
         return "requested a minimal valid Mermaid block and waited for streaming completion";
       },
       async () => {
@@ -47,12 +43,12 @@ journey("PW-CHART-01", async (context) => {
         return "the completed assistant message produced a real Mermaid SVG node";
       },
       async () => {
-        await chat.sendAndWait("严格只输出两个独立代码块，不要解释：\n```mermaid\ngraph LR\n  NX_C[Gamma] --> NX_D[Delta]\n```\n```mermaid\ngraph TD\n  NX_E[Epsilon] --> NX_F[Phi]\n```");
+        await chat.sendAndWaitForDisplayedCompletion("严格只输出两个独立代码块，不要解释：\n```mermaid\ngraph LR\n  NX_C[Gamma] --> NX_D[Delta]\n```\n```mermaid\ngraph TD\n  NX_E[Epsilon] --> NX_F[Phi]\n```");
         await expect(page.locator("[data-slot='mermaid-diagram'] svg")).toHaveCount(validCount + 2, { timeout: 120_000 });
         return "two additional Mermaid blocks rendered as two independent diagram containers";
       },
       async () => {
-        await chat.sendAndWait("严格只输出下面的错误代码块，不要修复、不要解释：\n```mermaid\ngraph LR\n  A -->>><<< B\n```");
+        await chat.sendAndWaitForDisplayedCompletion("严格只输出下面的错误代码块，不要修复、不要解释：\n```mermaid\ngraph LR\n  A -->>><<< B\n```");
         await expect(page.locator("[data-slot='mermaid-fallback']").last()).toBeVisible({ timeout: 120_000 });
         await expect(page.getByText("diagram could not be rendered").last()).toBeVisible();
         return "invalid Mermaid degraded to the scoped source fallback without breaking the page";
@@ -69,7 +65,7 @@ journey("PW-CHART-01", async (context) => {
         return "exercised only the actual Expand/Zoom in/Zoom out/Reset/Close controls exposed by newchat";
       },
       async () => {
-        await chat.sendAndWait("严格原样输出下面内容，不要执行、不要改写：\n```html\n<script>alert('NX_XSS')</script>\n<img src=x onerror=alert('NX_IMG')>\n<a href=\"javascript:alert('NX_LINK')\">NX link</a>\n```");
+        await chat.sendAndWaitForDisplayedCompletion("严格原样输出下面内容，不要执行、不要改写：\n```html\n<script>alert('NX_XSS')</script>\n<img src=x onerror=alert('NX_IMG')>\n<a href=\"javascript:alert('NX_LINK')\">NX link</a>\n```");
         return "submitted controlled script, onerror, and javascript-URL payloads as Markdown content";
       },
       async () => {
@@ -79,7 +75,7 @@ journey("PW-CHART-01", async (context) => {
         return "no dialog executed and the rendered assistant DOM contains no executable dangerous nodes or attributes";
       },
       async () => {
-        await chat.sendAndWait("严格原样输出，不要解释：~~~~删除线文本~~~~");
+        await chat.sendAndWaitForDisplayedCompletion("严格原样输出，不要解释：~~~~删除线文本~~~~");
         return "streamed the controlled GFM strikethrough fixture";
       },
       async () => {
@@ -91,20 +87,25 @@ journey("PW-CHART-01", async (context) => {
         return "strikethrough content remained plain span text without del/s or line-through decoration";
       },
       async () => {
-        await chat.sendAndWait("严格原样输出引用正文：第一句内容 [[a1]] 第二句内容 [[1]]");
+        await chat.sendAndWaitForDisplayedCompletion("严格原样输出引用正文：第一句内容 [[a1]] 第二句内容 [[1]]");
         citationConversationId = chat.currentConversationId();
         // Rendering/restore acceptance does not require the asynchronous
         // title generator. Give only this owned conversation a unique label;
         // never reopen an arbitrary shared "New Chat" history item.
-        const renamed = await page.request.post("/api/conversation/rename", {
-          data: { conversation_id: citationConversationId, name: title },
-        });
-        expect(renamed.ok()).toBe(true);
-        expect((await renamed.json()).code).toBe(0);
+        const rename = await page.evaluate(async ({ conversationId, title }) => {
+          const response = await fetch("/api/conversation/rename", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversation_id: conversationId, name: title }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          return { status: response.status, code: payload.code };
+        }, { conversationId: citationConversationId, title });
+        expect(rename.status).toBe(200);
+        expect(rename.code).toBe(0);
         expect(await chat.persistedThreadTitle(citationConversationId)).toBe(title);
-        const historyResponse = await page.request.get(`/api/conversation/${citationConversationId}`);
-        expect(historyResponse.ok()).toBe(true);
-        const history = await historyResponse.json();
+        const { status, payload: history } = await chat.readConversation(citationConversationId);
+        expect(status).toBe(200);
         const conversations = Array.isArray(history?.data) ? history.data : [];
         const currentConversation = conversations.find(
           (item: { conversation_id?: number }) => Number(item.conversation_id) === Number(citationConversationId),
@@ -136,7 +137,7 @@ journey("PW-CHART-01", async (context) => {
         return `citation marker opened SourcesPanel with citekey=${citekey} and sentence-level context`;
       },
       async () => {
-        await chat.sendAndWait("严格原样输出，不要执行：~~~~<img src=x onerror=alert('NX_STRIKE')>~~~~ [[javascript:alert('NX_CITE')]]");
+        await chat.sendAndWaitForDisplayedCompletion("严格原样输出，不要执行：~~~~<img src=x onerror=alert('NX_STRIKE')>~~~~ [[javascript:alert('NX_CITE')]]");
         const last = chat.assistantMessages().last();
         expect(alertTriggered).toBe(false);
         await expect(last.locator("script, [onerror], a[href^='javascript:']")).toHaveCount(0);

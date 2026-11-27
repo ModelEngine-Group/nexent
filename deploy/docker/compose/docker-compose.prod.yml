@@ -90,6 +90,7 @@ services:
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: migrate
+      NEXENT_SQL_SKIP_IF_CURRENT: "true"
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
       UMASK: "0022"
