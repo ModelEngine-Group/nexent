@@ -200,16 +200,76 @@ ON CONFLICT (migration_id) DO UPDATE SET
 SQL
 }
 
+prepare_account_migration_bundle() {
+  local source_file="$1"
+  local legacy_email_sql="${source_file%/*}/../tools/supabase_to_postgres/preserve_legacy_emails.sql"
+  local before_account after_account
+  if [ ! -f "$legacy_email_sql" ]; then
+    legacy_email_sql='/opt/deploy/sql/tools/supabase_to_postgres/preserve_legacy_emails.sql'
+  fi
+  before_account="$(cat <<SQL
+BEGIN;
+SET LOCAL nexent.account_import='on';
+\i '$(escape_sql_literal "$legacy_email_sql")'
+SELECT pg_temp.prepare_legacy_account_emails();
+SQL
+)"
+  after_account="$(cat <<'SQL'
+SELECT pg_temp.restore_legacy_account_emails();
+DO $account_email_warnings$
+DECLARE account record;
+BEGIN
+  FOR account IN
+    SELECT user_id,user_email FROM nexent.user_account_t
+    WHERE delete_flag='N' AND lower(trim(user_email)) IN (
+      SELECT lower(trim(user_email)) FROM nexent.user_account_t
+      WHERE delete_flag='N' AND user_email IS NOT NULL
+      GROUP BY lower(trim(user_email)) HAVING count(*)>1
+    ) ORDER BY user_id
+  LOOP
+    RAISE WARNING 'Duplicate active account email %', row_to_json(account);
+  END LOOP;
+END
+$account_email_warnings$;
+COMMIT;
+SQL
+)"
+  # Wrap only the account section. Keep the role grants in normal startup mode
+  # and use the immutable bundle's path and checksum for the migration ledger.
+  MIGRATION_ACCOUNT_BUNDLE="$(mktemp /tmp/nexent-account-bundle.XXXXXX.sql)"
+  NEXENT_BEFORE_ACCOUNT="$before_account" NEXENT_AFTER_ACCOUNT="$after_account" awk '
+    /^-- Source migration: / && in_account {
+      print ENVIRON["NEXENT_AFTER_ACCOUNT"]
+      in_account = 0
+    }
+    $0 == "-- Source migration: v2.9.0_001_local_user_accounts.sql" {
+      print ENVIRON["NEXENT_BEFORE_ACCOUNT"]
+      in_account = 1
+      found = 1
+    }
+    { print }
+    END {
+      if (in_account) print ENVIRON["NEXENT_AFTER_ACCOUNT"]
+      if (!found) exit 1
+    }
+  ' "$source_file" > "$MIGRATION_ACCOUNT_BUNDLE"
+}
+
 append_one_migration_sql() {
   local migration_id="$1"
   local checksum="$2"
   local source_file="$3"
-  local migration_id_escaped checksum_escaped source_file_escaped app_version_escaped
+  local migration_id_escaped checksum_escaped source_file_escaped app_version_escaped execution_file
 
   migration_id_escaped="$(escape_sql_literal "$migration_id")"
   checksum_escaped="$(escape_sql_literal "$checksum")"
   source_file_escaped="$(escape_sql_literal "$source_file")"
   app_version_escaped="$(escape_sql_literal "$APP_VERSION_VALUE")"
+  execution_file="$source_file_escaped"
+  if [ "$migration_id" = 'v2.9.0_merged_migrations.sql' ]; then
+    prepare_account_migration_bundle "$source_file"
+    execution_file="$(escape_sql_literal "$MIGRATION_ACCOUNT_BUNDLE")"
+  fi
 
   if [ "${NEXENT_SQL_MIGRATION_TIMING:-false}" = "true" ]; then
     cat >> "$MIGRATION_PLAN_FILE" <<SQL
@@ -247,7 +307,7 @@ END AS migration_skip_eligible \gset
   \else
     \echo [sql-migrations] apply $migration_id
   \endif
-  \i '$source_file_escaped'
+  \i '$execution_file'
   INSERT INTO "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" (migration_id, checksum, status, app_version, source_file)
   VALUES ('$migration_id_escaped', '$checksum_escaped', 'applied', '$app_version_escaped', '$source_file_escaped')
   ON CONFLICT (migration_id) DO UPDATE SET
@@ -412,6 +472,9 @@ SQL
 }
 
 cleanup() {
+  if [ -n "${MIGRATION_ACCOUNT_BUNDLE:-}" ]; then
+    rm -f "$MIGRATION_ACCOUNT_BUNDLE"
+  fi
   if [ -n "${MIGRATION_PLAN_FILE:-}" ]; then
     rm -f "$MIGRATION_PLAN_FILE"
   fi

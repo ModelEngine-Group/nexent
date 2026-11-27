@@ -19,12 +19,11 @@ pytestmark = [pytest.mark.case_id("AUTH-LOCAL-D5-001"), pytest.mark.stage("D5")]
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
 from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
-    MigrationConflict,
     import_users,
     read_source_users,
 )
-from management.utils.account_passwords import verify_password
 from local_auth import disposable_database
+from management.utils.account_passwords import verify_password
 from shared.merged_migrations import merged_migration_sql
 
 
@@ -206,23 +205,74 @@ def test_account_migration_retains_original_password_and_repeat_safety(target):
         assert cursor.fetchone() == (row["id"], row["email"], "N")
 
 
-def test_account_migration_conflict_rolls_back_all_users(target):
+def test_account_migration_email_conflicts_warn_and_preserve_all_users(target, capsys):
     first = historical_user()
     conflict = historical_user()
     with psycopg2.connect(target) as connection, connection.cursor() as cursor:
-        cursor.executemany("INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role) VALUES (%s,'tenant','USER')", [(first["id"],),(conflict["id"],)])
-    with pytest.raises(MigrationConflict) as error, psycopg2.connect(target) as connection:
+        cursor.executemany(
+            "INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role,user_email) VALUES (%s,'tenant','USER',%s)",
+            [(first["id"],"legacy@example.com"),(conflict["id"],conflict["email"])],
+        )
+    with psycopg2.connect(target) as connection:
         import_users(connection, [first, conflict], dry_run=False)
-    assert first["id"] in str(error.value) and conflict["id"] in str(error.value)
-    assert count(target) == 0
-    with pytest.raises(MigrationConflict, match=conflict["id"]), psycopg2.connect(target) as connection:
-        import_users(connection, [first], dry_run=False)
+    warnings = capsys.readouterr().err
+    assert "Source and historical profile emails differ" in warnings and "legacy@example.com" in warnings
+    assert "Duplicate active email" in warnings and first["email"] in warnings
+    assert first["id"] in warnings and conflict["id"] in warnings
     with psycopg2.connect(target) as connection, connection.cursor() as cursor:
-        cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y' WHERE user_id=%s", (conflict["id"],))
-        import_users(connection, [first], dry_run=False)
+        cursor.execute("SELECT user_id,user_email,password_hash,delete_flag,source_metadata->>'legacy_profile_email' FROM nexent.user_account_t")
+        assert set(cursor.fetchall()) == {
+            (first["id"], first["email"], first["encrypted_password"], "N", "legacy@example.com"),
+            (conflict["id"], conflict["email"], conflict["encrypted_password"], "N", None),
+        }
+        cursor.execute("SELECT count(*) FROM nexent.user_tenant_t WHERE delete_flag='N'")
+        assert cursor.fetchone() == (2,)
     with psycopg2.connect(target) as connection:
         assert import_users(connection, [conflict], dry_run=False)["complete"]
-    assert count(target) == 1
+    assert count(target) == 2
+
+
+def test_duplicate_source_id_warns_without_importing_ambiguous_credentials(target, capsys):
+    first, other = historical_user(), historical_user()
+    duplicate = dict(first, email="other@example.com")
+    member(target, first)
+    member(target, other)
+    with psycopg2.connect(target) as connection:
+        result = import_users(connection, [first, duplicate, other], dry_run=False)
+        assert result["source"] == 3
+    warning = capsys.readouterr().err
+    assert "Duplicate source user ID" in warning and first["id"] in warning
+    assert first["email"] in warning and duplicate["email"] in warning
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT user_id,user_email,password_hash,delete_flag FROM nexent.user_account_t")
+        assert set(cursor.fetchall()) == {
+            (first["id"], first["email"], None, "Y"),
+            (other["id"], other["email"], other["encrypted_password"], "N"),
+        }
+
+
+def test_conflicting_membership_emails_survive_migration(target, capsys):
+    row = historical_user()
+    member(target, row)
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role,user_email) VALUES (%s,'second','USER','second@example.com')",
+            (row["id"],),
+        )
+    with psycopg2.connect(target) as connection:
+        import_users(connection, [row], dry_run=False)
+    warnings = capsys.readouterr().err
+    assert "Conflicting legacy membership email" in warnings
+    assert row["id"] in warnings and row["email"] in warnings and "second@example.com" in warnings
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT user_email,password_hash,source_metadata->'legacy_membership_emails' FROM nexent.user_account_t")
+        email, password_hash, legacy_emails = cursor.fetchone()
+        assert (email, password_hash) == (row["email"], row["encrypted_password"])
+        assert {entry["tenant_id"]: entry["user_email"] for entry in legacy_emails} == {
+            "tenant": row["email"], "second": "second@example.com",
+        }
+        cursor.execute("SELECT count(*) FROM nexent.user_tenant_t WHERE delete_flag='N'")
+        assert cursor.fetchone() == (2,)
 
 
 def test_account_migration_keeps_orphans_disabled(target):
@@ -279,7 +329,7 @@ def test_banned_account_excluded_with_original_active_association_and_su_preflig
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from infrastructure.security.account_cli import bootstrap_super_admin
+    from management.cli.account import bootstrap_super_admin
     from infrastructure.rdb.client import db_client
 
     old, new = historical_user(), historical_user()
@@ -465,21 +515,21 @@ def test_account_profile_conflict_rolls_back_single_sql(role, email):
             assert cursor.fetchone()[0] == 2
 
 
-def test_consolidated_schema_provider_identities_and_final_email_conflicts():
+def test_consolidated_schema_provider_identities_and_final_email_conflicts(capsys):
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("consolidated_schema_proof", Path(__file__).with_name("schema_upgrade.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.assert_consolidated_schema(ROOT)
+    module.assert_consolidated_schema(ROOT, capsys)
     module.assert_legacy_account_columns(ROOT)
 
 
-@pytest.mark.parametrize("scenario", ["valid", "source-empty", "source-passwordless", "existing-empty", "existing-partial", "excluded"])
-def test_account_data_coverage_and_safe_recovery(scenario):
+@pytest.mark.parametrize("scenario", ["valid", "source-empty", "source-passwordless", "existing-empty", "existing-partial", "excluded", "banned-provider"])
+def test_account_data_coverage_and_safe_recovery(scenario, capsys):
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("account_coverage_proof", Path(__file__).with_name("completeness.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.assert_account_coverage(scenario)
+    module.assert_account_coverage(scenario, capsys)
