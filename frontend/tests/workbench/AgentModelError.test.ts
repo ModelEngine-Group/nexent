@@ -47,7 +47,7 @@ it.each(["message", "detail"])(
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ code: "model_not_available", details });
     expect(error.message).toBe(
-      "厨师助手智能体无可用模型，请检查该智能体绑定版本的模型配置。"
+      "「厨师助手」智能体无可用模型，请检查该智能体绑定版本的模型配置。"
     );
     expect(
       ordinarySendError(error, "zh", (value) =>

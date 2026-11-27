@@ -968,7 +968,7 @@
   "agent.error.nameExists": "智能体变量名{{name}}已存在，请修改",
   "agent.error.displayNameExists": "智能体名称{{displayName}}已存在，请修改",
   "agent.error.modelUnavailable": "大语言模型不可用，请修改",
-  "agent.error.noAvailableModel": "{{agentName}}智能体无可用模型，请检查该智能体绑定版本的模型配置。",
+  "agent.error.noAvailableModel": "「{{agentName}}」智能体无可用模型，请检查该智能体绑定版本的模型配置。",
   "agent.debug.placeholder": "输入测试问题...",
   "agent.debug.stop": "停止",
   "agent.debug.clear": "清空",
