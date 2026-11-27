@@ -130,8 +130,6 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path)
     with monkeypatch.context() as tool_patches:
         await _assert_stored_local_tool_over_signed_http(tool_patches, tmp_path)
-    with monkeypatch.context() as aidp_patches:
-        await _assert_shared_aidp_over_signed_http(aidp_patches, tmp_path)
     await _assert_resume_over_signed_http(monkeypatch)
     await _assert_run_lifecycle_over_signed_http(monkeypatch)
     await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
@@ -281,14 +279,18 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
         assert fanout.await_count == 2
 
 
-async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.asyncio
+async def test_shared_aidp_over_signed_http(monkeypatch, tmp_path):
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-shared-aidp-transport-key")
     from fastapi import Request
 
     from ext_components.aidp.database import aidp_permission_db
     from ext_components.aidp.services import aidp_service
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.local_tool_execution import build_local_tool
-    from infrastructure.rdb import account_access
+    from infrastructure.rdb import account_access, client as rdb_client
     from contracts.agentos import PreparedConversationScope
     from contracts.model import WorkbenchGenerationConfig
     from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
@@ -367,7 +369,7 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
                                            {"name": "search_method", "default": "hybrid_search"}],
     }
     for module in (evaluation_snapshot, prepared_local_tool):
-        monkeypatch.setattr(module, "read_bound_local_tools", lambda *_: [row])
+        monkeypatch.setattr(module, "read_bound_local_tools", lambda agent_id, *_: [row] if agent_id == 9 else [])
     for module in (local_tool, prepared_local_tool):
         monkeypatch.setattr(module, "read_shared_aidp_catalog_tool",
                             lambda tool_id, tenant: row if (tool_id, tenant) == (10, "tenant-a") else None)
@@ -375,7 +377,8 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
 
     async def start_scoped(payload, actor):
         assert payload.workbench_config_version == 3
-        assert payload.resource.tools[0].version == "3"
+        expected_version = "1" if payload.conversation_id == 62 else "3"
+        assert payload.resource.tools[0].version == expected_version
         info = await asyncio.to_thread(prepared_evaluation.prepare_run_snapshot, payload, actor)
         scoped_runs.append([json.loads(chunk) async for chunk in run(info, None)])
         return AgentRunReference(conversation_id=payload.conversation_id, run_id=payload.run_id)
@@ -433,11 +436,95 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
         groups.clear()
         assert await client.start_prepared_run(scoped, "user-a", "tenant-a") == reference
 
-    assert observed_whitelists == [["group-kb"], [], ["group-kb"], []]
+        platform_row = {**row, "tool_id": 110}
+        with _published_workbench_aidp_catalog(platform_row) as session_factory:
+            with monkeypatch.context() as catalog_patches:
+                catalog_patches.setattr(rdb_client, "get_db_session", session_factory)
+                default_agent = agent.model_copy(update={
+                    "agent_id": 81, "version_no": 3, "name": "workbench_main", "origin": "SYSTEM",
+                })
+                default_ref = AgentRunReference(conversation_id=62, run_id="d" * 32)
+                default = evaluation_snapshot.compile_snapshot(
+                    default_agent, [create_model_config_from_record(model)], "question", None,
+                    tenant_id="tenant-a", conversation_id=62, language="en",
+                    prepared_conversation=PreparedConversationScope(**default_ref.model_dump(), workbench_config_version=3),
+                )
+                assert default.resource.tools[0].parameters["instance_id"] == row["tool_instance_id"]
+                for private in (provider_url, "synthetic-shared-aidp-key", "shared-provider", "private-kb", "group-kb"):
+                    assert private not in default.model_dump_json()
+                groups.append(17)
+                assert await client.start_prepared_run(default, "user-a", "tenant-a") == default_ref
+                groups.clear()
+                assert await client.start_prepared_run(default, "user-a", "tenant-a") == default_ref
+
+                scoped_platform_tool = scoped_tool.model_copy(update={
+                    "metadata": {SCOPED_SHARED_AIDP_CATALOG_ID: platform_row["tool_id"]},
+                })
+                scoped_platform_agent = default_agent.model_copy(update={"tools": [scoped_platform_tool]})
+                scoped_platform_ref = AgentRunReference(conversation_id=63, run_id="f" * 32)
+                scoped_platform = evaluation_snapshot.compile_snapshot(
+                    scoped_platform_agent, [create_model_config_from_record(model)], "question", None,
+                    tenant_id="tenant-a", conversation_id=63, language="en",
+                    prepared_conversation=PreparedConversationScope(
+                        **scoped_platform_ref.model_dump(), workbench_config_version=3,
+                    ),
+                )
+                assert scoped_platform.resource.tools[0].parameters["catalog_tool_id"] == platform_row["tool_id"]
+                assert scoped_platform.resource.tools[0].parameters["options"] == scoped.resource.tools[0].parameters["options"]
+                groups.append(17)
+                assert await client.start_prepared_run(scoped_platform, "user-a", "tenant-a") == scoped_platform_ref
+
+    assert observed_whitelists == [["group-kb"], []] * 3 + [["group-kb"]]
     assert catalog_calls == ["Bearer synthetic-shared-aidp-key"]
-    assert searches == [("Bearer synthetic-shared-aidp-key", ["group-kb"])] * 2
-    assert retrieval_options == [("vector_search|full_text_search|graph_search", 10), ("full_text_search", 7)]
-    assert len(scoped_runs) == 2 and all(events[-1]["content"] == "done" for events in scoped_runs)
+    assert searches == [("Bearer synthetic-shared-aidp-key", ["group-kb"])] * 4
+    assert retrieval_options == [
+        ("vector_search|full_text_search|graph_search", 10), ("full_text_search", 7),
+        ("vector_search|full_text_search|graph_search", 10), ("full_text_search", 7),
+    ]
+    assert len(scoped_runs) == 5 and all(events[-1]["content"] == "done" for events in scoped_runs)
+
+
+@contextmanager
+def _published_workbench_aidp_catalog(row):
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS nexent")
+            connection.exec_driver_sql(
+                "CREATE TABLE nexent.ag_tenant_agent_t (agent_id INT, version_no INT, tenant_id TEXT, "
+                "system_key TEXT, agent_origin TEXT, delete_flag TEXT, enabled BOOLEAN)"
+            )
+            connection.exec_driver_sql(
+                "CREATE TABLE nexent.ag_tool_instance_t (tool_instance_id INT, agent_id INT, version_no INT, "
+                "tenant_id TEXT, enabled BOOLEAN, delete_flag TEXT, tool_id INT, params JSON)"
+            )
+            connection.exec_driver_sql(
+                "CREATE TABLE nexent.ag_tool_info_t (tool_id INT, name TEXT, class_name TEXT, source TEXT, "
+                "usage TEXT, params JSON, description TEXT, inputs TEXT, output_type TEXT, "
+                "delete_flag TEXT, is_available BOOLEAN, author TEXT)"
+            )
+            connection.execute(text(
+                "INSERT INTO nexent.ag_tenant_agent_t VALUES "
+                "(81, 3, :owner, 'workbench_main', 'SYSTEM', 'N', true)"
+            ), {"owner": ASSET_OWNER_TENANT_ID})
+            connection.execute(text(
+                "INSERT INTO nexent.ag_tool_instance_t VALUES "
+                "(:tool_instance_id, 81, 3, :owner, true, 'N', :tool_id, '{}')"
+            ), {**row, "owner": ASSET_OWNER_TENANT_ID})
+            connection.execute(text(
+                "INSERT INTO nexent.ag_tool_info_t VALUES "
+                "(:tool_id, :name, :class_name, :source, :usage, :params, :description, :inputs, "
+                ":output_type, 'N', true, :owner)"
+            ), {**row, "params": json.dumps(row["params"]), "owner": ASSET_OWNER_TENANT_ID})
+        yield sessionmaker(engine)
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.stage("D3")

@@ -272,3 +272,47 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
     assert mounted.params["api_key"] == "fixture-key" and mounted.metadata["allowed_kds_set"] == ["kb1"]
     catalog.assert_called_once_with(7, "tenant-a")
     access.assert_called_once()
+
+
+@pytest.mark.parametrize("platform_allowed", [False, True])
+@pytest.mark.parametrize("origin", ["SYSTEM", "PERSISTED"])
+def test_stored_platform_aidp_requires_workbench_run(mocker, platform_allowed, origin):
+    mocker.patch.object(environment, "JWT_SECRET", "fixture-signing-key")
+    from fastapi import HTTPException
+
+    from infrastructure.local_tool_execution import build_local_tool
+    from management.services.agent.preparation.local_tool import export_local_tool
+    from runtime.agentos import prepared_local_tool
+
+    row = {
+        "tool_id": 7, "tool_instance_id": 19, "name": "aidp_search", "class_name": "AidpSearchTool",
+        "source": "local", "description": "AIDP search", "usage": None, "inputs": None, "output_type": "string",
+        "params": [{"name": "kds_list", "default": '["kb1"]'}], "instance_params": {},
+    }
+    tool = build_local_tool(row, "en", None, None)
+    binding = export_local_tool(tool, [row], 8, 3, "tenant-a", "en")
+    resource = SimpleNamespace(agent_id=8, version_no=3, origin=origin, tools=[binding])
+    actor = ServicePrincipal("user-a", "tenant-a")
+    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[])
+    platform = mocker.patch.object(prepared_local_tool, "read_workbench_default_aidp_tools", return_value=[row])
+    bind_access = mocker.patch.object(prepared_local_tool, "_bind_shared_aidp_access")
+
+    if platform_allowed and origin == "SYSTEM":
+        result = prepared_local_tool.materialize_local_tools(
+            resource, actor, "en", allow_workbench_default_aidp=True,
+        )
+        platform.assert_called_once_with(8, 3)
+        bind_access.assert_called_once_with(result["aidp_search"], actor)
+        binding.parameters["instance_id"] = 20
+        with pytest.raises(HTTPException) as error:
+            prepared_local_tool.materialize_local_tools(resource, actor, "en", allow_workbench_default_aidp=True)
+        assert error.value.status_code == 404
+        assert bind_access.call_count == 1
+    else:
+        with pytest.raises(HTTPException) as error:
+            prepared_local_tool.materialize_local_tools(
+                resource, actor, "en", allow_workbench_default_aidp=platform_allowed,
+            )
+        assert error.value.status_code == 404
+        platform.assert_not_called()
+        bind_access.assert_not_called()
