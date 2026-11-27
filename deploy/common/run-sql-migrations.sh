@@ -285,6 +285,36 @@ expected_values_sql() {
   done < "$MIGRATION_MANIFEST_FILE"
 }
 
+append_current_migrations_check() {
+  local table_name values
+  table_name="$(escape_sql_literal "\"$MIGRATION_SCHEMA\".\"$MIGRATION_TABLE_NAME\"")"
+  values="$(expected_values_sql)"
+  cat >> "$MIGRATION_PLAN_FILE" <<SQL
+-- Older databases can have a migration table without a status column.
+SELECT EXISTS (
+  SELECT 1 FROM pg_attribute
+  WHERE attrelid = to_regclass('$table_name') AND attname = 'status' AND NOT attisdropped
+) AS migration_table_has_status \gset
+\if :migration_table_has_status
+  WITH expected(migration_id, checksum) AS (VALUES $values)
+  SELECT NOT EXISTS (
+    SELECT 1 FROM expected
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" AS recorded
+      WHERE recorded.migration_id = expected.migration_id
+        AND recorded.checksum = expected.checksum
+        AND recorded.status IN ('applied', 'baselined')
+    )
+  ) AS migrations_current \gset
+\else
+  \set migrations_current false
+\endif
+\if :migrations_current
+  \echo [sql-migrations] migration target is current. Skipping application SQL.
+\else
+SQL
+}
+
 ensure_migration_table() {
   local plan
   plan="$(mktemp /tmp/nexent-sql-migration-table.XXXXXX.sql)"
@@ -334,10 +364,15 @@ run_wait_mode() {
 }
 
 run_migrate_mode() {
+  local skip_if_current=false
   MIGRATION_PLAN_FILE="$(mktemp /tmp/nexent-sql-migrations.XXXXXX.sql)"
   {
     echo "SELECT pg_advisory_lock(hashtext('$(escape_sql_literal "$LOCK_KEY")'));"
   } > "$MIGRATION_PLAN_FILE"
+  if [ "${NEXENT_SQL_SKIP_IF_CURRENT:-false}" = "true" ] && [ -f "$INIT_SQL_FILE" ]; then
+    skip_if_current=true
+    append_current_migrations_check
+  fi
   append_migration_table_sql
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
 SET search_path TO $SQL_SEARCH_PATH;
@@ -351,6 +386,9 @@ SELECT 'false' AS migration_force_rerun \gset
 SQL
   append_init_sql
   append_all_migrations_sql
+  if [ "$skip_if_current" = "true" ]; then
+    echo '\endif' >> "$MIGRATION_PLAN_FILE"
+  fi
   echo "SELECT pg_advisory_unlock(hashtext('$(escape_sql_literal "$LOCK_KEY")'));" >> "$MIGRATION_PLAN_FILE"
 
   psql_base -f "$MIGRATION_PLAN_FILE"

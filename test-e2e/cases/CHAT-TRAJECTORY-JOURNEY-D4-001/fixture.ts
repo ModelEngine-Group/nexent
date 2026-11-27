@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import type { Page } from "playwright/test";
+import type { Page, Request } from "playwright/test";
+
+export const bodyChunkBytes = 64 * 1024;
 
 export const modelInput = JSON.stringify({
   model: "DeepSeek",
@@ -19,7 +21,8 @@ export const modelOutput = JSON.stringify({
       index: 0,
       message: {
         role: "assistant",
-        content: "### Storage recommendation\n\nKeep the records for **30 days**.",
+        content:
+          "### Storage recommendation\n\nKeep the records for **30 days**.",
       },
       finish_reason: "stop",
     },
@@ -29,19 +32,30 @@ export const modelOutput = JSON.stringify({
 /** Owned HTTP boundary; the product page and its state/rendering remain real. */
 export async function installTrajectoryFixture(
   page: Page,
+  expectMock5xx: (request: Request, status: number) => void,
   base = process.env.NEXENT_BASE_URL || "http://localhost:3000",
 ) {
   const state = {
     role: "OPS",
+    trajectoryRequests: [] as URL[],
     records: [] as URL[],
     reads: [] as URL[],
     cleanups: [] as Record<string, unknown>[],
     writes: [] as string[],
     failure: "",
+    availability: "available",
+    delayedList: null as {
+      id: string;
+      wait: Promise<void>;
+      release: () => void;
+    } | null,
+    queriedTitles: new Map<string, string>(),
+    archived: false,
     cleanupPaused: false,
     releaseCleanup: null as (() => void) | null,
     cleanupPartial: true,
     multiRound: false,
+    segmentCount: 1,
     schedules: {} as Record<
       string,
       { enabled: boolean; retention_days: number }
@@ -54,8 +68,8 @@ export async function installTrajectoryFixture(
     text,
     complete,
     content_id: "signed-content",
-    byte_count: complete ? Buffer.byteLength(text) : 1048579,
-    char_count: complete ? text.length : 1048577,
+    byte_count: complete ? Buffer.byteLength(text) : bodyChunkBytes + 3,
+    char_count: complete ? text.length : bodyChunkBytes + 1,
   });
   const makeNode = (
     id: string,
@@ -136,6 +150,12 @@ export async function installTrajectoryFixture(
       duration_ms: 17.09,
     },
   ];
+  const fullSegment = [
+    ...nodes,
+    ...Array.from({ length: 500 - nodes.length }, (_, index) =>
+      makeNode(`filler-${index}`, "root", "tool", `Sample tool ${index}`),
+    ),
+  ];
   const row = {
     tenant_id: "tenant",
     tenant_name: "Fixture Tenant",
@@ -190,6 +210,7 @@ export async function installTrajectoryFixture(
       url = new URL(request.url()),
       path = url.pathname.replace(/^.*\/api\//, "/api/");
     let data: unknown = {};
+    if (path.includes("/trajectory/")) state.trajectoryRequests.push(url);
     if (path.includes("/trajectory/") && !["OPS", "SU"].includes(state.role)) {
       await route.fulfill({
         status: 403,
@@ -202,8 +223,10 @@ export async function installTrajectoryFixture(
         const payload = request.postDataJSON();
         state.scheduleSaves.push(payload);
         if (state.scheduleFailure) {
+          const status = 503;
+          expectMock5xx(request, status);
           await route.fulfill({
-            status: 503,
+            status,
             json: { detail: { code: "query_unavailable" } },
           });
           return;
@@ -249,6 +272,25 @@ export async function installTrajectoryFixture(
     } else if (path.endsWith("/trajectory/records")) {
       state.records.push(url);
       const facet = url.searchParams.get("facet");
+      const idQuery = url.searchParams.get("id_query");
+      const delayed = state.delayedList;
+      if (!facet && delayed && delayed.id === idQuery) await delayed.wait;
+      const title = idQuery ? state.queriedTitles.get(idQuery) : undefined;
+      const owner = url.searchParams.get("target_user_id");
+      const recordedRow = {
+        ...row,
+        ...(owner === "alternate-owner"
+          ? { user_id: owner, user_name: "Alternate Owner" }
+          : {}),
+        conversation_title: title ?? row.conversation_title,
+        availability: state.availability,
+        status:
+          state.availability === "available" ? row.status : state.availability,
+        usage: state.availability === "available" ? row.usage : null,
+      };
+      const queryId = url.searchParams.get("query_id");
+      const includeArchived =
+        !idQuery && state.archived && queryId !== "query-snapshot";
       data = facet
         ? {
             items: [
@@ -272,13 +314,32 @@ export async function installTrajectoryFixture(
                 tenant_id: "tenant",
                 tenant_name: "Fixture Tenant",
               },
+              ...(facet === "users"
+                ? [
+                    {
+                      id: "alternate-owner",
+                      name: "Alternate Owner",
+                      tenant_id: "tenant",
+                      tenant_name: "Fixture Tenant",
+                    },
+                  ]
+                : []),
             ],
             next_cursor: null,
           }
         : {
-            query_id: "query-snapshot",
+            query_id: includeArchived ? "query-refreshed" : "query-snapshot",
             as_of: "2026-11-10T01:00:00Z",
-            items: [row],
+            items: includeArchived
+              ? [
+                  recordedRow,
+                  {
+                    ...row,
+                    conversation_id: "9223372036854775807",
+                    conversation_title: "Newly archived execution",
+                  },
+                ]
+              : [recordedRow],
             total: 25,
             page: Number(url.searchParams.get("page") || 1),
             page_size: Number(url.searchParams.get("page_size") || 10),
@@ -302,7 +363,7 @@ export async function installTrajectoryFixture(
       data = {
         snapshot_id: "conversation-snapshot",
         conversation_id: row.conversation_id,
-        availability: "available",
+        availability: state.availability,
         coverage: { complete: true },
         active_execution_count: 0,
         executions: [
@@ -314,7 +375,7 @@ export async function installTrajectoryFixture(
             root_agent_version_no: 3,
             root_agent_version_name: null,
             business_status: second ? "completed" : "failed",
-            availability: "available",
+            availability: state.availability,
             matches_filters: !second,
           },
         ],
@@ -329,7 +390,9 @@ export async function installTrajectoryFixture(
         });
         return;
       }
-      const later = url.searchParams.has("cursor");
+      const segment = Number(
+        url.searchParams.get("cursor")?.replace("segment-", "") ?? 0,
+      );
       const second = url.searchParams.get("trajectory_id") === "execution-2";
       data = {
         snapshot_id: "snapshot",
@@ -338,11 +401,23 @@ export async function installTrajectoryFixture(
         root_node_id: "root",
         nodes: second
           ? [makeNode("root", null, "agent", "重试成功")]
-          : later
-            ? [makeNode("later", "root", "tool", "Later tool")]
-            : nodes,
-        context_nodes: later ? [nodes[0]] : [],
-        next_cursor: later || second ? null : "next-segment",
+          : segment
+            ? [
+                makeNode(
+                  `later-${segment}`,
+                  "root",
+                  "tool",
+                  `Later tool ${segment}`,
+                ),
+              ]
+            : state.segmentCount > 1
+              ? fullSegment
+              : nodes,
+        context_nodes: segment ? [nodes[0]] : [],
+        next_cursor:
+          second || segment >= state.segmentCount
+            ? null
+            : `segment-${segment + 1}`,
         coverage: { complete: true },
         scope: {
           kind: "execution",
@@ -361,12 +436,12 @@ export async function installTrajectoryFixture(
       }
       const offset = Number(url.searchParams.get("offset") || 0);
       data = {
-        text: offset === 0 ? "a".repeat(1048576) : "终",
+        text: offset === 0 ? "a".repeat(bodyChunkBytes) : "终",
         offset,
-        next_offset: offset === 0 ? 1048576 : 1048579,
+        next_offset: offset === 0 ? bodyChunkBytes : bodyChunkBytes + 3,
         complete: offset > 0,
-        byte_count: 1048579,
-        char_count: 1048577,
+        byte_count: bodyChunkBytes + 3,
+        char_count: bodyChunkBytes + 1,
         offset_unit: "utf8_bytes",
       };
     } else if (path.endsWith("/trajectory/cleanup")) {
@@ -397,9 +472,10 @@ export async function installTrajectoryFixture(
               user_email: "fixture@example.test",
               tenant_id: "tenant",
               user_role: state.role,
-              groupIds: [],
+              roles: [state.role],
+              group_ids: [],
               permissions: [],
-              accessibleRoutes: [
+              accessiblePages: [
                 "/",
                 ...(["OPS", "SU"].includes(state.role)
                   ? ["/observability"]

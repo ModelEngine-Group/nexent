@@ -27,6 +27,7 @@ from nexent.monitor.monitoring import MonitoringConfig, MonitoringManager
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.sampling import ALWAYS_OFF
 from shared.model_service_profiles import resolved_profile_for_test
 
 pytestmark = [pytest.mark.case_id('CHAT-TRAJECTORY-TTFT-D3-001'), pytest.mark.stage('D3')]
@@ -40,7 +41,7 @@ def capture(tmp_path):
     processor = LocalTrajectoryProcessor(store, lambda: identity)
     threads = ThreadManager('ttft-fixture', {'background-service': LanePolicy('background-service', 1, 0)})
     threads.start()
-    provider = TracerProvider(shutdown_on_exit=False)
+    provider = TracerProvider(sampler=processor.wrap_sampler(ALWAYS_OFF), shutdown_on_exit=False)
     provider.add_span_processor(processor)
     reader = InMemoryMetricReader()
     metrics = MeterProvider(metric_readers=[reader], shutdown_on_exit=False)
@@ -65,7 +66,11 @@ def capture(tmp_path):
 
 
 def attrs(span):
-    return {item['key']: next(iter(item['value'].values())) for item in span.get('attributes', [])}
+    values = {}
+    for item in span.get('attributes', []):
+        field, value = next(iter(item['value'].items()))
+        values[item['key']] = int(value) if field == 'intValue' else value
+    return values
 
 
 def spans(capture):
@@ -86,7 +91,7 @@ def provider(mode):
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             requests.append(request)
-            if mode == 'before_error' or (mode == 'sampling_fallback' and len(requests) == 1):
+            if mode == 'before_error' or (mode == 'sampling_fallback' and 'temperature' in request):
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -153,9 +158,10 @@ def provider(mode):
         assert not thread.is_alive()
 
 
-async def invoke(capture, base, entry, *, streaming=True, attempts=1, empty_policy='accept'):
+async def invoke(capture, base, entry, *, streaming=True, attempts=1, empty_policy='accept', temperature=None):
     if entry == 'legacy':
         model = OpenAIModel(observer=MessageObserver(), model_id='model', api_key='synthetic', api_base=base,
+                            temperature=temperature,
                             retry_config=ModelRetryConfig(max_attempts=attempts, backoff_base_seconds=0, jitter=False))
         model._monitoring = capture.manager
         try:
@@ -287,7 +293,7 @@ async def test_ttft_each_physical_retry_preserves_safe_facts(capture, entry):
 async def test_ttft_sampling_fallback_is_a_separate_physical_attempt(capture):
     with provider('sampling_fallback') as (base, requests):
         with capture.tracer.start_as_current_span('agent.run'):
-            answer = await invoke(capture, base, 'legacy')
+            answer = await invoke(capture, base, 'legacy', temperature=0.2)
         assert answer.endswith('final') and len(requests) == 2
     models = [span for span in spans(capture) if attrs(span).get('openinference.span.kind') == 'LLM']
     assert len(models) == 2

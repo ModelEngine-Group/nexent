@@ -14,7 +14,7 @@ from pathlib import Path
 
 import httpx
 from infrastructure.rdb.client import get_db_session
-from management.db.models import ConversationMessage, ModelRecord, UserTenant
+from management.db.models import ConversationMessage, ConversationMessageUnit, ModelRecord, UserTenant
 from nexent.core.agents.cores.smolagents import agent as nexent_agent
 from nexent.core.agents.contracts.config import AgentConfig, ExternalA2AAgentConfig, ModelConfig, ToolConfig
 from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
@@ -22,12 +22,14 @@ from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 from management.services.configuration.user.memory import get_memory_switch
-from management.services.model.adapter import restore_model_snapshot
+from infrastructure.model_adapter import restore_model_snapshot
 from smolagents import Tool
-from management.services.permission.identity.authentication_helpers import generate_session_jwt
+from management.services.permission.identity.session import generate_session_jwt
 
 NATIVE, TEXT, TENANT = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
 RESULT = {}
+PHASE, ACTOR, RAW_CHECKPOINT, PROVIDER = sys.argv[4:8]
+CHECKPOINT = Path(RAW_CHECKPOINT)
 
 
 def saved_model(model_id, alias):
@@ -49,123 +51,103 @@ def checked(response):
     return response.json()
 
 
-def http_history():
+def http_history(phase, checkpoint, actor):
+    """Execute one authorized phase so the caller can switch the owned deployment."""
+    state = json.loads(checkpoint.read_text()) if checkpoint.is_file() else {}
     with get_db_session() as session:
-        identity = next(
-            (
-                user
-                for user in session.query(UserTenant).filter_by(tenant_id=TENANT, delete_flag="N")
-                if not get_memory_switch(user.user_id)
-            ),
-            None,
-        )
-        assert identity is not None, "A memory-disabled test identity is required to prove database-only continuity"
-        token = generate_session_jwt(identity.user_id, expires_in=1800)
+        session.query(UserTenant).filter_by(user_id=actor, tenant_id=TENANT, delete_flag="N").one()
+    assert not get_memory_switch(actor), "An explicit memory-disabled test actor is required"
+    token = generate_session_jwt(actor, expires_in=1800)
     headers = {"Authorization": "Bearer " + token}
-    config = httpx.Client(base_url="http://nexent-config:5010", headers=headers, trust_env=False, timeout=240)
-    runtime = httpx.Client(base_url="http://nexent-runtime:5014", headers=headers, trust_env=False, timeout=240)
-    agent, conversation = None, None
-    marker = "M6_HISTORY_" + uuid.uuid4().hex[:12]
-    try:
-        request = {
-            "name": "m6-" + uuid.uuid4().hex[:8],
-            "description": "Temporary M6 verification",
-            "model_ids": [NATIVE],
-            "business_logic_model_id": NATIVE,
-            "max_steps": 6,
-            "agent_core": "smolagents",
-            "is_main_agent": False,
-            "provide_run_summary": False,
-            "enable_context_manager": False,
-            "enabled": True,
-            "enabled_tool_ids": [],
-            "enabled_skill_ids": [],
-            "related_agent_ids": [],
-            "duty_prompt": "Answer only the current question. Remember conversation facts. Never repeat old tasks.",
-        }
-        agent = checked(config.post("/agent/update", json=request))["agent_id"]
-        checked(
-            config.post(f"/agent/{agent}/publish", json={"version_name": "m6-1", "release_note": "Temporary smoke"})
-        )
-        data = checked(runtime.put("/conversation/create", json={"title": "M6 synthetic history"}))["data"]
-        conversation = data["conversation_id"]
-        first_snapshot = None
-        outcomes = []
-        for index, core in enumerate(["smolagents", "jiuwen", "smolagents"]):
-            if index:
-                checked(config.post("/agent/update", json={"agent_id": agent, "agent_core": core}))
-                checked(
-                    config.post(
-                        f"/agent/{agent}/publish",
-                        json={"version_name": "m6-" + str(index + 1), "release_note": "Temporary Core switch"},
-                    )
-                )
-                loaded = checked(runtime.get(f"/conversation/{conversation}"))
-                assert marker in json.dumps(loaded), "History reload lost synthetic marker"
-            query = (
-                "Remember this verification code: " + marker + ". Reply with the code only."
-                if not index
-                else (
-                    "What verification code did I ask you to remember? Reply with that code only; do not repeat old tasks."
-                )
-            )
-            response = runtime.post(
-                "/agent/run",
-                json={
-                    "agent_id": agent,
-                    "conversation_id": conversation,
-                    "query": query,
-                    "history": None if index == 0 else [],
-                    "minio_files": [],
-                },
-            )
-            assert response.status_code == 200, "Runtime HTTP status"
-            events = [json.loads(line[5:].strip()) for line in response.text.splitlines() if line.startswith("data:")]
-            assert not any(e.get("type") == "tool" and e.get("tool_name") != "final_answer" for e in events), (
-                "Unexpected tool kinds="
-                + repr([(e.get("tool_name"), sorted(e)) for e in events if e.get("type") == "tool"])
-            )
-            if core == "jiuwen":
-                terminals = [e for e in events if e.get("type") == "run_terminal" and not e.get("invocation_id")]
-                assert len(terminals) == 1 and terminals[0]["status"] == "completed", "Root terminal missing"
-            for _ in range(50):
-                with get_db_session() as session:
-                    messages = (
-                        session.query(ConversationMessage)
-                        .filter_by(conversation_id=conversation)
-                        .order_by(ConversationMessage.message_index, ConversationMessage.message_id)
-                        .all()
-                    )
-                    snapshot = [(m.message_id, m.message_role, m.message_content, m.status) for m in messages]
-                    assert [m.message_index for m in messages] == list(range(len(messages))), "Server order regressed"
-                assistants = [m for m in snapshot if m[1] == "assistant"]
-                if len(assistants) == index + 1 and assistants[-1][3] == "completed":
-                    break
-                time.sleep(0.1)
-            assert assistants[-1][3] == "completed" and marker in (assistants[-1][2] or ""), (
-                "Persisted answer mismatch"
-            )
-            if first_snapshot is None:
-                first_snapshot = snapshot
-            else:
-                assert snapshot[: len(first_snapshot)] == first_snapshot, "Original history changed"
-            outcomes.append(
-                {
-                    "core": core,
-                    "completed": True,
-                    "history_loaded": index > 0,
-                    "pre_run_memory_searches": sum(e.get("tool_name") == "search_memory" for e in events),
-                }
-            )
-        RESULT["deployed_http_history"] = outcomes
-    finally:
-        if conversation:
-            checked(runtime.delete(f"/conversation/{conversation}"))
-        if agent:
-            checked(config.request("DELETE", "/agent", json={"agent_id": agent}))
-        config.close()
-        runtime.close()
+    with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=240) as api:
+        if phase == "cleanup":
+            if state.get("conversation"):
+                checked(api.delete(f"/conversation/{state['conversation']}"))
+                state.pop("conversation")
+                checkpoint.write_text(json.dumps(state))
+            if state.get("agent"):
+                checked(api.request("DELETE", "/agent", json={"agent_id": state["agent"]}))
+                state.pop("agent")
+            checkpoint.unlink(missing_ok=True)
+            return
+        if phase == "prepare":
+            assert not state
+            state["marker"] = "M6_HISTORY_" + uuid.uuid4().hex[:12]
+            state["agent"] = checked(api.post("/agent/update", json={
+                "name": "m6_" + uuid.uuid4().hex[:8],
+                "description": "Temporary M6 verification",
+                "model_ids": [NATIVE],
+                "business_logic_model_id": NATIVE,
+                "max_steps": 6,
+                "is_main_agent": False,
+                "provide_run_summary": False,
+                "enable_context_manager": False,
+                "enabled": True,
+                "enabled_tool_ids": [],
+                "enabled_skill_ids": [],
+                "related_agent_ids": [],
+                "duty_prompt": "Answer only the current question. Remember conversation facts. Never repeat old tasks.",
+            }))["agent_id"]
+            checkpoint.write_text(json.dumps(state))
+            state["version"] = checked(api.post(f"/agent/{state['agent']}/publish", json={
+                "version_name": "m6-history", "release_note": "Temporary smoke",
+            }))["version_no"]
+            state["conversation"] = checked(api.put("/conversation/create", json={
+                "title": "M6 synthetic history",
+            }))["data"]["conversation_id"]
+            checkpoint.write_text(json.dumps(state))
+            return
 
+        index = int(phase)
+        expected_core = ("smolagents", "jiuwen", "smolagents")[index]
+        assert checked(api.get("/tenant_config/deployment_version"))["agent_core"] == expected_core
+        marker, conversation = state["marker"], state["conversation"]
+        if index:
+            loaded = checked(api.get(f"/conversation/{conversation}"))
+            assert marker in json.dumps(loaded), "History reload lost synthetic marker"
+        query = (f"Remember this verification code: {marker}. Reply with the code only." if not index else
+                 "What verification code did I ask you to remember? Reply with that code only; do not repeat old tasks.")
+        response = api.post("/agent/run", json={
+            "agent_id": state["agent"], "version_no": state["version"], "conversation_id": conversation,
+            "query": query, "history": [], "minio_files": [],
+        })
+        assert response.status_code == 200, "Runtime HTTP status"
+        events = [json.loads(line[5:].strip()) for line in response.text.splitlines()
+                  if line.startswith("data:") and line[5:].strip() != "[DONE]"]
+        assert not any(e.get("type") == "error" for e in events), "History execution produced a terminal error"
+        assert not any(e.get("type") == "tool" and e.get("tool_name") != "final_answer" for e in events)
+        if expected_core == "jiuwen":
+            finals = [e for e in events if e.get("type") == "final_answer"
+                      and e.get("answer_phase") == "complete" and not e.get("invocation_id")]
+            assert len(finals) == 1 and marker in finals[0]["content"], "Root completion missing"
+
+        for _ in range(50):
+            with get_db_session() as session:
+                rows = session.query(ConversationMessage).filter_by(conversation_id=conversation).order_by(
+                    ConversationMessage.message_index, ConversationMessage.message_id
+                ).all()
+                snapshot = [[m.message_id, m.message_role, m.message_content, m.status] for m in rows]
+                assert [m.message_index for m in rows] == list(range(len(rows))), "Server order regressed"
+                assistants = [m for m in rows if m.message_role == "assistant"]
+                if len(assistants) == index + 1 and assistants[-1].status == "completed":
+                    if expected_core == "jiuwen":
+                        terminals = session.query(ConversationMessageUnit).filter_by(
+                            message_id=assistants[-1].message_id, unit_type="run_terminal"
+                        ).all()
+                        root_terminals = [unit for unit in terminals if not unit.invocation_id]
+                        assert len(root_terminals) == 1 and json.loads(root_terminals[0].unit_content)["status"] == "completed"
+                    break
+            time.sleep(0.1)
+        assert len(snapshot) == 2 * (index + 1) and snapshot[-1][3] == "completed"
+        assert marker in (snapshot[-1][2] or ""), "Persisted answer mismatch"
+        original = state.get("original", snapshot)
+        assert snapshot[:len(original)] == original, "Original history changed"
+        state["original"] = original
+        checkpoint.write_text(json.dumps(state))
+        RESULT["deployed_http_history"] = {
+            "core": expected_core, "completed": True, "history_loaded": index > 0,
+            "pre_run_memory_searches": sum(e.get("tool_name") == "search_memory" for e in events),
+        }
 
 async def sdk_resources(directory, url, protocol):
     effects = []
@@ -415,12 +397,14 @@ async def collaborators(child_core):
 
 
 def progress(phase):
-    Path("/tmp/m6-smoke-progress.json").write_text(json.dumps({"phase": phase, "completed": list(RESULT)}))
+    CHECKPOINT.with_suffix(".progress.json").write_text(json.dumps({"phase": phase, "completed": list(RESULT)}))
 
 
 async def main():
-    progress("http-history")
-    http_history()
+    if PHASE != "sdk":
+        http_history(PHASE, CHECKPOINT, ACTOR)
+        print("SMOKE_RESULT=" + json.dumps(RESULT))
+        return
     with tempfile.TemporaryDirectory(prefix="m6-real-") as raw:
         directory = Path(raw)
         import socket
@@ -429,7 +413,7 @@ async def main():
             reserved.bind(("127.0.0.1", 0))
             port = reserved.getsockname()[1]
         process = subprocess.Popen(
-            [sys.executable, "/tmp/m6_resource_provider.py", str(port)],
+            [sys.executable, PROVIDER, str(port)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

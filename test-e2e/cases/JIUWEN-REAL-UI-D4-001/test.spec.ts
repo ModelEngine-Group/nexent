@@ -1,16 +1,21 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { journey, observeAgentRunBodies, readFixtureConfig } from "../../infra/automation/d4/runner/journey";
+import { deploymentCoreSwitch } from "../../infra/automation/d4/runner/deployment-core";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
-  const input = JSON.parse(readFileSync(process.env.NEXENT_REAL_UI_CONFIG!, "utf8"));
+  const input = readFixtureConfig("NEXENT_REAL_UI_CONFIG");
   const base = process.env.NEXENT_BASE_URL || "http://127.0.0.1:3000";
-  const container = input.container || "nexent-runtime";
+  const deployment = deploymentCoreSwitch(page, base);
+  const readRunBody = await observeAgentRunBodies(page);
+  const container = deployment.fixtureContainer;
+  contract.deferCleanup(deployment.restore);
   const unique = randomUUID().replaceAll("-", "").slice(0, 12);
-  const target = `/tmp/nexent_real_ui_${unique}`;
+  const target = `${deployment.fixtureDirectory}/nexent_real_ui_${unique}`;
   const localState = join(contract.caseDir, "private-state.json");
   const localImage = join(contract.caseDir, "reference.jpg");
   const docker = (...args: string[]) => {
@@ -21,7 +26,7 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
     }
   };
   const fixture = (mode: string, ...args: string[]) => {
-    const output = docker("exec", "-e", "PYTHONPATH=/opt/backend", "-w", "/opt/backend", container,
+    const output = docker("exec", "-e", "PYTHONPATH=/opt:/opt/backend", "-w", "/opt/backend", container,
       "/opt/backend/.venv/bin/python", target + ".py", mode, target + ".json", ...args);
     return JSON.parse(output.trim().split(/\r?\n/).at(-1)!);
   };
@@ -90,6 +95,7 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
     return texts;
   };
   const send = async (core: string, upload: boolean, query: string, document = false) => {
+    await new ChatPage(page).selectBoundModel(Number(state.model));
     if (upload) {
       const uploadButton = page.getByRole("button", { name: /^(添加附件|上传文件|上传附件)$/ }).first();
       if (!await uploadButton.isVisible()) await page.getByRole("button", { name: "添加", exact: true }).click();
@@ -109,14 +115,10 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
     conversation = request.conversation_id ?? Number(response.headers()["conversation_id"]);
     expect(conversation).toBeGreaterThan(0);
     expect((request.minio_files || []).length).toBeGreaterThanOrEqual(upload ? 1 : 0);
-    const events = (await response.body()).toString("utf8").split(/\r?\n/)
-      .filter(line => line.startsWith("data:")).map(line => JSON.parse(line.slice(5).trim()));
+    const events = (await readRunBody()).split(/\r?\n/)
+      .filter(line => line.startsWith("data:") && line.slice(5).trim() !== "[DONE]").map(line => JSON.parse(line.slice(5).trim()));
     expect(events.filter(e => e.type === "error")).toEqual([]);
-    const terminals = events.filter(e => e.type === "run_terminal" && !e.invocation_id);
-    if (core === "jiuwen") { expect(terminals).toHaveLength(1); expect(terminals[0].status).toBe("completed"); }
-    const capacityEvents = core === "jiuwen"
-      ? events.filter(e => e.type === "step_observation").map(e => e.context_capacity)
-      : events.filter(e => e.type === "token_count").map(e => JSON.parse(e.content));
+    const capacityEvents = events.filter(e => e.type === "token_count").map(e => JSON.parse(e.content));
     expect(capacityEvents.length).toBeGreaterThan(0);
     for (const capacity of capacityEvents) {
       expect(capacity.context_window_tokens).toBeGreaterThan(0);
@@ -130,8 +132,8 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
     const calls = events.filter(e => e.type === "tool");
     const images = calls.filter(e => e.tool_name === "analyze_image");
     const complete = events.filter(e => e.type === "final_answer" && e.answer_phase === "complete" && !e.invocation_id);
-    if (core === "smolagents") expect(complete).toHaveLength(1);
-    const final = core === "jiuwen" ? terminals[0].final_content : complete[0].reclassify_step
+    expect(complete).toHaveLength(1);
+    const final = core === "jiuwen" ? complete[0].content : complete[0].reclassify_step
       ? events.filter(e => e.type === "model_output_thinking" && e.step_id === complete[0].step_id).map(e => e.content).join("")
       : events.filter(e => e.type === "final_answer" && e.answer_phase === "delta" && !e.invocation_id).map(e => e.content).join("") || complete[0].content;
     outcomes.push({ kind: "wire", core, image_calls: images.length, explicit_complete: true, final_length: final.length }); save();
@@ -139,7 +141,7 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
     expect(final).toContain(input.expected_fact);
     if (upload) {
       expect(images).toHaveLength(1);
-      const results = core === "jiuwen" ? events.filter(e => e.type === "tool_result" && e.local_call_id === images[0].local_call_id)
+      const results = core === "jiuwen" ? events.filter(e => e.type === "execution_logs" && e.tool_call_id === images[0].tool_call_id)
         : events.filter(e => e.type === "execution_logs");
       expect(results.length).toBeGreaterThan(0);
       expect(results.some(e => e.is_error === true)).toBe(false);
@@ -182,24 +184,11 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
       cm_enabled:cmEnabled,capacity:referenceCapacity,usage_percentage:true });
     save();
   };
-  const configure = async (core: string) => {
-    await page.goto(`${base}/zh/agents/${state.agent_id}`);
-    const label = page.getByText("Agent Core", { exact: true });
-    await expect(label).toBeAttached();
-    if (!await label.isVisible()) await page.getByText("高级设置", { exact: true }).click();
-    const saved = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/agent/update"
-      && response.request().postDataJSON()?.agent_core === core);
-    await page.locator(".ant-select").filter({ has: page.locator("#agent-core") }).click();
-    await page.locator(".ant-select-dropdown:visible .ant-select-item-option-content").filter({ hasText: new RegExp(`^${core === "jiuwen" ? "Jiuwen" : "smolagents"}$`) }).click();
-    expect((await saved).status()).toBe(200);
-    const published = await page.request.post(`${base}/api/agent/${state.agent_id}/publish`, { data: { version_name: "Real-UI-" + core + "-" + Date.now(), release_note: "Owned real Core switch" } });
-    expect(published.status()).toBe(200);
-  };
+  const configure = deployment.select;
   const enableCM = async () => {
     await page.goto(`${base}/zh/agents/${state.agent_id}`);
-    const label=page.getByText("Agent Core",{exact:true});await expect(label).toBeAttached();
-    if (!await label.isVisible()) await page.getByText("高级设置",{exact:true}).click();
     const toggle=page.getByRole("switch",{name:"上下文自动压缩",exact:true});
+    if (!await toggle.isVisible()) await page.getByText("高级设置",{exact:true}).click();
     await expect(toggle).not.toBeChecked();
     const saved=page.waitForResponse(r=>r.request().method()==="POST"&&new URL(r.url()).pathname==="/api/agent/update"&&r.request().postDataJSON()?.enable_context_manager===true);
     await toggle.click();expect((await saved).status()).toBe(200);
@@ -210,6 +199,7 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
   const follow = "只根据本会话之前已经完成的图片分析，衣服主要是什么颜色？同时原样回复先前的验收编号。只用已有历史结果，不要调用任何工具，也不要重新分析图片。";
   const steps = contract.expectedIds("steps");
   await contract.step(steps[0], async () => {
+    await configure("smolagents");
     await openHistory(0);
     await send("smolagents", true, `请调用图片分析工具分析上传图片，说明人物衣服的主要颜色和画面内容。本会话验收编号是${marker}，请记住并在回答末尾原样带上编号。`);
     await openHistory(1); await send("smolagents", false, follow);

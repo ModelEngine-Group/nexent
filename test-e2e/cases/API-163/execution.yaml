@@ -4,9 +4,9 @@ implementations:
 - framework: pytest
   file: test.py
   selector: API-163
-notes: V5 source binding migrated; runtime parity is not yet certified.
+notes: Isolated readiness fixtures and read-only Gateway probes use no shared test assets.
 preparation:
   families: []
-  anchors: true
+  anchors: false
   special_assets: false
   d4_groups: []

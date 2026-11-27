@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: BLOCKED-E2E-FOLLOWUP-20261126
+  change_type: test-fix
+  title: Prepare and retest fifteen blocked Core cases
+  description: Supply controlled model providers for CMSR and use owned fixtures for browser and
+    deployed HTTP cases. Resolve the current Gateway and Management contracts. Select configured
+    models through the chat UI. Switch deployment Core only through a loopback test driver that
+    preserves the isolated database and saved artifacts. Keep real-provider and resource requirements.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: This change affects formal test code, test preparation and the release Case contract.
+  affected_features:
+    existing:
+    - CMSR-005
+    - F-179
+    - JIUWEN-MODEL-BRIDGE
+    - JIUWEN-OUTPUT
+    - JIUWEN-RELEASE
+    - JIUWEN-RESOURCES
+    - TPC-001
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - CMSR-D3-001
+    - CMSR-D4-001
+    - JIUWEN-CLARIFICATION-D4-001
+    - JIUWEN-CONCURRENCY-D3-001
+    - JIUWEN-DELEGATION-D4-001
+    - JIUWEN-IMAGE-D3-001
+    - JIUWEN-RESOURCES-D3-003
+    - JIUWEN-SKILL-CREATOR-D4-001
+    - JIUWEN-SKILL-FILES-D4-001
+    - JIUWEN-WORKBENCH-HITL-D4-001
+    - TPC-D3-001
+    - TPC-D4-001
+    modified:
+    - CHAT-RETRY-HISTORY-D4-001
+    - JIUWEN-REAL-UI-D4-001
+    - JIUWEN-RELEASE-D3-001
+    added: []
+    retired: []
+  notes: Browser switches restore the starting Core and remove their owned fixtures. The release test
+    keeps a private cleanup checkpoint if teardown fails. Model and Agent seeds belong to the
+    configured test actors. Machine-local bindings and evidence stay outside the repository.

@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: TRAJECTORY-CAPTURE-POSTGRES-20261127
+  change_type: test-fix
+  title: Reconcile Runtime trajectory bootstrap with isolated PostgreSQL
+  description: >-
+    Verify default local capture through the real Runtime configuration in a
+    fresh process. Check the allocated execution UUID, durable archive hash,
+    committed source and accepted answer, and reuse of PostgreSQL tables and
+    sequences. Repair the controlled fixture's catalog, preparation timing,
+    and assertions for native ancestry and its simplified cold projection.
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-CAPTURE-D3-001]
+    retired: []
+  notes: >-
+    The existing controlled worker and cold-reader tests cover HTTP retries,
+    file capture and projection, with simulated PG catalog responses. The new
+    AC-01/03 selector owns a loopback model, runtime subprocess, temporary
+    archive, and one registered UUID scratch database. It checks the failed
+    attempt stays in the archive while the observed final answer is persisted
+    through Management's save_message, with no runtime schema changes. The
+    subprocess closes its model clients and worker lanes, and the scratch
+    factory drops the database. No product, business contract, or traditional
+    unit test changes. The full Case remains blocked on deployed Runtime and
+    Ops lifespans, public chat-stream persistence, and independent Ops reads
+    with configured PostgreSQL and Redis. Real-provider acceptance stays
+    separate in CHAT-TRAJECTORY-REAL-MODEL-D3-001.

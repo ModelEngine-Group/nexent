@@ -73,7 +73,7 @@ def main():
     with httpx.Client(headers={"Authorization": "Bearer " + state["access_token"]},
                       trust_env=False, timeout=30) as client:
         for cid in owned:
-            assert client.delete(f"http://nexent-runtime:5014/conversation/{cid}").status_code == 200
+            assert client.delete(f"http://nexent-gateway:5013/api/conversation/{cid}").status_code == 200
     with get_db_session() as session:
         assert original(session, state) == state["original"], "Cleanup changed original records"
         assert not session.query(ConversationRecord).filter(

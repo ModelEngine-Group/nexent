@@ -1,16 +1,17 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""FAF-D2-001 real stream-generator contract with SDK events."""
-import asyncio
+"""FAF-D2-001 public AgentOS stream and history projection with SDK events."""
+
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from management.services.agent import run as agent_run_service
-from management.services.agent import execution as agent_execution
+
 from nexent.core.utils.observer import MessageObserver, ProcessType
+from shared.attempt_journal import capture_attempt_journal
+
 
 pytestmark = [pytest.mark.case_id("FAF-D2-001"), pytest.mark.stage("D2")]
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prefix", ["", "Thought. ", "<think>Deep.</think>"])
@@ -27,13 +28,14 @@ async def test_faf_d2_001(monkeypatch, prefix, invocation):
     observer.commit_model_attempt("a", 1)
     observer.complete_final_answer("agent", "Final report")
     events = [json.loads(raw) for raw in observer.get_cached_message()]
-    payloads, batches = await _capture_events(monkeypatch, events)
-    assert len(batches) == 1
-    units = batches[0]["message_units"]
+    payloads, batch = await capture_attempt_journal(monkeypatch, events)
+
+    units = batch["message_units"]
     assert [unit["content"] for unit in units if unit["type"] == "final_answer"] == ["Final report"]
     assert len([unit for unit in units if unit["type"] == "step_count"]) == bool(prefix)
-    assert "".join(item["content"] for item in payloads if item.get("type") == "final_answer") == "Final report"
-    assert all(item.get("invocation_id") == invocation for item in payloads if item.get("type") == "final_answer")
+    answers = [item for item in payloads if item.get("type") == "final_answer"]
+    assert "".join(item["content"] for item in answers) == "Final report"
+    assert all(item.get("invocation_id") == invocation for item in answers)
     assert not any("Final report" in item["content"] for item in units if item["type"].startswith("model_output"))
 
 
@@ -45,64 +47,12 @@ async def test_faf_d2_001_legacy_body_is_moved_without_retransmission(monkeypatc
     observer.flush_remaining_tokens()
     observer.mark_direct_final_answer()
     observer.complete_final_answer("agent", "Legacy answer")
-    payloads, batches = await _capture_events(monkeypatch, [json.loads(raw) for raw in observer.get_cached_message()])
+    payloads, batch = await capture_attempt_journal(
+        monkeypatch, [json.loads(raw) for raw in observer.get_cached_message()],
+    )
+
     assert sum(event.get("content") == "Legacy answer" for event in payloads) == 1
-    units = batches[0]["message_units"]
-    assert [(item["type"], item["content"]) for item in units] == [("final_answer", "Legacy answer")]
-    assert batches[0]["message_content"] == "Legacy answer"
-
-async def _capture_events(monkeypatch, events):
-    async def source(*_args, **_kwargs):
-        for event in events:
-            yield json.dumps(event)
-
-    batches = []
-    monkeypatch.setattr(agent_execution, "agent_run", source)
-    monkeypatch.setattr(agent_execution, "save_message", MagicMock(return_value=42))
-    monkeypatch.setattr(
-        agent_execution,
-        "persist_assistant_run_batch",
-        lambda **kwargs: batches.append(kwargs),
-    )
-    monkeypatch.setattr(
-        agent_execution, "_unregister_agent_run_after_execution", MagicMock()
-    )
-    monkeypatch.setattr(
-        agent_execution.streaming_channel_manager, "complete_channel", AsyncMock()
-    )
-    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
-
-    async def managed(_lane, _spec, fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    async def cancel(*_args, **_kwargs):
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", managed)
-    monkeypatch.setattr(agent_execution, "_poll_runtime_cancel_signal", cancel)
-    info = SimpleNamespace(
-        agent_config=SimpleNamespace(pre_run_tool_events=()),
-        cancellation_scope=None,
-        stop_event=asyncio.Event(),
-        human_interaction=None,
-        attempt_outcome="completed",
-        thread_future=None,
-    )
-    channel = SimpleNamespace(publish=AsyncMock())
-    published = [
-        raw
-        async for raw in agent_run_service._stream_agent_chunks(
-            SimpleNamespace(conversation_id=999, history=[], is_debug=False),
-            "test-user",
-            "test-tenant",
-            info,
-            MagicMock(),
-            channel=channel,
-        )
+    assert [(item["type"], item["content"]) for item in batch["message_units"]] == [
+        ("final_answer", "Legacy answer"),
     ]
-    payloads = [
-        json.loads(raw.removeprefix("data: ").strip())
-        for raw in published
-        if raw.startswith("data: {")
-    ]
-    return payloads, batches
+    assert batch["message_content"] == "Legacy answer"

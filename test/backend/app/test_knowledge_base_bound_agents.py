@@ -35,12 +35,12 @@ EMPTY = {"agents": []}
 def preview(request, monkeypatch):
     local = request.param == "local"
     module = local_app if local else aidp_app
-    auth = MagicMock(return_value=("u1", "t1", "USER") if local else ("u1", "t1"))
+    auth = MagicMock(return_value=("u1", "t1", "DEV") if local else ("u1", "t1"))
     monkeypatch.setattr(local_app if local else aidp_app.auth_utils_module,
                         "get_current_user_context" if local else "get_current_user_id", auth)
     permission = MagicMock()
     monkeypatch.setattr(local_app if local else aidp_app.perms,
-                        "require_knowledge_base_read_permission" if local else "require_permission", permission)
+                        "require_knowledge_base_edit_permission" if local else "require_permission", permission)
     collect = MagicMock(return_value=EMPTY)
     if local:
         monkeypatch.setattr(local_app.ElasticSearchService, "get_bound_agents", collect)
@@ -75,13 +75,13 @@ def test_preview_uses_existing_business_route_and_returns_contract(preview, agen
     if prefix == "/indices":
         permission.assert_called_once_with("missing-kb", "u1", "t1")
     else:
-        permission.assert_called_once_with("missing-kb", "u1", "t1", required="READ")
+        permission.assert_called_once_with("missing-kb", "u1", "t1", required="EDIT")
     worker.assert_awaited_once()
     assert worker.call_args.args[1] is collect
 
 
 @pytest.mark.parametrize("preview", ["local"], indirect=True)
-@pytest.mark.parametrize("role,tenant,status", [("USER", "t1", 200), ("USER", "selected-tenant", 403),
+@pytest.mark.parametrize("role,tenant,status", [("DEV", "t1", 200), ("DEV", "selected-tenant", 403),
                                                  ("ADMIN", "selected-tenant", 403), ("SU", "selected-tenant", 200)])
 def test_resource_management_preview_uses_selected_tenant(preview, role, tenant, status):
     client, prefix, collect, auth, worker, permission = preview
@@ -149,7 +149,7 @@ async def test_auth_runs_directly_and_binding_query_runs_in_managed_worker(monke
     def auth(_):
         assert threading.get_ident() == event_loop_thread
         events.append("auth")
-        return ("u1", "t1", "USER") if local else ("u1", "t1")
+        return ("u1", "t1", "DEV") if local else ("u1", "t1")
 
     def query(*args, **kwargs):
         assert threading.get_ident() != event_loop_thread
@@ -160,7 +160,7 @@ async def test_auth_runs_directly_and_binding_query_runs_in_managed_worker(monke
     monkeypatch.setattr(local_app if local else aidp_app.auth_utils_module,
                         "get_current_user_context" if local else "get_current_user_id", auth)
     monkeypatch.setattr(local_app if local else aidp_app.perms,
-                        "require_knowledge_base_read_permission" if local else "require_permission", MagicMock())
+                        "require_knowledge_base_edit_permission" if local else "require_permission", MagicMock())
     if local:
         monkeypatch.setattr(local_app.ElasticSearchService, "get_bound_agents", query)
     else:

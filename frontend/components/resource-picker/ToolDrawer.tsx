@@ -20,6 +20,7 @@ import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import { cn } from "@/lib/utils";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import ToolConfigModal from "@/app/agents/components/capability/tool/ToolConfigModal";
@@ -302,10 +303,12 @@ export function ToolDrawer({ open, onClose, currentAgentId }: ToolDrawerProps) {
 
   const selectedChips = useMemo(
     () =>
-      draftTools.map((tool) => ({
-        id: String(tool.id),
-        label: tool.name,
-      })),
+      draftTools
+        .filter((tool) => !isManagedKnowledgeTool(tool))
+        .map((tool) => ({
+          id: String(tool.id),
+          label: tool.name,
+        })),
     [draftTools]
   );
 

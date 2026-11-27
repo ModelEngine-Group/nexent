@@ -145,20 +145,28 @@ async def test_tpc_provider_keeps_auxiliary_calls_out_of_sequence_and_preserves_
         assert (await api.get(path + '/__stats')).status_code == 404
         assert (await api.post(path + '/__control', json={'responses': ['<code>broken(', '<final_answer>OK</final_answer>'],
                                                         'finish_reason': 'length'})).status_code == 200
-        await api.post(path + '/v1/chat/completions', json={'max_tokens': 100, 'model': 'tpc'})
+        system = {'role': 'system', 'content': 'Run the Agent'}
+        generation = {'model': 'tpc', 'stream': True, 'messages': [system]}
+        await api.post(path + '/v1/chat/completions',
+                       json={**generation, 'stream': False, 'max_tokens': 4096})
+        await api.post(path + '/v1/chat/completions',
+                       json={**generation, 'messages': [{'role': 'user', 'content': 'Hello'}]})
         assert (await api.get(path + '/__stats')).json()['request_count'] == 0
-        response = await api.post(path + '/v1/chat/completions', json={'max_tokens': 4096, 'model': 'tpc', 'stream': True})
+        response = await api.post(path + '/v1/chat/completions', json={**generation, 'max_completion_tokens': 2048})
         frames = [json.loads(line[5:]) for line in response.text.splitlines()
                   if line.startswith('data:') and line[5:].strip() != '[DONE]']
         assert ''.join(frame['choices'][0]['delta'].get('content', '') for frame in frames) == '<code>broken('
         assert frames[-1]['choices'][0]['finish_reason'] == 'length'
-        second = await api.post(path + '/v1/chat/completions', json={'max_tokens': 4096, 'model': 'tpc'})
-        assert second.json()['choices'][0]['message']['content'] == '<final_answer>OK</final_answer>'
+        second = await api.post(path + '/v1/chat/completions', json=generation)
+        frames = [json.loads(line[5:]) for line in second.text.splitlines()
+                  if line.startswith('data:') and line[5:].strip() != '[DONE]']
+        assert ''.join(frame['choices'][0]['delta'].get('content', '') for frame in frames) == '<final_answer>OK</final_answer>'
         assert (await api.get(path + '/__stats')).json()['request_count'] == 2
         assert (await api.post(path + '/__control', json={'responses': ['<final_answer>OK</final_answer>'], 'observation_marker': 123})).status_code == 400
         assert (await api.post(path + '/__control', json={'responses': ['<final_answer>OK</final_answer>'], 'observation_marker': 'REAL_MARKER'})).status_code == 200
-        await api.post(path + '/v1/chat/completions', json={'max_tokens': 4096, 'model': 'tpc', 'messages': []})
-        await api.post(path + '/v1/chat/completions', json={'max_tokens': 4096, 'model': 'tpc', 'messages': [{'role': 'assistant', 'content': 'REAL_MARKER'}]})
+        await api.post(path + '/v1/chat/completions', json=generation)
+        await api.post(path + '/v1/chat/completions',
+                       json={**generation, 'messages': [system, {'role': 'assistant', 'content': 'REAL_MARKER'}]})
         assert (await api.get(path + '/__stats')).json()['observation_counts'] == [0, 1]
         assert (await api.delete(path)).status_code == 200
         assert (await api.get(path + '/__stats')).status_code == 404

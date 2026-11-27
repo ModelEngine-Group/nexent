@@ -11,16 +11,17 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
+CHART = ROOT / 'deploy/k8s/helm/nexent'
 HELM = shutil.which('helm')
 pytestmark = pytest.mark.skipif(HELM is None, reason='Helm CLI is required for local template verification')
 
 
 def render(*options):
     return subprocess.run([
-        HELM, 'template', 't01-test', str(ROOT/'deploy/k8s/helm/nexent'),
-        '--set-string', 'nexent-common.secrets.jwtSecret=t01-public-test-value', *options,
+        HELM, 'template', 't01-test', str(CHART),
+        '--set-string', 'nexent-common.secrets.jwtSecret=t01-public-test-value',
         # Rendering proves structure only; this fixture never certifies a CNI.
-        '--set', 'global.sandboxNetworkPolicyVerified=true',
+        '--set', 'global.sandboxNetworkPolicyVerified=true', *options,
     ], capture_output=True, text=True, encoding='utf-8', timeout=20, check=False)
 
 
@@ -34,7 +35,8 @@ def test_provider_identity_and_default_runtime_replicas(provider, mode, level):
     assert result.returncode == 0, result.stderr
     objects = list(yaml.safe_load_all(result.stdout))
     runtime = next(o for o in objects if o and o.get('kind') == 'Deployment' and o['metadata']['name'] == 'nexent-runtime')
-    assert runtime['spec']['replicas'] == 1
+    chart_values = yaml.safe_load((CHART / 'values.yaml').read_text(encoding='utf-8'))
+    assert runtime['spec']['replicas'] == chart_values['nexent-runtime']['replicaCount']
     assert runtime['spec']['strategy']['type'] == 'Recreate'
     env = {e['name']: e for e in runtime['spec']['template']['spec']['containers'][0]['env']}
     assert env['NEXENT_SANDBOX_DEFAULT_LEVEL']['value'] == level
@@ -48,7 +50,8 @@ def test_provider_identity_and_default_runtime_replicas(provider, mode, level):
 
 
 @pytest.mark.parametrize('override,error', [
-    ('nexent-runtime.replicaCount=2', 'requires dynamic or existing shared RWX storage'),
+    ('nexent-runtime.replicaCount=2,global.sharedStorage.mode=local',
+     'requires dynamic or existing shared RWX storage'),
     ('nexent-runtime.strategy.type=RollingUpdate', 'Recreate'),
     ('global.sandboxProvider=invalid', 'sandboxProvider'),
 ])
@@ -59,22 +62,22 @@ def test_invalid_provider_or_unsafe_deployment_is_still_rejected(override, error
 
 
 def test_kubernetes_local_storage_requires_explicit_development_exception():
-    result = render('--set', 'global.sandboxProvider=kubernetes')
+    local_storage = ('--set', 'global.sandboxProvider=kubernetes,global.sandboxMode=lightweight,'
+                     'global.sharedStorage.mode=local,'
+                     'nexent-runtime.replicaCount=1,global.sandboxSingleNodeDevelopment=false')
+    result = render(*local_storage)
     assert result.returncode != 0 and 'verified CSI RWX' in result.stderr
-    result = render('--set', 'global.sandboxProvider=kubernetes', '--set', 'global.sandboxSingleNodeDevelopment=true')
+    result = render(*local_storage, '--set', 'global.sandboxSingleNodeDevelopment=true')
     assert result.returncode == 0, result.stderr
 
 
 def test_unverified_network_policy_cannot_enable_a_kubernetes_sandbox():
-    result = subprocess.run([HELM, 'template', 'ksm-test', str(ROOT / 'deploy/k8s/helm/nexent'),
-        '--set-string', 'nexent-common.secrets.jwtSecret=test-only', '--set', 'global.sandboxProvider=kubernetes',
-        '--set', 'global.sandboxSingleNodeDevelopment=true'], capture_output=True, text=True, timeout=20)
+    sandbox = ('--set', 'global.sandboxProvider=kubernetes,global.sandboxMode=lightweight,'
+               'global.sharedStorage.mode=existing')
+    result = render(*sandbox, '--set', 'global.sandboxNetworkPolicyVerified=false')
     assert result.returncode != 0
     assert 'enforced NetworkPolicy' in result.stderr
-    result = subprocess.run([HELM, 'template', 'ksm-test', str(ROOT / 'deploy/k8s/helm/nexent'),
-        '--set-string', 'nexent-common.secrets.jwtSecret=test-only', '--set', 'global.sandboxProvider=kubernetes',
-        '--set', 'global.sandboxSingleNodeDevelopment=true', '--set-string', 'global.sandboxNetworkPolicyVerified=false'],
-        capture_output=True, text=True, timeout=20)
+    result = render(*sandbox, '--set-string', 'global.sandboxNetworkPolicyVerified=false')
     assert result.returncode != 0 and 'must be a boolean' in result.stderr
 
 

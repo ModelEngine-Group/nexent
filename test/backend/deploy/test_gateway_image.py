@@ -105,7 +105,9 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     chart = tmp_path / "charts/nexent-gateway"
     shutil.copytree(CHART / "charts/nexent-gateway", chart)
     shutil.copytree(CHART / "charts/nexent-common", chart.parent / "nexent-common")
-    dependencies = subprocess.run([helm, "dependency", "build", str(chart)],
+    dependencies = subprocess.run([helm, "dependency", "build", str(chart), "--skip-refresh",
+                                   "--repository-config", str(tmp_path / "repositories.yaml"),
+                                   "--repository-cache", str(tmp_path / "helm-cache")],
                                   capture_output=True, text=True, timeout=30)
     assert dependencies.returncode == 0, dependencies.stderr
     values = tmp_path / "global.yaml"

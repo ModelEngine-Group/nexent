@@ -4,4 +4,12 @@ implementations:
 - framework: vitest
   file: test.test.tsx
   selector: UT-FE-036
-notes: V5 source binding migrated; runtime parity is not yet certified.
+acceptance_bindings:
+  AC-DEFAULT:
+  - UT-FE-036 defaults monitoring access to SU
+  AC-CONFIGURED:
+  - UT-FE-036 matches actual roles against the configured allowlist
+  AC-RETIRED-SPEED:
+  - UT-FE-036 denies access through retired SPEED
+  AC-DENIED:
+  - UT-FE-036 denies unmatched roles and an empty allowlist

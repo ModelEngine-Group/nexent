@@ -10,14 +10,14 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import null, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from management.api.conversation import workbench_pins as routes
 from management.db.conversation import pins as workbench_pin_db
 from infrastructure.rdb.client import db_client
-from management.db.models import ConversationRecord
+from management.db.models import AgentInfo, ConversationRecord
 
 
 @pytest.fixture(params=["UTC", "Asia/Shanghai", "America/New_York"])
@@ -27,6 +27,7 @@ def persistence(monkeypatch, request):
     with engine.begin() as connection:
         connection.execute(CreateSchema(schema))
         ConversationRecord.__table__.create(connection)
+        AgentInfo.__table__.create(connection)
     try:
         with Session(engine) as session, session.begin():
             for id, owner, config, deleted in [
@@ -36,7 +37,8 @@ def persistence(monkeypatch, request):
             ]:
                 session.add(ConversationRecord(
                     conversation_id=id, conversation_title=f"History {id}",
-                    created_by=owner, updated_by=owner, workbench_config=config,
+                    created_by=owner, updated_by=owner,
+                    workbench_config=null() if config is None else config,
                     create_time=datetime(2026, 1, 1), update_time=datetime(2026, 1, 2), delete_flag=deleted,
                 ))
 

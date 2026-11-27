@@ -48,7 +48,10 @@ async def prepare_share_assets(identity):
         'service':'config','identity':identity.id,'method':'DELETE',
         'path':f'/file/storage/{quote(object_name,safe="/")}','allowed_statuses':[200,404]})
     product_db()
+    from infrastructure.system_configuration.runtime import load_system_configuration
     from management.db.conversation.repository import create_conversation_message
+
+    load_system_configuration()
     scopes=[]
     for role in ('bound','other'):
         conversation=await _create_conversation(identity,'Isolated share '+role)

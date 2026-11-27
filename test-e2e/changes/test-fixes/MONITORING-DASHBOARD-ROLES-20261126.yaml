@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: MONITORING-DASHBOARD-ROLES-20261126
+  change_type: test-fix
+  title: Align the monitoring dashboard case with active role authorization
+  description: >-
+    Update the migrated dashboard role case for the SPEED retirement in
+    AUTH-MULTI-ROLE-RULE-08. Verify the SU default, configured role replacement,
+    multi-role matching, and denial for retired, unknown, or missing roles.
+  affected_features:
+    existing: [F-153]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-FE-036]
+    retired: []
+  notes: >-
+    Commit f9023320b retired SPEED elevation and introduced actual-role matching.
+    Existing frontend tests cover the SU default and account hook access.
+    Preserve UT-FE-036 with explicit negative assertions for the legacy flag and
+    configured SPEED and a positive multi-role allowlist check.

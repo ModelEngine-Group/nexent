@@ -34,9 +34,13 @@ vm.runInNewContext(code, {exports:exported, process:{env:{RESULT_DIR:'/fixture',
   }});
 const item = {precondition_items:[],step_items:[],assertion_items:[]};
 const contract = new exported.ContractExecution('fixture',item);
+const url = 'http://fixture/trajectory/cleanup/schedule';
+const mocked = {method: () => 'PUT'};
+contract.expectMock5xx(mocked, 503);
+contract.auditHttpResponse(mocked, 503, url);
 contract.complete();
-// Reproduce a 500 arriving during asynchronous cleanup, after the first complete().
-contract.addUnexpected5xx('500 http://fixture/conversation/generate_title');
+// Another request at the same endpoint still fails the late response audit.
+contract.auditHttpResponse({method: () => 'PUT'}, 503, url);
 assert.throws(() => contract.complete(), /unexpected 5xx/);
 contract.finish('FAIL','unexpected 5xx');
 const finalEvidence = JSON.stringify(writes.get(contract.evidencePath));
@@ -48,6 +52,10 @@ assert.equal(JSON.stringify(writes.get(contract.evidencePath)),finalEvidence);
 const success = new exported.ContractExecution('success',item);
 success.complete(); success.finish('PASS'); success.addConsoleError('late');
 assert.equal(writes.get(success.statusPath).status,'PASS');
+const mismatch = new exported.ContractExecution('mismatch',item);
+mismatch.expectMock5xx(mocked, 503);
+mismatch.auditHttpResponse(mocked, 500, url);
+assert.throws(() => mismatch.complete(), /unexpected 5xx/);
 assert.ok(text.indexOf('contract.complete();',text.indexOf('await page.context().tracing.stop({ path: traceZip });')) < text.indexOf('contract.finish("PASS")'));
 """.replace("ROOT", json.dumps(str(repo)))
     outcome = subprocess.run(["node", "-"], input=script, text=True, capture_output=True, timeout=20)

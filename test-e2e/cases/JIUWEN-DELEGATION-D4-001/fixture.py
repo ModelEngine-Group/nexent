@@ -13,24 +13,22 @@ from management.db.models import ConversationMessage, ConversationMessageUnit, C
 
 
 mode, filename, helper_path = sys.argv[1:4]
-if mode == "select-core":
+if mode == "require-core":
     state = json.loads(Path(filename).read_text())
     core = sys.argv[4]
     assert core in {"smolagents", "jiuwen"}
     assert state["agent_id"] != state["source"] and state["agent_id"] in state["owned_agents"]
     with httpx.Client(
-        base_url="http://nexent-config:5010",
+        base_url="http://nexent-gateway:5013/api",
         trust_env=False,
         timeout=90,
         headers={"Authorization": "Bearer " + state["access_token"]},
     ) as client:
-        response = client.post(
-            "/agent/update", json={"agent_id": state["agent_id"], **state["copied_fields"], "agent_core": core}
-        )
-        assert response.status_code == 200
-        response = client.post(f"/agent/{state['agent_id']}/publish", json={"version_name": "Delegation validation"})
-        assert response.status_code == 200
-    print(json.dumps({"configured_core": core}))
+        response = client.get("/tenant_config/deployment_version")
+        response.raise_for_status()
+        deployed_core = response.json()["agent_core"]
+        assert deployed_core == core, "Run this delegation profile in its configured deployment"
+    print(json.dumps({"configured_core": deployed_core}))
 elif mode == "nested":
     state = json.loads(Path(filename).read_text())
     conversation = int(sys.argv[4])

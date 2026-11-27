@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { test, expect, Page } from "playwright/test";
+import type { Request } from "playwright/test";
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { atomicJson } from "./atomic-file";
 import { dirname, join, relative } from "node:path";
@@ -35,6 +36,56 @@ function safeUrl(value: string): string {
   }
 }
 
+export class FixtureUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FixtureUnavailableError";
+  }
+}
+
+export function readFixtureConfig(name: string) {
+  const path = process.env[name];
+  if (!path || !existsSync(path)) {
+    throw new FixtureUnavailableError("Machine-local fixture file is missing. Set " + name + " to an existing file.");
+  }
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error("Cannot read a valid JSON fixture from " + name);
+  }
+}
+
+export async function observeAgentRunBodies(page: Page): Promise<(discard?: boolean) => Promise<string>> {
+  // Chromium can discard a streamed body after the app updates the thread route.
+  await page.addInitScript(() => {
+    const bodies: Array<Promise<string>> = [];
+    Object.assign(window, { __nexentAgentRunBodies: bodies });
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch.apply(window, args);
+      const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : "GET");
+      if (method.toUpperCase() === "POST" && new URL(response.url).pathname === "/api/agent/run") {
+        bodies.push(response.clone().text().catch(() => ""));
+      }
+      return response;
+    };
+  });
+  return async (discard = false) => {
+    await page.waitForFunction(() => {
+      const current = window as Window & { __nexentAgentRunBodies?: unknown[] };
+      return Boolean(current.__nexentAgentRunBodies?.length);
+    }, undefined, { timeout: 30_000 });
+    const body = await page.evaluate(async skip => {
+      const current = window as Window & { __nexentAgentRunBodies?: Array<Promise<string>> };
+      const next = current.__nexentAgentRunBodies?.shift();
+      return skip ? "" : next ?? "";
+    }, discard);
+    if (discard) return body;
+    expect(body, "Browser must observe the authenticated run stream").not.toBe("");
+    return body;
+  };
+}
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`missing required environment variable ${name}`);
@@ -59,6 +110,7 @@ export class ContractExecution {
   private currentId = "";
   private cursors: Record<CheckKind, number> = { preconditions: 0, steps: 0, assertions: 0 };
   private cleanups: Array<() => Promise<void>> = [];
+  private expectedMock5xx = new WeakMap<Request, number>();
   private cleanupPromise?: Promise<void>;
   private finished = false;
   readonly caseDir: string;
@@ -137,6 +189,24 @@ export class ContractExecution {
   addConsoleError(value: string): void { if (!this.finished) { this.evidence.console_errors.push(redact(value)); this.persist(); } }
   addUnexpected5xx(value: string): void { if (!this.finished) { this.evidence.unexpected_5xx.push(redact(value)); this.persist(); } }
 
+  expectMock5xx(request: Request, status: number): void {
+    if (!Number.isInteger(status) || status < 500 || status > 599) {
+      throw new Error("Expected mocked status must be an HTTP 5xx code");
+    }
+    this.expectedMock5xx.set(request, status);
+  }
+
+  auditHttpResponse(request: Request, status: number, url: string): void {
+    if (this.finished) return;
+    const expected = this.expectedMock5xx.get(request);
+    this.expectedMock5xx.delete(request);
+    if (status === expected) {
+      this.event("EXPECTED_MOCK_5XX", { method: request.method(), status, url: safeUrl(url) });
+    } else if (status >= 500) {
+      this.addUnexpected5xx(`${status} ${safeUrl(url)}`);
+    }
+  }
+
   cleanup(): Promise<void> {
     // A late failure can enter the catch path after cleanup already completed.
     return this.cleanupPromise ??= this.runCleanup();
@@ -164,6 +234,7 @@ export class ContractExecution {
   }
 
   failKind(error: unknown): FinalResult {
+    if (error instanceof FixtureUnavailableError) return "BLOCKED";
     const name = error instanceof Error ? error.name : "";
     if (/Cleanup/i.test(name)) return "AUTOMATION_ERROR";
     if (/DependencyFailure/i.test(name)) return "BLOCKED_BY_DEPENDENCY";
@@ -207,7 +278,7 @@ export function journey(caseId: string, body: (context: JourneyContext) => Promi
         time: new Date().toISOString(), method: request.method(), url: safeUrl(response.url()),
         status: response.status(), resource_type: request.resourceType(),
       });
-      if (response.status() >= 500) contract.addUnexpected5xx(`${response.status()} ${safeUrl(response.url())}`);
+      contract.auditHttpResponse(request, response.status(), response.url());
     });
     page.on("requestfailed", (request) => {
       networkEvidence.push({

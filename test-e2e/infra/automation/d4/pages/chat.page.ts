@@ -4,6 +4,7 @@ import { expect, type FileChooser, type Locator, type Page, type Response } from
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appPath } from "../runner/runtime-config";
+import { registerReadyAsset, resolveReadyAsset } from "../runner/assets";
 
 /** A path or a full setFiles payload (name/mimeType/buffer). */
 type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
@@ -63,6 +64,14 @@ export class ChatPage {
     await this.selectAgent(displayName);
   }
 
+  async openPreparedAgent(role: string, caseId: string): Promise<string> {
+    const name = resolveReadyAsset("agents", `${role}_display_name`, caseId);
+    const model = resolveReadyAsset("models", `${role}_model_display_name`, caseId);
+    await this.openAgent(name);
+    await this.selectModelByDisplayName(model);
+    return name;
+  }
+
   async selectAgent(displayName: string): Promise<void> {
     // The discover-agents landing search is 搜索智能体名称 now. The card's
     // accessible name mixes the agent name, description, tag and the
@@ -75,11 +84,42 @@ export class ChatPage {
       has: this.page.getByText(displayName, { exact: true }),
     });
     await expect(card).toHaveCount(1);
+    await this.dismissMissingEmbeddingWarning();
     await card.click();
     // Landing selection is complete when the discover page is replaced by
     // the conversation view with a usable composer.
     await expect(this.page.getByRole("heading", { name: "发现智能体" })).toBeHidden();
     await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
+  }
+
+  private async dismissMissingEmbeddingWarning(): Promise<void> {
+    const warning = this.page.getByRole("dialog", { name: /Embedding model not configured|尚未配置向量模型/ });
+    if (await warning.isVisible()) {
+      await warning.getByRole("button", { name: /^(关闭|Close)$/, exact: true }).click();
+      await expect(warning).toBeHidden();
+    }
+  }
+
+  async selectBoundModel(modelId: number): Promise<void> {
+    const response = await this.page.request.get(new URL("/api/model/list", this.page.url()).href);
+    expect(response.ok()).toBe(true);
+    const payload = await response.json();
+    const model = payload.data.find((item: { model_id?: number; id?: number }) =>
+      Number(item.model_id ?? item.id) === modelId,
+    );
+    expect(model?.display_name, `Fixture model ${modelId} must be listed for the actor`).toBeTruthy();
+    await this.selectModelByDisplayName(model.display_name);
+  }
+
+  async selectModelByDisplayName(displayName: string): Promise<void> {
+    const trigger = this.page.locator('[data-slot="model-selector-trigger"]');
+    await expect(trigger).toBeVisible();
+    if (await trigger.getByText(displayName, { exact: true }).isVisible()) return;
+    await this.dismissMissingEmbeddingWarning();
+    await trigger.click();
+    await this.page.locator('[data-slot="model-selector-item"]')
+      .filter({ has: this.page.getByText(displayName, { exact: true }) }).click();
+    await expect(trigger.getByText(displayName, { exact: true })).toBeVisible();
   }
 
   async selectMode(mode: "规划" | "执行"): Promise<void> {
@@ -165,10 +205,30 @@ export class ChatPage {
     return this.lastServerConversationId;
   }
 
+  registerOwnedConversation(caseId: string): number {
+    const id = this.currentConversationId();
+    registerReadyAsset("owned_conversations", String(id), String(id), caseId, {
+      service: "config",
+      identity: "tenant_a_admin",
+      method: "DELETE",
+      path: `/conversation/${id}`,
+      allowed_statuses: [200, 404],
+    });
+    return id;
+  }
+
+  async readConversation(conversationId: number) {
+    // Use the active browser origin so the frontend proxy receives the session cookie.
+    return this.page.evaluate(async (id) => {
+      const response = await fetch(`/api/conversation/${id}`);
+      const payload = await response.json().catch(() => ({}));
+      return { ok: response.ok, status: response.status, payload };
+    }, conversationId);
+  }
+
   async persistedThreadTitle(conversationId: number): Promise<string> {
-    const response = await this.page.request.get(`/api/conversation/${conversationId}`);
-    expect(response.status()).toBe(200);
-    const payload = await response.json();
+    const { status, payload } = await this.readConversation(conversationId);
+    expect(status).toBe(200);
     expect(payload.code).toBe(0);
     expect(Array.isArray(payload.data)).toBe(true);
     expect(payload.data).toHaveLength(1);
@@ -229,6 +289,17 @@ export class ChatPage {
     return message;
   }
 
+  async waitForDisplayedCompletion(message = this.assistantMessages().last()): Promise<void> {
+    await expect(message.locator('[data-slot="aui_assistant-message-completion-indicator"]')
+      .getByText(/^(已完成|Completed?)$/)).toBeVisible({ timeout: 90_000 });
+  }
+
+  async sendAndWaitForDisplayedCompletion(prompt: string): Promise<Locator> {
+    const message = await this.startMessage(prompt);
+    await this.waitForDisplayedCompletion(message);
+    return message;
+  }
+
   async stopGeneration(): Promise<void> {
     const stop = this.page.locator("button:has(svg.lucide-square)").first();
     await expect(stop).toBeVisible({ timeout: 120_000 });
@@ -249,9 +320,8 @@ export class ChatPage {
     // Stop acknowledgement precedes persistence/worker finalization. Wait for
     // the owned stream's terminal history before continuing or reconnecting.
     await expect.poll(async () => {
-      const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
-      if (!response.ok()) return "history_unavailable";
-      const payload = await response.json();
+      const { ok, status, payload } = await this.readConversation(this.currentConversationId());
+      if (!ok) return `history_unavailable_${status}`;
       const history = payload.data?.[0];
       if (history?.streaming_message?.status === "streaming") return "streaming";
       const assistant = history?.message?.filter((item: any) => item.role === "assistant").at(-1);
@@ -260,9 +330,8 @@ export class ChatPage {
   }
 
   async persistedMessages(): Promise<Array<{ role: string; status: string; message: unknown }>> {
-    const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
-    expect(response.ok()).toBe(true);
-    const payload = await response.json();
+    const { status, payload } = await this.readConversation(this.currentConversationId());
+    expect(status).toBe(200);
     expect(payload.code).toBe(0);
     const history = payload.data?.[0];
     expect(history).toBeTruthy();
@@ -272,8 +341,7 @@ export class ChatPage {
   }
 
   async captureConversationState(path: string, marker: string): Promise<void> {
-    const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
-    const payload = await response.json().catch(() => ({}));
+    const { status, payload } = await this.readConversation(this.currentConversationId());
     const history = payload.data?.[0];
     const messages = (history?.message || []).map((item: any) => {
       const parts = Array.isArray(item.message) ? item.message : [];
@@ -283,7 +351,7 @@ export class ChatPage {
         contains_expected_marker:text.includes(marker), final_contains_expected_marker:final.includes(marker),
         final_is_success:final.trim()==="success", final_length:final.length};
     });
-    writeFileSync(path, JSON.stringify({conversation_id:this.currentConversationId(), http_status:response.status(), code:payload.code,
+    writeFileSync(path, JSON.stringify({conversation_id:this.currentConversationId(), http_status:status, code:payload.code,
       streaming_status:history?.streaming_message?.status || null, messages,
       ui_user_count:await this.userMessages().count(), ui_assistant_count:await this.assistantMessages().count()},null,2)+"\n");
   }
@@ -361,6 +429,8 @@ export class ChatPage {
   async openThread(title: string, occurrence?: "first" | "last"): Promise<void> {
     const matches = this.threadButton(title);
     const target = occurrence === "first" ? matches.first() : occurrence === "last" ? matches.last() : matches;
+    await expect(target).toBeVisible();
+    await this.dismissMissingEmbeddingWarning();
     await target.click();
     await expect(this.activeThread()).toContainText(title);
   }

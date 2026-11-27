@@ -23,7 +23,10 @@ def test_helm_gateway_uses_existing_database_config_and_secret(tmp_path, standal
         chart = tmp_path / "nexent-gateway"
         shutil.copytree(CHART / "nexent-gateway", chart)
         shutil.copytree(CHART / "nexent-common", tmp_path / "nexent-common")
-        subprocess.run(["helm", "dependency", "build", str(chart)], capture_output=True, text=True, check=True)
+        subprocess.run(["helm", "dependency", "build", str(chart), "--skip-refresh",
+                        "--repository-config", str(tmp_path / "repositories.yaml"),
+                        "--repository-cache", str(tmp_path / "helm-cache")],
+                       capture_output=True, text=True, check=True, timeout=30)
     else:
         chart = CHART.parent
     def render(password):

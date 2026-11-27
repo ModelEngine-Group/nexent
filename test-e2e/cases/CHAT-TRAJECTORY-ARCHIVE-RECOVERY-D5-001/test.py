@@ -5,6 +5,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import replace
@@ -132,6 +133,6 @@ def test_archive_recovery_browser():
         capture_output=True,
         text=True,
         timeout=120,
-        env=dict(os.environ),
+        env={**os.environ, "FIXED_TEST_PYTHON": sys.executable},
     )
     assert result.returncode == 0, result.stdout + result.stderr

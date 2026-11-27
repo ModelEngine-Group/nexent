@@ -25,7 +25,7 @@ notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager a
   in finally and asserts zero active workers. No shared preparation family, deployment, browser or business asset
   is required. The after-read content transition variants invoke the actual decoder before controlled expiry, real
   local cleanup or catalog membership revocation. Final HTTP responses must reject that already-read chunk without
-  a success body. These assertions are prepared; their current execution remains deferred by the user.
+  a success body.
 acceptance_bindings:
   AC-08:
   - test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed

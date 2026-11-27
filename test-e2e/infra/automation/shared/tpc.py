@@ -6,6 +6,7 @@ import uuid
 
 import httpx
 
+from shared.agent_core import require_code_agent
 from shared.asset_registry import AssetDependencyError, register_asset
 from shared.auth import sign_in
 from shared.config import controlled_asset_url, service_url
@@ -27,6 +28,7 @@ class FixtureConfig(dict):
 
 async def setup(case_id):
     identity = await sign_in('tenant_a_admin')
+    await require_code_agent(identity, case_id)
     nonce = uuid.uuid4().hex
     local = os.environ.get('NEXENT_TEST_ASSETS_LOCAL_URL', '').rstrip('/')
     if not local:

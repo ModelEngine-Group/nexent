@@ -27,7 +27,7 @@ case:
   steps:
   - order: 1
     action: 在真实文件卷于OTLP追加、fsync、临时meta写入/fsync、rename/目录fsync和终态发布边界逐次终止进程；包括实际Span未结束但fragment已确认、meta发布持续失败后恢复可写的场景。 在大字符串编码中途、JSON对象结束前和换行写入前分别终止进程。
-    expected: OTLP和meta确认偏移均持久化才导出成功；所有故障点已确认内容丢失/重复为0。按confirmed_bytes/hash校验，已确认fragment保留实际输入/部分输出并标interrupted，未确认尾部可裁掉，已确认范围损坏报corrupt；终态缺失按last_durable_at或started_at固定终结，到期不因重启延期。
+    expected: OTLP和meta确认偏移均持久化才导出成功；所有故障点已确认内容丢失/重复为0。按confirmed_bytes/hash校验，已确认活动快照保留实际输入和结构信息并标interrupted，未确认尾部可裁掉，已确认范围损坏报corrupt；终态缺失按last_durable_at或started_at固定终结，到期不因重启延期。
       meta仅确认完整OTLP请求行，未闭合大行属于未确认尾部；此前已确认前缀保留，重试幂等且不把半行当可读正文。
   - order: 2
     action: 原写入者持实际OTLP文件锁时尝试接管，释放后校验确认前缀；重发最后batch及同一实际Span，覆盖同键同内容/异内容，保留未发布有效文件及孤儿临时文件。
@@ -39,7 +39,7 @@ case:
     action: 核对OTLP及meta的confirmed_bytes/hash、最终file_bytes/hash和publication_no；制造到期/删除后重试终态发布，检查清理并还原环境。
     expected: meta只发布可验证的已确认文件，无悬空成功引用；重复发布幂等，永久错误保留incomplete/corrupt。终态时间/到期不因重启延期，到期/删除不能被重新发布；原配置/canary恢复，独占资源释放。
   expected_results:
-  - OTLP和meta确认偏移均持久化才导出成功；所有故障点已确认内容丢失/重复为0。按confirmed_bytes/hash校验，已确认fragment保留实际输入/部分输出并标interrupted，未确认尾部可裁掉，已确认范围损坏报corrupt；终态缺失按last_durable_at或started_at固定终结，到期不因重启延期。
+  - OTLP和meta确认偏移均持久化才导出成功；所有故障点已确认内容丢失/重复为0。按confirmed_bytes/hash校验，已确认活动快照保留实际输入和结构信息并标interrupted，未确认尾部可裁掉，已确认范围损坏报corrupt；终态缺失按last_durable_at或started_at固定终结，到期不因重启延期。
     meta仅确认完整OTLP请求行，未闭合大行属于未确认尾部；此前已确认前缀保留，重试幂等且不把半行当可读正文。
   - 实际运行文件锁保证单写入者，超时不绕过锁；同batch/hash返回原收据，同Span键/安全内容不重复，异hash/错expected_offset拒绝。export_seq与已确认范围一致；未发布有效文件保留校验，真正孤儿核验后清理。
   - 进程级/单运行内存队列不超预算；未刷盘不得确认，轨迹显式incomplete/gap，聊天保持既有行为。文件修复只封存已确认文件前缀，未确认内存损失不伪称完整，缺口不被抹掉。
@@ -47,14 +47,17 @@ case:
   forbidden_side_effects:
   - 不丢弃已确认正文，不把 incomplete 当作 ready。
   - 不重新执行业务模型或工具，不故障注入共享生产目录。
+  - 活动快照不写入尚未结束的生成正文。
   acceptance:
   - id: AC-01
-    description: OTLP和meta确认偏移均持久化才导出成功；所有故障点已确认内容丢失/重复为0。按confirmed_bytes/hash校验，已确认fragment保留实际输入/部分输出并标interrupted，未确认尾部可裁掉，已确认范围损坏报corrupt；终态缺失按last_durable_at或started_at固定终结，到期不因重启延期。
+    description: OTLP和meta确认偏移均持久化才导出成功；所有故障点已确认内容丢失/重复为0。按confirmed_bytes/hash校验，已确认活动快照保留实际输入和结构信息并标interrupted，未确认尾部可裁掉，已确认范围损坏报corrupt；终态缺失按last_durable_at或started_at固定终结，到期不因重启延期。
       meta仅确认完整OTLP请求行，未闭合大行属于未确认尾部；此前已确认前缀保留，重试幂等且不把半行当可读正文。
     steps:
     - 1
     expected_results:
     - 1
+    forbidden_side_effects:
+    - 3
   - id: AC-02
     description: 实际运行文件锁保证单写入者，超时不绕过锁；同batch/hash返回原收据，同Span键/安全内容不重复，异hash/错expected_offset拒绝。export_seq与已确认范围一致；未发布有效文件保留校验，真正孤儿核验后清理。
     steps:

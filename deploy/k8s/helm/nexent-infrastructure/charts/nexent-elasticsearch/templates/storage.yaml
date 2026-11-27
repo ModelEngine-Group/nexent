@@ -1,4 +1,5 @@
 {{- $mode := default "local" .Values.persistence.mode }}
+{{- $storageClassName := default (ternary "nexent-local" "" (eq $mode "local")) .Values.persistence.storageClassName }}
 {{- if eq $mode "local" }}
 apiVersion: v1
 kind: PersistentVolume
@@ -10,7 +11,7 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "-3"
 spec:
-  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  storageClassName: {{ $storageClassName | quote }}
   capacity:
     storage: {{ .Values.storage.size }}
   accessModes:
@@ -27,8 +28,15 @@ kind: PersistentVolumeClaim
 metadata:
   name: nexent-elasticsearch
   namespace: {{ .Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  {{- end }}
   annotations:
     "helm.sh/hook-weight": "-3"
+    {{- if eq $mode "dynamic" }}
+    helm.sh/resource-policy: keep
+    {{- end }}
 spec:
   accessModes:
 {{ toYaml .Values.persistence.accessModes | indent 4 }}
@@ -38,7 +46,7 @@ spec:
   {{- if eq $mode "local" }}
   volumeName: nexent-elasticsearch-pv
   {{- end }}
-  {{- if .Values.persistence.storageClassName }}
-  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  {{- if $storageClassName }}
+  storageClassName: {{ $storageClassName | quote }}
   {{- end }}
 {{- end }}

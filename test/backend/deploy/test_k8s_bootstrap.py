@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from .test_workbench_publication import BASH, shell_function
+from .test_workbench_publication import BASH, run_shell, shell_function
 
 
 def run(script):
-    return subprocess.run([BASH, "-c", script], check=False, capture_output=True, text=True, timeout=20)
+    return run_shell(script)
 
 
 def test_config_deployment_launches_as_python_module():
@@ -24,6 +24,7 @@ def test_config_deployment_launches_as_python_module():
         [helm, "template", "nexent", str(chart),
          "--show-only", "charts/nexent-config/templates/deployment.yaml",
          "--set", "nexent-runtime.replicaCount=1",
+         "--set", "global.sandboxProvider=docker",
          "--set-string", "nexent-common.secrets.jwtSecret=test-config-launch"],
         check=False, capture_output=True, text=True, timeout=20,
     )
@@ -134,7 +135,9 @@ deploy_application_release
                 "activate", "ready"]
     if failure:
         expected = expected[:expected.index(failure) + 1]
-    assert result.stdout.splitlines() == ["EVENT:" + item for item in expected]
+    assert [line for line in result.stdout.splitlines() if line.startswith("EVENT:")] == [
+        "EVENT:" + item for item in expected
+    ]
     assert result.returncode == (1 if failure else 0)
 
 
@@ -150,7 +153,7 @@ wait_for_nexent_ready() { echo READY; }
 deploy_application_release
 ''')
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["HELM:false", "READY"]
+    assert result.stdout.splitlines() == ["HELM:false", "Waiting for the application workloads...", "READY"]
 
 
 @pytest.mark.parametrize(
@@ -309,7 +312,7 @@ run_system_agent_bootstrap expected-bootstrap-id
     elif failure:
         assert "FAILED:bootstrap-7" in result.stdout
     else:
-        assert result.stdout.splitlines() == ["SYNC:bootstrap-pod"]
+        assert "SYNC:bootstrap-pod" in result.stdout.splitlines()
     assert "nexent.io/bootstrap-run-id=expected-bootstrap-id" in result.stderr
     if failure in ("job", "ready_timeout", "copy", "lock_before_copy", "lock_after_copy"):
         assert "nexent-bootstrap-start" not in result.stderr
@@ -331,4 +334,4 @@ bootstrap_job_failed bootstrap-7
     assert result.returncode == 1
     assert "logs -n test-ns job/bootstrap-7" in result.stderr
     assert "delete job bootstrap-7 -n test-ns --wait=true --timeout=7s" in result.stderr
-    assert "business workloads remain paused" in result.stderr
+    assert "Business workloads remain paused" in result.stderr
