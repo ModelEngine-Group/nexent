@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: TRAJECTORY-TRACE-LOOKUP-POSTGRES-20261127
+  change_type: test-fix
+  title: Backfill PostgreSQL-backed trajectory lookup coverage
+  description: >-
+    Add the fixed D2 HTTP tests missing from the blocked lookup Case. Use the
+    existing product catalog and an owned PostgreSQL database for membership,
+    conversation identity, message pagination and source coverage, alongside
+    real local OTLP storage. Control the upstream session identity boundary.
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-TRACE-LOOKUP-D2-001]
+    retired: []
+  notes: >-
+    QUERY-D2 covers node budgets, cursor rejection and bounded decoding with a
+    controlled catalog. The added selectors exercise the HTTP path with real
+    PostgreSQL queries, source-message IDs, role rechecks and local archive
+    files. The fixture drops its UUID-owned database, removes its temporary
+    archive and drains the managed read lane. Legacy chat API compatibility,
+    signed share identity and the complete long-history byte-budget matrix
+    still need independent evidence for activation.

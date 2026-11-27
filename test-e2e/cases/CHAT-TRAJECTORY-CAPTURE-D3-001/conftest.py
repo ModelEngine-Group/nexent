@@ -116,6 +116,11 @@ def scripted_provider(reply):
 
 
 @pytest.fixture
+def provider_http():
+    return scripted_provider
+
+
+@pytest.fixture
 def telemetry_receiver():
     state = SimpleNamespace(status=200, requests=[])
 
@@ -170,6 +175,9 @@ class Catalog:
 
     def builtin_agent_ids(self, tenants, ids):
         return set()
+
+    def agent_names(self, tenants, ids):
+        return {(tenant, agent_id): 'Controlled Agent' for tenant in tenants for agent_id in ids}
 
     def message_upper(self, conversation_id):
         return 0
@@ -281,6 +289,7 @@ def runtime(tmp_path, monkeypatch):
                             sandbox_config=SandboxConfig(auto_sync_outputs=False), thread_manager=threads)
         if preparation is not None:
             info.preparation_trace = preparation.preparation_trace
+            info.run_timing = preparation.run_timing
         metadata = AgentRunMetadata(agent_id=agent_id, agent_name=config.name, tenant_id='tenant',
                                     user_id='owner', conversation_id=123, query=query)
         with agent_monitoring_context(metadata):
@@ -291,11 +300,11 @@ def runtime(tmp_path, monkeypatch):
             assert local.force_flush(3000)
         return info, task
 
-    def spans():
+    def spans(*, include_fragments=False):
         assert local.force_flush(3000)
         return [span for path in directory.rglob('*.otlp.jsonl') for line in path.read_text().splitlines()
                 for resource in json.loads(line)['resourceSpans'] for scope in resource['scopeSpans']
-                for span in scope['spans'] if span['name'] != 'nexent.trajectory.fragment']
+                for span in scope['spans'] if include_fragments or span['name'] != 'nexent.trajectory.fragment']
 
     @contextmanager
     def cold_client():
@@ -320,7 +329,8 @@ def runtime(tmp_path, monkeypatch):
         repository = Path(__file__).resolve().parents[3]
         environment = dict(os.environ)
         environment['PYTHONPATH'] = os.pathsep.join(
-            [str(repository / 'backend'), str(repository / 'sdk'), environment.get('PYTHONPATH', '')])
+            [str(repository), str(repository / 'backend'), str(repository / 'sdk'),
+             environment.get('PYTHONPATH', '')])
         errors = directory.parent / f'{directory.name}-cold-reader.stderr'
         with errors.open('w') as stderr:
             process = subprocess.Popen(

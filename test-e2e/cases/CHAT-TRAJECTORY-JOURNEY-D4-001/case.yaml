@@ -39,7 +39,7 @@ case:
   - 管理员OPS/SU登录，菜单授权含/observability；普通角色无菜单且页面/API拒绝。
   - 运行真实Nexent前端及受控HTTP夹具，使用隔离身份、十进制字符串会话ID和并行/嵌套/大正文/缺口样本；记录被测版本。
   - 集合GET /trajectory/records返回执行行、query_id、全量summary和分页facet；详情使用指定conversation_id+trajectory_id的snapshot与contents。
-  - 清理POST只携带before_days/cursor，固定可信认证租户；SU筛选租户不改变清理授权上下文。
+  - 清理POST携带before_days、已授权的tenant_id及可选cursor，禁止传入path；SU须在弹窗选择租户，列表筛选不改变清理授权上下文。
   test_data:
     profile: mock
   steps:
@@ -151,10 +151,12 @@ case:
     - AC-011
     - AC-013
     - AC-SCHEDULE-01
-    blocked_reason: Production page/viewer implemented; a partial fixed browser script and owned HTTP fixture exist.
-      Delayed-response/all availability/SU/locale/keyboard/resource-volume assertions remain pending. The partial
-      journey has an execution binding; formal browser acceptance is deferred by the user; local UI smoke and UT
-      do not close this Case.
+    blocked_reason: >-
+      The fixed browser journey covers only part of the contract. Delayed
+      facet, snapshot and body reads, in-page identity changes, capture gaps
+      and storage failures, full byte and cache budgets, cross-tenant list
+      scope, cleanup transport failures and conversation switching remain
+      incomplete. Formal activation requires a complete audited browser run.
   execution:
     profiles:
     - name: mock

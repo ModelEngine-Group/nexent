@@ -3,7 +3,11 @@
 
 import hashlib
 import json
+import os
+import subprocess
+import sys
 import threading
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -174,7 +178,7 @@ def test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads(runtime
         info, _ = runtime.run(base)
         assert info.attempt_outcome == 'completed'
         assert len(requests) == 2
-    saved = runtime.spans()
+    saved = runtime.spans(include_fragments=True)
     models = [span for span in saved if attrs(span).get('openinference.span.kind') == 'LLM']
     assert len(models) == 2
     models.sort(key=lambda span: int(attrs(span)['nexent.attempt_no']))
@@ -264,7 +268,8 @@ def test_capture_parallel_tools_nested_output_and_full_local_body(runtime, monke
     from nexent.core.agents.cores.smolagents import agent as module
 
     calls, barrier = [], threading.Barrier(2)
-    large = '完整工具结果' * 55000
+    large = '完整工具结果' * 20_000
+    assert len(large.encode('utf-8')) > 256 * 1024
 
     class CaptureEchoTool(Tool):
         name = 'capture_echo'
@@ -307,18 +312,24 @@ def test_capture_parallel_tools_nested_output_and_full_local_body(runtime, monke
         assert json.loads(values['tool.definition'])['name'] == 'capture_echo'
         assert int(span['spanId'], 16) in {identity for _, identity, _ in calls}
     assert len({attrs(span)['nexent.record_id'] for span in tools}) == 2
+    with next(runtime.root.rglob('*.otlp.jsonl')).open('rb') as archive:
+        assert any(len(line) > 256 * 1024 for line in archive)
+    python = next(s for s in saved if attrs(s).get('tool.name') == 'python_interpreter')
+    execution = next(s for s in saved if s['name'] == 'code.execute')
+    parallel = next(s for s in saved if attrs(s).get('tool.name') == 'parallel_executor')
+    assert execution['parentSpanId'] == python['spanId']
+    assert parallel['parentSpanId'] == execution['spanId']
+    assert 0 <= float(attrs(execution)['nexent.duration_ms']) <= float(attrs(python)['nexent.duration_ms'])
     with runtime.client() as client:
         result = snapshot(runtime, client)
         assert result['coverage']['complete']
         root = next(n for n in result['nodes'] if n['parent_id'] is None)
         assert root['tool_call_count'] == 4
-        assert len([n for n in result['nodes'] if n['name'] == 'python_interpreter']) == 1
-        assert len([n for n in result['nodes'] if n['name'] == 'capture_echo']) == 2
-        python = next(n for n in result['nodes'] if n['name'] == 'python_interpreter')
-        execution = next(n for n in result['nodes'] if n['name'] == 'code.execute')
-        assert execution['parent_id'] == python['id'] and execution['kind'] == 'phase'
-        assert execution['duration_ms'] >= 0 and execution['duration_ms'] <= python['duration_ms']
-        assert execution['usage'] is None and execution['tool_call_count'] is None
+        assert not {'python_interpreter', 'code.execute'} & {node['name'] for node in result['nodes']}
+        parent = next(n for n in result['nodes'] if n['name'] == 'parallel_executor')
+        assert parent['parent_id'] == root['id']
+        echoes = [n for n in result['nodes'] if n['name'] == 'capture_echo']
+        assert len(echoes) == 2 and all(n['parent_id'] == parent['id'] for n in echoes)
 
 
 def test_capture_actual_worker_cancel_preserves_partial_output(runtime):
@@ -430,6 +441,7 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
         result = snapshot(runtime, client)
     assert result['coverage']['complete']
     nodes = {n['id']: n for n in result['nodes']}
+    by_span = {span['spanId']: span for span in runtime.spans()}
     agents = [n for n in nodes.values() if n['kind'] == 'agent' and n['parent_id'] is not None]
     assert len(agents) == 2
     for agent in agents:
@@ -439,11 +451,15 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
         assert agent['attributes']['nexent.parent_invocation_id'] == root_invocation
         assert agent['model_call_count'] == 2 and agent['tool_call_count'] == 2
         tools = [n for n in nodes.values() if n['kind'] == 'tool' and n['parent_id'] == agent['id']]
-        assert len(tools) == 1 and tools[0]['name'] == 'python_interpreter'
-        executions = [n for n in nodes.values() if n['parent_id'] == tools[0]['id']]
-        assert len(executions) == 1 and executions[0]['name'] == 'code.execute'
-        leaves = [n for n in nodes.values() if n['parent_id'] == executions[0]['id']]
-        assert len(leaves) == 1 and leaves[0]['name'] == 'capture_leaf'
+        assert len(tools) == 1 and tools[0]['name'] == 'capture_leaf'
+        tool = by_span[tools[0]['source']['span_id']]
+        execution = by_span[tool['parentSpanId']]
+        python = by_span[execution['parentSpanId']]
+        assert execution['name'] == 'code.execute'
+        assert attrs(python)['tool.name'] == 'python_interpreter'
+        loop = by_span[python['parentSpanId']]
+        assert loop['name'] == 'agent.run.loop'
+        assert loop['parentSpanId'] == agent['source']['span_id']
     root = next(n for n in nodes.values() if n['parent_id'] is None)
     assert root['name'] == '通用助手'
     assert root['agent_version_no'] == 3
@@ -657,6 +673,103 @@ def test_capture_independent_process_reads_published_facts_without_runtime_cache
         root = next(n for n in result['nodes'] if n['parent_id'] is None)
         assert root['display_trace_id'] == '123' and root['model_call_count'] == 1
         assert client.get('/trajectory/conversations/123', headers={'Authorization': 'user'}).status_code == 403
+
+
+def test_capture_backend_bootstrap_reconciles_pg_and_archive(tmp_path, monkeypatch, provider_http):
+    from sqlalchemy import create_engine, inspect, insert, select
+
+    from infrastructure.rdb.account_record import UserAccount, UserTenant
+    from infrastructure.rdb.base import TableBase
+    from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
+    from infrastructure.rdb.trajectory.models import TrajectoryExecution, TrajectoryStatistics
+    from shared.factories.scratch_database import isolated_schema_database
+    from shared.postgres import postgres_target, postgres_url
+
+    def reply(request, number, emit):
+        if number == 1:
+            emit('archived-failed-partial')
+            emit(error=True)
+        else:
+            emit('<final_answer>committed-answer</final_answer>')
+            emit(done=True)
+
+    if not os.environ.get('RESULT_DIR'):
+        monkeypatch.setenv('RESULT_DIR', str(tmp_path / 'evidence'))
+    archive = tmp_path / 'archive'
+    repository = Path(__file__).resolve().parents[3]
+    target = postgres_target()
+    with isolated_schema_database() as database, provider_http(reply) as (base, requests):
+        engine = create_engine(postgres_url(), hide_parameters=True)
+        try:
+            with engine.begin() as connection:
+                connection.exec_driver_sql('CREATE SCHEMA IF NOT EXISTS nexent')
+                TableBase.metadata.create_all(connection, tables=[model.__table__ for model in (
+                    UserAccount, UserTenant, ConversationRecord, ConversationMessage,
+                    TrajectoryExecution, TrajectoryStatistics,
+                )])
+                connection.execute(insert(UserAccount).values(
+                    user_id='owner', user_email='owner@example.test', user_roles=['USER'], delete_flag='N',
+                ))
+                connection.execute(insert(UserTenant).values(user_id='owner', tenant_id='tenant', delete_flag='N'))
+                conversation_id = connection.scalar(insert(ConversationRecord).values(
+                    conversation_title='Controlled capture', created_by='owner', agent_id=7, delete_flag='N',
+                ).returning(ConversationRecord.conversation_id))
+                source_id = connection.scalar(insert(ConversationMessage).values(
+                    conversation_id=conversation_id, message_role='user', message_index=0,
+                    message_content='Controlled PG question', created_by='owner', delete_flag='N',
+                ).returning(ConversationMessage.message_id))
+                table_names = set(inspect(connection).get_table_names(schema='nexent'))
+                sequence_names = set(inspect(connection).get_sequence_names(schema='nexent'))
+            assert {'conversation_record_t_conversation_id_seq',
+                    'conversation_message_t_message_id_seq'} <= sequence_names
+            environment = {**os.environ,
+                           'PYTHONPATH': os.pathsep.join(str(path) for path in
+                                                       (repository, repository / 'backend', repository / 'sdk')),
+                           'POSTGRES_HOST': target.host, 'POSTGRES_PORT': str(target.port),
+                           'POSTGRES_USER': target.user, 'POSTGRES_DB': database,
+                           'NEXENT_POSTGRES_PASSWORD': target.password, 'NEXENT_AGENT_CORE': 'smolagents',
+                           'ENABLE_TELEMETRY': 'false', 'ENABLE_MODEL_MONITORING': 'false',
+                           'MONITORING_PROVIDER': 'otlp', 'TRAJECTORY_ROOT_DIR': str(archive),
+                           'TRAJECTORY_READ_ENABLED': 'false', 'TRAJECTORY_STORAGE_MODE': 'single_node'}
+            # The product default enables local capture with remote telemetry disabled.
+            environment.pop('LOCAL_FILE_MONITORING_ENABLED', None)
+            completed = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('runtime_capture.py')), '--provider', base,
+                 '--conversation', str(conversation_id), '--source', str(source_id)],
+                cwd=repository, env=environment, capture_output=True, text=True, timeout=60, check=False,
+            )
+            assert completed.returncode == 0, completed.stderr[-2000:]
+            report = json.loads(completed.stdout.splitlines()[-1])
+            assert report['active_workers'] == 0
+            assert len(requests) == 2
+            meta = json.loads((archive / 'tenant' / 'owner' / '7' / str(conversation_id) / 'meta.json').read_text())
+            run, = meta['runs']
+            path = archive / 'tenant' / 'owner' / '7' / str(conversation_id) / f"{run['trajectory_id']}.otlp.jsonl"
+            raw = path.read_bytes()
+            assert run['capture_state'] == 'ready' and run['business_status'] == 'completed'
+            assert run['source_message_id'] == str(source_id)
+            assert run['confirmed_bytes'] == len(raw)
+            assert run['confirmed_sha256'] == hashlib.sha256(raw).hexdigest()
+            assert b'archived-failed-partial' in raw and b'committed-answer' in raw
+            assistant_id = report['assistant_message_id']
+            assert assistant_id > source_id
+            with engine.connect() as connection:
+                assert set(inspect(connection).get_table_names(schema='nexent')) == table_names
+                assert set(inspect(connection).get_sequence_names(schema='nexent')) == sequence_names
+                messages = connection.execute(select(
+                    ConversationMessage.message_id, ConversationMessage.message_role,
+                    ConversationMessage.message_content,
+                ).where(ConversationMessage.conversation_id == conversation_id)
+                    .order_by(ConversationMessage.message_index)).all()
+                assert messages == [(source_id, 'user', 'Controlled PG question'),
+                                    (assistant_id, 'assistant', 'committed-answer')]
+                rows = connection.execute(select(
+                    TrajectoryExecution.trajectory_id, TrajectoryExecution.turn_no,
+                    TrajectoryExecution.agent_id, TrajectoryExecution.created_by,
+                ).where(TrajectoryExecution.conversation_id == conversation_id)).all()
+                assert rows == [(run['trajectory_id'], run['turn_no'], 7, 'owner')]
+        finally:
+            engine.dispose()
 
 
 @pytest.mark.parametrize('workbench', [False, True])

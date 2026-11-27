@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""File-risk portion of RETENTION-D5; full HTTP/PG acceptance remains blocked."""
+"""File and managed maintenance risk proofs for trajectory retention."""
 
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -14,10 +15,42 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from secrets import token_hex
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+
+# isort: split
+from contracts.constants import environment as product_config
+from gateway.identity.downstream import IDENTITY_HEADER, sign_identity
+from gateway.identity.middleware import GatewayIdentityMiddleware
+from management.db.configuration.models import TenantConfig
+from management.db.conversation.models import (
+    ConversationSourceImage,
+    ConversationSourceSearch,
+)
+from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
+from ops.db.trajectory.cleanup_schedule import CleanupScheduleRepository
+from ops.services.trajectory.lifecycle import create_maintenance_processor
+from shared.factories.scratch_database import isolated_product_database
+from shared.http import assert_status
+
+from infrastructure.rdb.account_record import UserTenant
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.conversation_record import (
+    ConversationMessage,
+    ConversationMessageUnit,
+    ConversationRecord,
+)
+from infrastructure.rdb.trajectory.models import (
+    TrajectoryExecution,
+    TrajectoryStatistics,
+)
 from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryConflict,
@@ -201,7 +234,7 @@ def command(files, run, fault):
 def environment():
     return {
         **os.environ,
-        "PYTHONPATH": os.pathsep.join((str(REPO / "backend"), str(REPO / "sdk"))),
+        "PYTHONPATH": os.pathsep.join(str(REPO / directory) for directory in ("", "backend", "sdk")),
     }
 
 
@@ -319,6 +352,8 @@ def test_retention_failed_deletion_is_not_counted_and_pending_marker_survives_se
     assert outcome["failed_runs"] == outcome["pending_runs"] == 0
     assert state(files, expired)["file_deleted_at"] == timestamp(files.clock[0])
     assert not expired.path.exists()
+    cleanup_version = files.store.manifest(files.owner)["cleanup_version"]
+    assert cleanup_version == 1
     files.clock[0] += timedelta(days=7, microseconds=-1)
     files.store.cleanup(files.owner)
     assert state(files, expired)["file_deleted_at"] is not None
@@ -326,7 +361,7 @@ def test_retention_failed_deletion_is_not_counted_and_pending_marker_survives_se
     files.store.cleanup(files.owner)
     meta = files.store.manifest(files.owner)
     assert meta["runs"] == [] and meta["expired_execution_count"] == 1
-    assert meta["had_expired_history"] and meta["cleanup_version"] == 1
+    assert meta["had_expired_history"] and meta["cleanup_version"] == cleanup_version + 1
 
 
 def test_retention_run_lock_blocks_deletion_across_processes_without_losing_marker(
@@ -521,3 +556,234 @@ def test_deleted_conversation_waits_for_other_process_file_lock(files):
         assert state(files, active)["file_deleted_at"] is None
     assert files.reopen().cleanup(files.owner, force_reason="conversation_deleted")["deleted_runs"] == 1
     assert not active.path.exists()
+
+
+@pytest.fixture
+def retention_database(files, tmp_path, monkeypatch):
+    if "RESULT_DIR" not in os.environ:
+        monkeypatch.setenv("RESULT_DIR", str(tmp_path / "results"))
+    with isolated_product_database():
+        with get_db_session() as session:
+            session.execute(text("CREATE SCHEMA IF NOT EXISTS nexent"))
+            for model in (ConversationRecord, TenantConfig, TrajectoryExecution, TrajectoryStatistics):
+                model.__table__.create(session.connection(), checkfirst=True)
+            for identity in (files.owner, files.other):
+                session.add(
+                    ConversationRecord(
+                        conversation_id=int(identity.conversation_id),
+                        created_by=identity.owner_user_id,
+                        agent_id=int(identity.root_agent_id),
+                    )
+                )
+        yield
+
+
+@contextmanager
+def running_maintenance(files, *, enabled):
+    processor = create_maintenance_processor(
+        SimpleNamespace(
+            TRAJECTORY_ROOT_DIR=files.root,
+            TRAJECTORY_RETENTION_DAYS=30,
+            TRAJECTORY_CLEANUP_INTERVAL_SECONDS=3600,
+            TRAJECTORY_CLEANUP_ENABLED=enabled,
+        )
+    )
+    processor.store.clock = lambda: files.clock[0]
+    manager = ThreadManager("retention-proof", {"background-service": LanePolicy("background-service", 1, 0)})
+    manager.start()
+    try:
+        processor.start(
+            manager,
+            ManagedThreadSpec(
+                "retention-proof-worker",
+                __name__,
+                close_hook=processor.request_stop,
+            ),
+        )
+        yield processor
+    finally:
+        try:
+            processor.shutdown()
+        finally:
+            asyncio.run(manager.shutdown(timeout=4))
+        assert manager.snapshot().active_count == 0
+
+
+def wait_for(condition, message):
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        if condition():
+            return
+        time.sleep(0.02)
+    pytest.fail(message)
+
+
+def test_pg_schedule_policies_apply_on_managed_worker_midnight(files, retention_database):
+    expired = files.add(age_days=8)
+    fresh = files.add(age_days=6)
+    foreign = files.add(files.other, age_days=8)
+    retained = {run.path: digest(run.path) for run in (fresh, foreign)}
+    policies = CleanupScheduleRepository()
+    policies.save(files.owner.tenant_id, {"enabled": True, "retention_days": 7}, "fixture-ops-a")
+    policies.save(files.other.tenant_id, {"enabled": False, "retention_days": 7}, "fixture-ops-b")
+    with get_db_session() as session:
+        session.add(
+            TrajectoryExecution(
+                trajectory_id=expired.id,
+                turn_no=1,
+                status="completed",
+                conversation_id=int(files.owner.conversation_id),
+                created_by=files.owner.owner_user_id,
+                duration_ms=200,
+                total_tokens=12,
+            )
+        )
+
+    midnight = NOW.replace(hour=16)
+    with running_maintenance(files, enabled=False) as processor:
+        wait_for(lambda: processor._next_maintenance > time.monotonic(), "Startup maintenance did not complete")
+        assert processor._next_cleanup_at == midnight
+        assert expired.path.exists()
+        files.clock[0] = midnight
+        wait_for(lambda: not expired.path.exists(), "The managed worker did not wake for Beijing midnight")
+        wait_for(
+            lambda: processor._next_cleanup_at == midnight + timedelta(days=1),
+            "The managed worker did not schedule the next midnight",
+        )
+        assert state(files, expired)["cleanup_reason"] == "retention"
+        assert {path: digest(path) for path in retained} == retained
+        with get_db_session() as session:
+            summary = session.get(TrajectoryExecution, expired.id)
+            assert (summary.status, summary.duration_ms, summary.total_tokens) == ("expired", 200, 12)
+
+
+def test_pg_confirmed_deletion_queues_and_retries_while_periodic_cleanup_is_disabled(
+    files,
+    retention_database,
+):
+    deleted = files.add()
+    foreign = files.add(files.other)
+    original = digest(foreign.path)
+    with running_maintenance(files, enabled=False) as processor:
+        wait_for(lambda: processor._next_maintenance > time.monotonic(), "Startup maintenance did not complete")
+        with locked(files, deleted, "hold_run"):
+            assert processor.request_conversation_cleanup(
+                [files.owner.conversation_id], files.owner.owner_user_id
+            )
+            wait_for(
+                lambda: processor._deletions.unfinished_tasks == 0, "Initial cleanup request did not finish"
+            )
+            assert state(files, deleted)["cleanup_reason"] is None
+            with get_db_session() as session:
+                session.get(ConversationRecord, int(files.owner.conversation_id)).delete_flag = "Y"
+            assert processor.request_conversation_cleanup(
+                [files.owner.conversation_id], files.owner.owner_user_id
+            )
+            wait_for(
+                lambda: state(files, deleted)["cleanup_reason"] == "conversation_deleted",
+                "The worker did not record the confirmed deletion while the file was busy",
+            )
+            assert deleted.path.exists() and state(files, deleted)["file_deleted_at"] is None
+        wait_for(lambda: not deleted.path.exists(), "The managed worker did not retry the busy archive")
+        wait_for(
+            lambda: state(files, deleted)["file_deleted_at"] is not None,
+            "The managed worker did not persist the deletion receipt",
+        )
+        assert digest(foreign.path) == original
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_pg_delete_http_commits_before_archive_cleanup_handoff(files, retention_database, monkeypatch, batch):
+    from management.api.conversation import conversation_management
+    from management.services.automation.service import agent_automation_facade
+
+    from infrastructure.trace import bootstrap
+
+    monkeypatch.setattr(agent_automation_facade, "on_conversation_deleted", AsyncMock())
+    monkeypatch.setattr(product_config, "GATEWAY_SIGNING_SECRET", token_hex(32))
+    monkeypatch.setattr(product_config, "GATEWAY_AUTH_ENABLED", True)
+
+    selected = files.add()
+    foreign = files.add(files.other)
+    owner_id = int(files.owner.conversation_id)
+    foreign_id = int(files.other.conversation_id)
+    foreign_digest = digest(foreign.path)
+    with get_db_session() as session:
+        for model in (
+            UserTenant,
+            ConversationMessage,
+            ConversationMessageUnit,
+            ConversationSourceSearch,
+            ConversationSourceImage,
+        ):
+            model.__table__.create(session.connection(), checkfirst=True)
+        for identity, archive in ((files.owner, selected), (files.other, foreign)):
+            identifier = int(identity.conversation_id)
+            session.add(UserTenant(user_id=identity.owner_user_id, tenant_id=identity.tenant_id))
+            session.add(
+                ConversationMessage(
+                    conversation_id=identifier,
+                    message_role="user",
+                    message_content="owned-chat",
+                    created_by=identity.owner_user_id,
+                )
+            )
+            session.add(
+                TrajectoryExecution(
+                    trajectory_id=archive.id,
+                    turn_no=1,
+                    status="completed",
+                    conversation_id=identifier,
+                    created_by=identity.owner_user_id,
+                )
+            )
+
+    app = FastAPI()
+    app.add_middleware(GatewayIdentityMiddleware, audience="management")
+    app.include_router(conversation_management.router)
+    identity = {"kind": "session", "user_id": files.owner.owner_user_id, "tenant_id": files.owner.tenant_id}
+    path = "/conversation/batch-delete" if batch else f"/conversation/{owner_id}"
+    method = "POST" if batch else "DELETE"
+    token = sign_identity(identity, "management", method, path, b"")
+    request_args = {"json": {"conversation_ids": [owner_id, foreign_id]}} if batch else {}
+    with running_maintenance(files, enabled=False) as processor:
+        monkeypatch.setattr(bootstrap, "local_trajectory_processor", processor)
+        handoffs = []
+        submit = processor.request_conversation_cleanup
+
+        def observe_handoff(conversation_ids, owner):
+            with get_db_session() as session:
+                committed = session.get(ConversationRecord, owner_id).delete_flag
+                summary = session.get(TrajectoryExecution, selected.id).delete_flag
+            handoffs.append((list(conversation_ids), owner, committed, summary))
+            return submit(conversation_ids, owner)
+
+        monkeypatch.setattr(processor, "request_conversation_cleanup", observe_handoff)
+        wait_for(lambda: processor._next_maintenance > time.monotonic(), "Startup maintenance did not complete")
+        with locked(files, selected, "hold_run"), TestClient(app) as api:
+            result = api.request(method, path, headers={IDENTITY_HEADER: token}, **request_args)
+            assert_status(result, 200)
+            expected = {"deleted_count": 1, "failed_ids": [foreign_id]} if batch else True
+            assert result.json()["data"] == expected
+            assert handoffs == [([owner_id], files.owner.owner_user_id, "Y", "Y")]
+            with get_db_session() as session:
+                for conversation_id, run, delete_flag in (
+                    (owner_id, selected, "Y"),
+                    (foreign_id, foreign, "N"),
+                ):
+                    assert session.get(ConversationRecord, conversation_id).delete_flag == delete_flag
+                    assert session.get(TrajectoryExecution, run.id).delete_flag == delete_flag
+                    message = (
+                        session.query(ConversationMessage).filter_by(conversation_id=conversation_id).one()
+                    )
+                    assert message.delete_flag == delete_flag
+            wait_for(
+                lambda: state(files, selected)["cleanup_reason"] == "conversation_deleted",
+                "The committed HTTP deletion did not reach the managed queue",
+            )
+            assert selected.path.exists() and state(files, selected)["file_deleted_at"] is None
+        wait_for(
+            lambda: not selected.path.exists(), "The worker did not finish the HTTP deletion after lock release"
+        )
+        wait_for(lambda: state(files, selected)["file_deleted_at"] is not None, "Missing HTTP deletion receipt")
+        assert digest(foreign.path) == foreign_digest

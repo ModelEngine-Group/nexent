@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { test, expect, Page } from "playwright/test";
+import type { Request } from "playwright/test";
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { atomicJson } from "./atomic-file";
 import { dirname, join, relative } from "node:path";
@@ -109,6 +110,7 @@ export class ContractExecution {
   private currentId = "";
   private cursors: Record<CheckKind, number> = { preconditions: 0, steps: 0, assertions: 0 };
   private cleanups: Array<() => Promise<void>> = [];
+  private expectedMock5xx = new WeakMap<Request, number>();
   private cleanupPromise?: Promise<void>;
   private finished = false;
   readonly caseDir: string;
@@ -187,6 +189,24 @@ export class ContractExecution {
   addConsoleError(value: string): void { if (!this.finished) { this.evidence.console_errors.push(redact(value)); this.persist(); } }
   addUnexpected5xx(value: string): void { if (!this.finished) { this.evidence.unexpected_5xx.push(redact(value)); this.persist(); } }
 
+  expectMock5xx(request: Request, status: number): void {
+    if (!Number.isInteger(status) || status < 500 || status > 599) {
+      throw new Error("Expected mocked status must be an HTTP 5xx code");
+    }
+    this.expectedMock5xx.set(request, status);
+  }
+
+  auditHttpResponse(request: Request, status: number, url: string): void {
+    if (this.finished) return;
+    const expected = this.expectedMock5xx.get(request);
+    this.expectedMock5xx.delete(request);
+    if (status === expected) {
+      this.event("EXPECTED_MOCK_5XX", { method: request.method(), status, url: safeUrl(url) });
+    } else if (status >= 500) {
+      this.addUnexpected5xx(`${status} ${safeUrl(url)}`);
+    }
+  }
+
   cleanup(): Promise<void> {
     // A late failure can enter the catch path after cleanup already completed.
     return this.cleanupPromise ??= this.runCleanup();
@@ -258,7 +278,7 @@ export function journey(caseId: string, body: (context: JourneyContext) => Promi
         time: new Date().toISOString(), method: request.method(), url: safeUrl(response.url()),
         status: response.status(), resource_type: request.resourceType(),
       });
-      if (response.status() >= 500) contract.addUnexpected5xx(`${response.status()} ${safeUrl(response.url())}`);
+      contract.auditHttpResponse(request, response.status(), response.url());
     });
     page.on("requestfailed", (request) => {
       networkEvidence.push({
