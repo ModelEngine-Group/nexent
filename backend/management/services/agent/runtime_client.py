@@ -216,7 +216,7 @@ async def forward_conversation_run(
             )
         except RunModelControlsError as exc:
             status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
-            raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+            raise HTTPException(status_code=status, detail=exc.to_detail()) from exc
         except WorkbenchError as exc:
             raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
         if prepared is not None:

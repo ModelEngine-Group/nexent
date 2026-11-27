@@ -22,7 +22,8 @@ feature:
       Agent configuration.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-005
     description: Existing permissions and tenant/capability validation guard execution; locks, cancellation and errors preserve
-      valid drafts without silent fallback.
+      valid drafts without silent fallback. Failure to resolve a configured root or child model identifies the failing Agent
+      and bound version in safe error details; localized feedback names that Agent without invalidating a healthy root selection.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-006
     description: Shared advanced settings allow temperature 0–2, including explicit zero. Explicit Top P must be greater than 0 and at most 1, subject to the model's declared constraints. Chat and Workbench use integrated numeric steppers. Top P uses 0.01 steps, and valid typed values preserve precision. Historical Top P zero can be cleared or corrected and cannot reach the model service. Clearing either sampling value in a session or Agent restores inheritance. Missing outlet sampling is omitted from provider requests. When no inherited value is available, empty inputs in Chat and Workbench show the allowed numeric range and leave the override unset. Explicit sampling must not silently disappear on provider retry.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-007

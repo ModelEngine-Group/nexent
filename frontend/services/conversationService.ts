@@ -1435,7 +1435,11 @@ export const conversationService = {
           const payload =
             detail && typeof detail === "object" && !Array.isArray(detail)
               ? detail
-              : errorData;
+              : errorData.message &&
+                  typeof errorData.message === "object" &&
+                  !Array.isArray(errorData.message)
+                ? errorData.message
+                : errorData;
           const payloadCode = payload?.code ?? errorData?.code;
           if (
             typeof payloadCode === "string" ||
@@ -1454,6 +1458,15 @@ export const conversationService = {
             details = payload.details as Record<string, unknown>;
           } else if (typeof payload?.current_version === "number") {
             details = { current_version: payload.current_version };
+          }
+          if (
+            code === "model_not_available" &&
+            typeof details?.agent_name === "string" &&
+            details.agent_name.trim()
+          ) {
+            errorMessage = translate("agent.error.noAvailableModel", {
+              agentName: details.agent_name,
+            });
           }
         } catch {
           // Preserve the HTTP status when the error response is not JSON.

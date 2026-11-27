@@ -3,6 +3,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { ChatModelRunOptions } from "@assistant-ui/react";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
+import { ApiError } from "@/services/api";
+import { subscribeRejectedSelection } from "@/features/model-controls/rejectedSelection";
 
 import {
   patchModelDraft,
@@ -143,3 +145,25 @@ it("preserves canonical debug drafts when the backend rejects the run", async ()
     "12": { enable_thinking: false },
   });
 });
+
+it.each([48, 7, undefined])(
+  "only rejects the root selection when the error belongs to it (Agent %s)",
+  async (agentId) => {
+    const rejected = vi.fn();
+    const unsubscribe = subscribeRejectedSelection(rejected);
+    try {
+      service.runAgent.mockRejectedValueOnce(
+        new ApiError(
+          "model_not_available",
+          "No model",
+          agentId === undefined ? undefined : { agent_id: agentId }
+        )
+      );
+      await expect(consume(debugOptions({}))).rejects.toThrow("No model");
+      if (agentId === 48) expect(rejected.mock.calls).toEqual([]);
+      else expect(rejected).toHaveBeenCalledWith(12);
+    } finally {
+      unsubscribe();
+    }
+  }
+);

@@ -405,7 +405,11 @@ async def create_agent_config(
         model_info = (runtime_model_records.get(model_id_to_use) if runtime_model_records is not None
                       else get_model_by_model_id(model_id_to_use, tenant_id=tenant_id))
         if model_info is None:
-            raise RunModelControlsError("model_not_available")
+            raise RunModelControlsError(
+                "model_not_available", agent_id=agent_id, version_no=version_no,
+                agent_name=(agent_info.get("display_name") or "").strip()
+                or (agent_info.get("name") or "").strip() or str(agent_id),
+            )
         model_name = model_info["display_name"] if model_info is not None else "main_model"
         # Capacity and output reserve come exclusively from the saved outlet.
         input_budget, capacity_snapshot, resolved_capacity_snapshot = (
