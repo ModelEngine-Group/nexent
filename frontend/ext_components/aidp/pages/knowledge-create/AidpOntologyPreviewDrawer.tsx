@@ -23,7 +23,7 @@ import {
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { aidpRelationName } from "@/ext_components/aidp/shared/utils/aidpRelationDisplay";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
@@ -47,16 +47,6 @@ const TYPE_LABEL_KEYS: Record<string, string> = {
   string: "aidpKnowledge.ontologyMetadataTypeText",
   time: "aidpKnowledge.ontologyMetadataTypeDate",
   number: "aidpKnowledge.ontologyMetadataTypeNumber",
-};
-
-/** Format an audit value with minutes without inventing a timestamp. */
-const formatAuditTime = (value?: string | number | null): string => {
-  if (!value) return "—";
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
-  }
-  return text || "—";
 };
 
 /**
@@ -183,7 +173,8 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
       dataIndex: "updated_at",
       key: "updated_at",
       width: 170,
-      render: (value: string | null | undefined) => formatAuditTime(value),
+      render: (value: string | number | null | undefined) =>
+        formatAidpDateTime(value),
     },
   ];
 
@@ -280,14 +271,11 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
                     {t("aidpKnowledge.ontologyDomainColumnUpdateTime")}
                   </span>
                   <span className={styles.statValue}>
-                    {formatAuditTime(domain?.update_time)}
+                    {formatAidpDateTime(domain?.update_time)}
                   </span>
                 </span>
               </div>
             </div>
-            <AidpOntologyGapNote>
-              {t("aidpKnowledge.ontologyPreviewCountsGap")}
-            </AidpOntologyGapNote>
           </section>
 
           <Segmented<PreviewView>

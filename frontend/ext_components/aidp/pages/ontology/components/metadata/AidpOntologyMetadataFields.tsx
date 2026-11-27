@@ -52,7 +52,6 @@ import type {
   AidpMetadataFieldType,
   AidpOntologyMetadataField,
 } from "@/ext_components/aidp/shared/types/ontology";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
 import styles from "./AidpOntologyMetadataFields.module.css";
@@ -146,16 +145,18 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       )
     : undefined;
 
-  const refresh = () => {
-    void queryClient.invalidateQueries({
-      queryKey: [...scope.key, "ontology-metadata-fields", domainId],
-    });
-    void queryClient.invalidateQueries({
-      queryKey: [...scope.key, "ontology-chunks"],
-    });
-    void queryClient.invalidateQueries({
-      queryKey: [...scope.key, "ontology-chunk"],
-    });
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: [...scope.key, "ontology-metadata-fields", domainId],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: [...scope.key, "ontology-chunks"],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: [...scope.key, "ontology-chunk"],
+      }),
+    ]);
   };
 
   const openCreate = () => {
@@ -197,7 +198,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       message.success(t("aidpKnowledge.ontologyMetadataFieldCreated"));
       setCreateOpen(false);
       setPage(1);
-      refresh();
+      void refresh();
     } catch (error) {
       setCreateError(
         getAidpErrorMessage(
@@ -240,8 +241,10 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         }
       }
       message.success(t("aidpKnowledge.ontologyMetadataUpdated"));
+      // Refresh the list before closing so reopening the editor immediately
+      // cannot hydrate from the previous row data.
+      await refresh().catch(() => undefined);
       closeEdit();
-      refresh();
     } catch (error) {
       setErrorMessage(
         getAidpErrorMessage(
@@ -293,7 +296,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           } else {
             message.success(t("aidpKnowledge.ontologyMetadataFieldDeleted"));
           }
-          refresh();
+          void refresh();
         } catch (error) {
           message.error(
             getAidpErrorMessage(
@@ -342,7 +345,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             message.success(t("aidpKnowledge.ontologyMetadataUnbindDone"));
           }
           setSelectedKeys([]);
-          refresh();
+          void refresh();
         } catch (error) {
           message.error(
             getAidpErrorMessage(
@@ -432,7 +435,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             );
           }
           setSelectedKeys([]);
-          refresh();
+          void refresh();
         } finally {
           setSaving(false);
         }
@@ -520,13 +523,17 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
 
   const columnKeys = columns.map((column) => String(column.key));
   const { tableContainer, columnWidths, totalWidth, handleResize } =
-    useAidpOntologyColumnWidths(columnKeys, {
-      field_name: 1.4,
-      field_type: 1,
-      create_time: 1.2,
-      update_time: 1.2,
-      actions: 0.9,
-    });
+    useAidpOntologyColumnWidths(
+      columnKeys,
+      {
+        field_name: 1.4,
+        field_type: 1,
+        create_time: 1.2,
+        update_time: 1.2,
+        actions: 0.9,
+      },
+      canManage ? 32 : 0
+    );
   const resizableColumns = columns.map((column, index) => {
     const key = columnKeys[index];
     const nextKey = columnKeys[index + 1];
@@ -676,11 +683,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         </div>
       </div>
 
-      <AidpOntologyGapNote
-        title={t("aidpKnowledge.ontologyMetadataLengthGapTitle")}
-      >
-        {t("aidpKnowledge.ontologyMetadataLengthGap")}
-      </AidpOntologyGapNote>
       <div className={tableStyles.tableArea} ref={tableContainer}>
         {query.isLoading ? (
           <div className={tableStyles.stateBlock}>

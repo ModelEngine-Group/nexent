@@ -3,14 +3,19 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  AIDP_MIN_COLUMN_WIDTH,
   fitAidpColumnWidths,
   resizeAidpColumnPair,
 } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
 
-/** Shared draggable column widths for ontology tables. */
+/**
+ * Shared draggable column widths for ontology tables.
+ * `reservedWidth` leaves room for columns outside `keys` (e.g. row selection).
+ */
 export const useAidpOntologyColumnWidths = <K extends string>(
   keys: readonly K[],
-  weights: Record<K, number>
+  weights: Record<K, number>,
+  reservedWidth = 0
 ) => {
   // A callback ref keeps observing when the container appears only after async
   // loading; a one-shot effect would miss it and leave every column at the
@@ -36,11 +41,13 @@ export const useAidpOntologyColumnWidths = <K extends string>(
     return () => observer.disconnect();
   }, [tableNode]);
 
-  const columnWidths = fitAidpColumnWidths(
-    keys,
-    columnWeights,
-    containerWidth || keys.reduce((sum, key) => sum + columnWeights[key], 0)
-  );
+  const usableWidth = containerWidth
+    ? Math.max(
+        containerWidth - reservedWidth,
+        keys.length * AIDP_MIN_COLUMN_WIDTH
+      )
+    : keys.reduce((sum, key) => sum + columnWeights[key], 0);
+  const columnWidths = fitAidpColumnWidths(keys, columnWeights, usableWidth);
   const totalWidth = keys.reduce((sum, key) => sum + columnWidths[key], 0);
 
   const handleResize = (

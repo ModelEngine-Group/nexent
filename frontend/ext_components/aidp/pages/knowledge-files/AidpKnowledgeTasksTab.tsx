@@ -121,7 +121,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
       setTaskParams((current) =>
         current.keyword === keyword ? current : { ...current, keyword, page: 1 }
       );
-    }, 250);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [taskKeyword]);
 

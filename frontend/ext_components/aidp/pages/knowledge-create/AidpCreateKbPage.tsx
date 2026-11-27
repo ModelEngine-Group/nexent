@@ -260,7 +260,10 @@ const AidpCreateKbPage: React.FC = () => {
     submittingRef.current = true;
     setValidating(true);
     try {
-      const values = await form.validateFields();
+      // Step 0 fields are unmounted on step 1. Its values were validated by
+      // goNext() before leaving step 0, so read the preserved store directly
+      // instead of validating fields that are no longer mounted.
+      const values = form.getFieldsValue(true);
       const permission = isUser
         ? "PRIVATE"
         : values.ingroup_permission || "READ_ONLY";
@@ -301,8 +304,8 @@ const AidpCreateKbPage: React.FC = () => {
 
       setValidating(false);
       const created = await createMutation.mutateAsync({
-        name: values.name.trim(),
-        description: values.description.trim(),
+        name: (values.name ?? "").trim(),
+        description: (values.description ?? "").trim(),
         chunk_token_num: chunkTokens,
         chunk_overlap_num: overlapTokens,
         chunk_mode: values.chunk_mode ?? AIDP_CREATE_DEFAULTS.chunk_mode,

@@ -57,7 +57,7 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   useEffect(() => {
     const timer = window.setTimeout(
       () => setSearch(searchInput.trim()),
-      250
+      300
     );
     return () => window.clearTimeout(timer);
   }, [searchInput]);

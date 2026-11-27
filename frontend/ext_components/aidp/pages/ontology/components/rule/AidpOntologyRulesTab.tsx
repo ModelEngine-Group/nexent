@@ -426,17 +426,21 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
 
   const columnKeys = columns.map((column) => String(column.key));
   const { tableContainer, columnWidths, totalWidth, handleResize } =
-    useAidpOntologyColumnWidths(columnKeys, {
-      name: 1.2,
-      description: 1.5,
-      enabled: 1.1,
-      conditions: 1.5,
-      aggregation: 1.2,
-      coefficient: 1.2,
-      created_at: 1.8,
-      updated_at: 1.8,
-      actions: 1.0,
-    });
+    useAidpOntologyColumnWidths(
+      columnKeys,
+      {
+        name: 1.2,
+        description: 1.5,
+        enabled: 1.1,
+        conditions: 1.5,
+        aggregation: 1.2,
+        coefficient: 1.2,
+        created_at: 1.8,
+        updated_at: 1.8,
+        actions: 1.0,
+      },
+      canManage ? 32 : 0
+    );
   const resizableColumns = columns.map((column, index) => {
     const key = columnKeys[index];
     const nextKey = columnKeys[index + 1];

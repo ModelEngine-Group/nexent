@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -18,6 +18,7 @@ import { useParams } from "next/navigation";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
@@ -25,20 +26,12 @@ import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.m
 import AidpOntologyPreviewDrawer from "./AidpOntologyPreviewDrawer";
 import styles from "./AidpCreateOntologyStep.module.css";
 
+const SEARCH_DEBOUNCE_MS = 300;
+
 interface AidpCreateOntologyStepProps {
   selectedDomainId: string | null;
   onSelect: (domainId: string | null) => void;
 }
-
-/** Format an audit date with time without inventing a missing value. */
-const formatAuditTime = (value?: string | number | null): string => {
-  if (value === null || value === undefined || value === "") return "—";
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
-  }
-  return text || "—";
-};
 
 /**
  * Optional ontology picker shown between configuration and user groups.
@@ -59,6 +52,15 @@ const AidpCreateOntologyStep: React.FC<AidpCreateOntologyStepProps> = ({
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [previewDomainId, setPreviewDomainId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = searchInput.trim();
+      setSearch((current) => (current === next ? current : next));
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
 
   const query = useQuery({
     queryKey: [...scope.key, "create-ontology-options", { page, search }],
@@ -104,7 +106,7 @@ const AidpCreateOntologyStep: React.FC<AidpCreateOntologyStepProps> = ({
       key: "create_time",
       width: 170,
       render: (value: string | number | null | undefined) =>
-        formatAuditTime(value),
+        formatAidpDateTime(value),
     },
   ];
 
@@ -121,13 +123,7 @@ const AidpCreateOntologyStep: React.FC<AidpCreateOntologyStepProps> = ({
           prefix={<SearchOutlined />}
           placeholder={t("aidpKnowledge.createOntologySearch")}
           value={searchInput}
-          onChange={(event) => {
-            setSearchInput(event.target.value);
-            if (!event.target.value) {
-              setSearch("");
-              setPage(1);
-            }
-          }}
+          onChange={(event) => setSearchInput(event.target.value)}
           onPressEnter={() => {
             setSearch(searchInput.trim());
             setPage(1);

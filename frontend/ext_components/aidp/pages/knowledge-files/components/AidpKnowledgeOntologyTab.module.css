@@ -8,9 +8,12 @@
 
 .emptyBlock {
   display: flex;
+  flex: 1;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 12px;
-  padding: 8px 0;
+  padding: 24px 0;
 }
 
 .emptyIcon {

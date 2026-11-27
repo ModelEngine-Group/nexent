@@ -12,7 +12,6 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyTask } from "@/ext_components/aidp/shared/types/ontology";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
@@ -211,9 +210,7 @@ const AidpOntologyTasksTab: React.FC = () => {
               {t("aidpKnowledge.ontologyTaskFailureDetail")}
             </Button>
           </Popover>
-        ) : (
-          <span className={styles.muted}>—</span>
-        ),
+        ) : null,
     },
   ];
 
@@ -268,9 +265,6 @@ const AidpOntologyTasksTab: React.FC = () => {
           />
         </div>
       </div>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyTaskSortGap")}
-      </AidpOntologyGapNote>
       <div className={tableStyles.tableArea} ref={tableContainer}>
         <Table<TaskRow>
           rowKey="id"

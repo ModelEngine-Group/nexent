@@ -9,7 +9,6 @@ import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
 
 import type { AidpOntologyEntity } from "@/ext_components/aidp/shared/types/ontology";
 import { aidpRelationName } from "@/ext_components/aidp/shared/utils/aidpRelationDisplay";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
@@ -101,9 +100,6 @@ const AidpOntologyEntityDetailDrawer: React.FC<
     >
       {entity && (
         <>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyEntityRelationScanGap")}
-          </AidpOntologyGapNote>
           <Descriptions
             size="small"
             column={1}

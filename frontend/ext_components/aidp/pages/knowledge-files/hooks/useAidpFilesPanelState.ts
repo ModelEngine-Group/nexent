@@ -186,7 +186,7 @@ export const useAidpFilesPanelState = ({
     const timer = window.setTimeout(() => {
       const next = globalKeywordInput.trim();
       setGlobalKeyword((current) => (current === next ? current : next));
-    }, 250);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [globalKeywordInput]);
 
@@ -194,7 +194,7 @@ export const useAidpFilesPanelState = ({
     const timer = window.setTimeout(() => {
       const next = folderKeywordInput.trim();
       setFolderKeyword((current) => (current === next ? current : next));
-    }, 250);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [folderKeywordInput]);
 
