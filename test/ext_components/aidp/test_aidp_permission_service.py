@@ -166,13 +166,40 @@ class TestResolvePermission:
         assert decision.permission is None
         assert decision.matched_group_ids == ()
 
-    def test_user_cannot_access_shared_kb_even_with_group_intersection(self, patched):
+    @pytest.mark.parametrize("permission", ["EDIT", "READ_ONLY"])
+    def test_user_group_intersection_is_read_only(self, patched, permission):
+        decision = svc._resolve_permission(
+            _record(ingroup_permission=permission, group_ids=[1]),
+            "u", "t",
+            user_groups=[1],
+        )
+        assert decision.permission == "READ_ONLY"
+        assert decision.matched_group_ids == (1,)
+
+    def test_user_without_group_intersection_denied(self, patched):
         decision = svc._resolve_permission(
             _record(ingroup_permission="READ_ONLY", group_ids=[1]),
+            "u", "t",
+            user_groups=[2],
+        )
+        assert decision.permission is None
+
+    def test_user_private_denied(self, patched):
+        decision = svc._resolve_permission(
+            _record(ingroup_permission="PRIVATE", group_ids=[1]),
             "u", "t",
             user_groups=[1],
         )
         assert decision.permission is None
+
+    def test_user_dev_union_keeps_group_edit(self, patched):
+        patched["get_role"].return_value = ("USER", "DEV")
+        decision = svc._resolve_permission(
+            _record(ingroup_permission="EDIT", group_ids=[1]),
+            "u", "t",
+            user_groups=[1],
+        )
+        assert decision.permission == "EDIT"
 
     @pytest.mark.parametrize("role", sorted(CAN_EDIT_ALL_USER_ROLES))
     def test_management_roles_can_edit_shared_kb_without_group_access(self, patched, role):
@@ -371,10 +398,10 @@ class TestGetAccessibleKbs:
         assert out[0]["permission"] == "EDIT"        # creator -> EDIT regardless of PRIVATE
         assert out[1]["permission"] == "READ_ONLY"   # group intersection grants READ_ONLY
 
-    def test_user_only_sees_own_private_kb(self, monkeypatch):
+    def test_user_sees_own_private_and_group_shared_kb(self, monkeypatch):
         rows = [
             _record(kb_id="own", owner_user_id="u", ingroup_permission="PRIVATE"),
-            _record(kb_id="shared", owner_user_id="other", ingroup_permission="READ_ONLY"),
+            _record(kb_id="shared", owner_user_id="other", ingroup_permission="EDIT"),
         ]
         monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
                             lambda tenant_id: rows)
@@ -382,7 +409,8 @@ class TestGetAccessibleKbs:
         monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
 
         out = svc.get_accessible_kbs("u", "t")
-        assert [row["kb_id"] for row in out] == ["own"]
+        assert [row["kb_id"] for row in out] == ["own", "shared"]
+        assert [row["permission"] for row in out] == ["EDIT", "READ_ONLY"]
 
     def test_management_role_sees_all_shared_rows_but_not_private(self, monkeypatch):
         # Management roles bypass group membership for shared rows, while

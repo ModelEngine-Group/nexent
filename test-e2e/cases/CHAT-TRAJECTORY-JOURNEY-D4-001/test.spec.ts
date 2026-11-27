@@ -2,20 +2,34 @@
 
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
-import { installTrajectoryFixture, modelInput, modelOutput } from "./fixture";
+import {
+  bodyChunkBytes,
+  installTrajectoryFixture,
+  modelInput,
+  modelOutput,
+} from "./fixture";
 
 journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
-  const state = await installTrajectoryFixture(page);
+  const state = await installTrajectoryFixture(page, (request, status) =>
+    contract.expectMock5xx(request, status),
+  );
   const base = process.env.NEXENT_BASE_URL || "http://localhost:3000";
   contract.deferCleanup(async () => {
     state.cleanupPaused = false;
     state.releaseCleanup?.();
+    state.delayedList?.release();
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await page.context().clearCookies();
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${base}/zh/observability`);
   const table = page.locator(".trajectory-table-panel .ant-table");
+  const selectVisibleOption = async (name: string) => {
+    await page
+      .locator(".ant-select-dropdown:visible .ant-select-item-option")
+      .filter({ has: page.getByText(name, { exact: true }) })
+      .click();
+  };
   const open = async () => {
     await table.getByRole("button", { name: "Friday", exact: true }).click();
     await expect(page.getByRole("treeitem", { name: /Friday/ })).toBeVisible();
@@ -25,6 +39,8 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .locator(".ant-drawer-mask")
       .click({ position: { x: 10, y: 10 } });
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    // Move off the left edge so the hover sidebar does not cover row controls.
+    await page.getByRole("button", { name: "清理轨迹", exact: true }).hover();
   };
   const openCleanup = async (kind: "manual" | "schedule") => {
     await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
@@ -66,7 +82,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       ["会话", "并行轨迹评估"],
     ]) {
       await page.getByRole("combobox", { name: label, exact: true }).click();
-      await page.getByRole("option").filter({ hasText: option }).click();
+      await selectVisibleOption(option);
     }
     await expect(
       page.locator(".trajectory-summary").getByText("20", { exact: true }),
@@ -132,7 +148,8 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   });
   await contract.step(steps[1], async () => {
     await expect(table.getByText("V3", { exact: true })).toBeVisible();
-    await open();
+    const row = table.getByRole("row").filter({ hasText: "并行轨迹评估" });
+    await row.press("Enter");
     await expect(
       page.getByRole("treeitem", { name: /Friday.*V3/ }),
     ).toBeVisible();
@@ -265,7 +282,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   });
   await contract.step(steps[2], async () => {
     await page.getByRole("combobox", { name: "节点类型" }).click();
-    await page.getByRole("option", { name: "阶段", exact: true }).click();
+    await selectVisibleOption("阶段");
     await expect(page.getByRole("treeitem", { name: /Friday/ })).toBeVisible();
     await expect(page.getByRole("treeitem", { name: /DeepSeek/ })).toHaveCount(
       0,
@@ -303,7 +320,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       phaseDetail.getByRole("heading", { name: "沙箱初始化" }),
     ).toBeVisible();
     await page.getByRole("combobox", { name: "节点类型" }).click();
-    await page.getByRole("option", { name: "全部类型", exact: true }).click();
+    await selectVisibleOption("全部类型");
     await page.getByRole("treeitem", { name: "代码执行", exact: true }).click();
     await expect(
       phaseDetail.getByRole("heading", { name: "代码执行", exact: true }),
@@ -340,7 +357,8 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
         state.reads.some(
           (url) =>
             url.pathname.includes("/contents/") &&
-            url.searchParams.get("limit") === "1048576",
+            url.searchParams.get("offset") === "0" &&
+            Number(url.searchParams.get("limit")) === bodyChunkBytes,
         ),
       )
       .toBe(true);
@@ -351,7 +369,10 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(body.locator("code")).toContainText("aaaa");
     const inputSection = page.locator(".trajectory-body").first();
     const outputSection = page.locator(".trajectory-body").nth(1);
-    await outputSection.getByText("JSON", { exact: true }).click();
+    await outputSection
+      .getByRole("radiogroup")
+      .getByText("JSON", { exact: true })
+      .click();
     const originalBody = await body.locator("code").textContent();
     await inputSection
       .getByRole("button", { name: "自动换行", exact: true })
@@ -382,39 +403,152 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     expect(
       state.reads
         .slice(readStart)
-        .some((url) => url.searchParams.get("offset") === "1048576"),
+        .some(
+          (url) => url.searchParams.get("offset") === String(bodyChunkBytes),
+        ),
     ).toBe(true);
-    await page.getByRole("button", { name: "加载更多", exact: true }).click();
+    await close();
+    await page.setViewportSize({ width: 1440, height: 700 });
+    state.segmentCount = 4;
+    const segmentReadStart = state.reads.length;
+    await open();
+    const retainedNodes = page.locator(".trajectory-segment-navigation small");
+    await expect(retainedNodes).toHaveText("已加载范围 · 500 个节点");
+    const loadMore = page.getByRole("button", { name: /加载更多$/ });
+    for (let segment = 1; segment <= state.segmentCount; segment++) {
+      const requested = () =>
+        state.reads
+          .slice(segmentReadStart)
+          .some(
+            (url) => url.searchParams.get("cursor") === `segment-${segment}`,
+          );
+      if (!requested()) {
+        await expect(loadMore).not.toHaveClass(/ant-btn-loading/);
+        await loadMore.click();
+      }
+      await expect.poll(requested).toBe(true);
+    }
     await expect(
-      page.getByRole("treeitem", { name: /Later tool/ }),
+      page.getByRole("treeitem", { name: /Later tool 4/ }),
     ).toBeVisible();
+    await expect(retainedNodes).toHaveText("已加载范围 · 5 个节点");
     await expect(page.getByRole("treeitem", { name: /DeepSeek/ })).toHaveCount(
       0,
     );
-    await page.getByRole("button", { name: "上一段", exact: true }).click();
+    await page
+      .getByRole("button", { name: "加载较早轮次", exact: true })
+      .click();
     await expect(
       page.getByRole("treeitem", { name: /DeepSeek/ }),
     ).toBeVisible();
+    const snapshots = state.reads
+      .slice(segmentReadStart)
+      .filter((url) => url.pathname.endsWith("/snapshot"));
+    expect(snapshots.length).toBeGreaterThanOrEqual(6);
+    expect(
+      new Set(snapshots.map((url) => url.searchParams.get("limit"))),
+    ).toEqual(new Set(["500"]));
+    state.segmentCount = 1;
     await close();
+    await page.setViewportSize({ width: 1440, height: 1000 });
   });
   await contract.step(steps[3], async () => {
+    const search = page.getByRole("textbox", { name: "会话 ID" });
+    const oldId = "9223372036854775805";
+    const newId = "9223372036854775804";
+    state.queriedTitles.set(oldId, "Delayed query result");
+    state.queriedTitles.set(newId, "Current query result");
+    const pending = Promise.withResolvers<void>();
+    state.delayedList = {
+      id: oldId,
+      wait: pending.promise,
+      release: pending.resolve,
+    };
+    await search.fill(oldId);
+    await search.press("Enter");
+    await expect
+      .poll(() =>
+        state.records.some((url) => url.searchParams.get("id_query") === oldId),
+      )
+      .toBe(true);
+    const staleRequest = page.waitForEvent(
+      "requestfailed",
+      (request) =>
+        new URL(request.url()).searchParams.get("id_query") === oldId,
+    );
+    await search.fill(newId);
+    await search.press("Enter");
+    await expect(table.getByText("Current query result")).toBeVisible();
+    expect((await staleRequest).failure()?.errorText).toBe("net::ERR_ABORTED");
+    pending.resolve();
+    state.delayedList = null;
+    await expect(table.getByText("Delayed query result")).toHaveCount(0);
+
+    await search.fill("");
+    await search.press("Enter");
+    await expect(table.getByText("并行轨迹评估")).toBeVisible();
+    state.archived = true;
+    const newArchive = table.getByText("Newly archived execution");
+    await page.clock.install();
     const count = state.records.length;
     await page.evaluate(() => {
       window.dispatchEvent(new Event("focus"));
       window.dispatchEvent(new Event("online"));
     });
-    await expect.poll(() => state.records.length).toBe(count);
-    await page.getByRole("textbox", { name: "会话 ID" }).fill("draft");
+    await page.clock.fastForward(60_000);
+    await expect(newArchive).toHaveCount(0);
+    expect(state.records).toHaveLength(count);
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await expect(newArchive).toBeVisible();
+    state.archived = false;
+    state.queriedTitles.clear();
+
+    await search.fill("draft");
     await page.getByRole("combobox", { name: "用户", exact: true }).click();
-    await page.getByRole("option").filter({ hasText: "Owner" }).click();
+    await selectVisibleOption("Alternate Owner");
     await expect(page.getByRole("textbox", { name: "会话 ID" })).toHaveValue(
       "",
     );
+    const currentQuery = () =>
+      state.records.filter((url) => !url.searchParams.has("facet")).at(-1)
+        ?.searchParams;
+    await expect
+      .poll(() => currentQuery()?.get("target_user_id"))
+      .toBe("alternate-owner");
+    expect(currentQuery()?.has("agent_id")).toBe(false);
+    expect(currentQuery()?.has("conversation_id")).toBe(false);
     expect(
       state.writes.filter((path) => /chat|run|tool/.test(path)),
     ).toHaveLength(0);
   });
   await contract.step(steps[4], async () => {
+    for (const [availability, label] of [
+      ["unarchived", "未归档"],
+      ["not_captured", "未采集"],
+      ["expired", "已清理"],
+      ["corrupt", "轨迹文件损坏"],
+    ]) {
+      state.availability = availability;
+      await page.getByRole("button", { name: "刷新", exact: true }).click();
+      await expect(table.getByText(label, { exact: true })).toBeVisible();
+      const snapshots = state.reads.filter((url) =>
+        url.pathname.endsWith("/snapshot"),
+      ).length;
+      await table.getByRole("button", { name: "Friday", exact: true }).click();
+      const drawer = page.getByRole("dialog");
+      await expect(drawer.getByText(label, { exact: true })).toBeVisible();
+      await expect(drawer.locator(".trajectory-viewer-identity")).toContainText(
+        "— Tokens",
+      );
+      await expect(drawer.getByRole("treeitem")).toHaveCount(0);
+      expect(
+        state.reads.filter((url) => url.pathname.endsWith("/snapshot")),
+      ).toHaveLength(snapshots);
+      await close();
+    }
+
+    state.availability = "available";
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
     state.failure = "snapshot_reset";
     await table.getByRole("button", { name: "Friday", exact: true }).click();
     await expect(
@@ -425,14 +559,33 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     ).toHaveCount(0);
     await close();
     state.failure = "";
+    await page.goto(`${base}/en/observability`);
+    await expect(
+      page.getByRole("heading", { name: "Observability center" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Conversation trajectories" }),
+    ).toBeVisible();
+    await page.goto(`${base}/zh/observability`);
+    await expect(
+      page.getByRole("heading", { name: "可观测中心" }),
+    ).toBeVisible();
     for (const role of ["USER", "DEV"]) {
       state.role = role;
-      const before = state.records.length;
-      await page.reload();
+      const before = state.trajectoryRequests.length;
+      await page.goto(`${base}/zh/observability`);
+      await expect(page).not.toHaveURL(/\/observability\/?$/);
+      await expect(
+        page
+          .getByRole("navigation")
+          .getByRole("button", { name: "可观测中心" }),
+      ).toHaveCount(0);
       await expect(
         page.getByRole("heading", { name: "可观测中心" }),
       ).toHaveCount(0);
-      expect(state.records.length).toBe(before);
+      await expect(page.getByText("并行轨迹评估")).toHaveCount(0);
+      await expect(page.getByText("private preview")).toHaveCount(0);
+      expect(state.trajectoryRequests.length).toBe(before);
     }
     state.role = "OPS";
     await page.goto(`${base}/zh/observability`);
@@ -498,15 +651,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
         ?.searchParams.get("view"),
     ).toBe("conversation");
     await open();
-    // The product may prefetch the next segment when the end sentinel enters the viewport.
-    for (
-      let index = 0;
-      index < 3 &&
-      (await page.getByRole("treeitem", { name: /重试成功/ }).count()) === 0;
-      index++
-    ) {
-      await page.getByRole("button", { name: "加载更多", exact: true }).click();
-    }
+    // This compact fixture puts the end sentinel in view for automatic advance.
     await expect(
       page.getByRole("treeitem", { name: /重试成功/ }),
     ).toBeVisible();
@@ -620,10 +765,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       manual.getByRole("button", { name: "确认清理", exact: true }),
     ).toBeDisabled();
     await manual.getByRole("combobox", { name: "租户", exact: true }).click();
-    await page
-      .getByRole("option")
-      .filter({ hasText: "Fixture Tenant" })
-      .click();
+    await selectVisibleOption("Fixture Tenant");
     await manual.getByRole("button", { name: "确认清理", exact: true }).click();
     await expect.poll(() => state.cleanups.length).toBeGreaterThan(deleted);
     await expect(

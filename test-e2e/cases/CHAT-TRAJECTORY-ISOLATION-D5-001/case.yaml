@@ -17,14 +17,14 @@ case:
   automation: automated
   objective: 仅管理员可读可信租户内轨迹，普通创建者及范围外访问拒绝
   preconditions:
-  - 设计阶段；轨迹产品接口、固定脚本和 case-local execution.yaml 尚未实现，本 Case 不可计为通过。
+  - 轨迹接口已实现。真实 PostgreSQL 和 Ops HTTP 已覆盖部分角色、迁租撤权及清理范围，完整隔离风险验证保持阻断。
   - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
   - 读取使用可信OPS/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
   - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有表结构和查询，轨迹正文及执行清单全部为文件。
   - 基于现有MonitoringManager，本地采集独立于MONITORING_PROVIDER指定的远端提供方，两路可同时开启；本地业务正文为正文内嵌的标准OTLP JSONL，会话meta.json保存归属、执行清单和确认进度。
   - 目录使用tenant/user/storage_agent/conversation业务ID，storage_agent_id固定为首次采集根Agent；稳定owner/会话锁串行首次定位与登记。会话切换根Agent仍读写同一物理目录。
   - 所有正文内嵌OTLP Span属性/Events；256KiB为批量刷盘阈值，单行可更大。读写须处理大型字符串的增量编码/解码，正文API按解码后的UTF-8区间返回。
-  - 清理服务具备可控UTC时钟与独占文件夹具；定期默认30天/3600秒，可关闭；主动POST /trajectory/cleanup固定可信租户和首次截止时间，全部产品/脚本仍待实现。
+  - 清理服务具备可控UTC时钟与独占文件夹具；定期默认30天/3600秒，可关闭；主动POST /trajectory/cleanup固定可信租户和首次截止时间。
   - 用户搜索直接复用POST /users/list；Agent/会话选择在既有两个GET增加view=trajectory、target_user_id及普通/工作台分类；新增仅3个轨迹GET及清理POST，原分支行为保持。
   test_data:
     profile: mock
@@ -94,7 +94,7 @@ case:
     - AC-007
     - AC-013
     - AC-008
-    blocked_reason: Backend administrator authorization, current tenant/owner checks, signed references and file identity checks are implemented. This Case still lacks its fixed risk script and binding; actual PG-backed isolation acceptance is deferred by the user.
+    blocked_reason: PostgreSQL-backed role, tenant migration and cleanup scope assertions are implemented. Remote and local credential redaction, the browser menu, file replacement races, and complete cross-scope reference and cleanup-cursor coverage still need fixed assertions and a complete execution binding.
   execution:
     profiles:
     - name: mock

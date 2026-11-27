@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: SPLIT-SERVICE-BOUNDARY-20261126
+  change_type: test-fix
+  title: Probe Config and Runtime separately from Gateway
+  description: >-
+    The Config and Runtime business clients share the public Gateway origin.
+    Restore direct health probes and verify owned OpenAPI routes and cross-service
+    rejections against the real downstream applications using synthetic signing
+    keys. Probe anonymous and private-route rejections at the deployed Gateway.
+  affected_features:
+    existing: [F-176]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [API-162, API-163]
+    retired: []
+  notes: >-
+    Direct HTTP probes are read-only. The isolated ASGI clients close after each
+    test and pytest restores their signing configuration and readiness fixtures.
+    API-AUTO-95BBFF3CC39D73F0 retains scoped thread-capacity snapshot proof.
+    Legacy deployment shutdown timing and log assertions still require
+    separate deployment verification.

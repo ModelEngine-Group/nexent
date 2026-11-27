@@ -64,7 +64,7 @@ test.each(["docx", "xlsx", "pptx"])(
   }
 );
 
-test.each(["doc", "xls", "ppt", "pdf", "txt", "md"])(
+test.each(["doc", "xls", "ppt", "pdf", "txt", "md", "html", "htm"])(
   "%s keeps the existing remote preview path",
   (extension) => {
     const result = artifactDocumentSource(attachment(`report.${extension}`));

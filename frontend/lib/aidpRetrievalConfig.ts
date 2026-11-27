@@ -65,6 +65,17 @@ export function resolveAidpConfig(raw: Record<string, unknown>) {
   if (result.graph_top_k === 0) result.graph_top_k = aidpDefaults.graph_top_k;
   return result;
 }
+/** Replace legacy zero caps before a tool instance is saved. */
+export function normalizeAidpCapParams(
+  params: Record<string, unknown>
+): Record<string, unknown> {
+  if (!("hybrid_top_k" in params) && !("graph_top_k" in params)) return params;
+  const normalized = { ...params };
+  for (const key of ["hybrid_top_k", "graph_top_k"]) {
+    if (normalized[key] === 0) normalized[key] = aidpDefaults[key];
+  }
+  return normalized;
+}
 export function aidpErrors(
   raw: Record<string, unknown>
 ): Record<string, string> {

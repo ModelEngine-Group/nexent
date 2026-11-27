@@ -7,6 +7,7 @@ implementations:
 acceptance_bindings:
   AC-01:
   - test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads
+  - test_capture_backend_bootstrap_reconciles_pg_and_archive
   AC-02:
   - test_capture_interactive_card_preserves_stop_status
   - test_capture_tool_failure_reason_survives_cold_read
@@ -23,6 +24,7 @@ acceptance_bindings:
   - test_capture_root_switch_keeps_directory_and_native_context
   - test_capture_parallel_tools_nested_output_and_full_local_body
   - test_capture_independent_process_reads_published_facts_without_runtime_caches
+  - test_capture_backend_bootstrap_reconciles_pg_and_archive
   AC-04:
   - test_capture_disabled_and_remote_mode_preserve_historical_files_and_cold_read
   AC-05:
@@ -50,13 +52,16 @@ notes: 'Current assertions own private loopback Provider/OTLP HTTP servers, real
   including an independent Uvicorn process with asserted shutdown, and bounded ThreadManager
   lanes. Tool implementations and PG identities/catalog are controlled boundaries.
   SDK configuration/exporters are real; repeated startup provider registration is
-  isolated inside this process. All created model clients close, private sandbox pool
+  isolated inside this process. The backend bootstrap assertion starts a fresh Runtime
+  process using one registered scratch database from the configured PostgreSQL service.
+  It verifies committed message IDs and capture facts against the same database and
+  archive, disposes both process-local database engines, and drops the owned database
+  through the scratch factory. All created model clients close, private sandbox pool
   shuts down on its owning manager, HTTP server threads join and managed active_count
-  is asserted zero. No shared preparation family or shared service is used. Bindings
-  describe implemented assertion locations only. This Case remains blocked: live PG
-  schema/sequence/committed-chat reconciliation, backend environment bootstrap across
-  processes remain unverified; integration acceptance is deferred by the user. A direct
-  script pass is not complete acceptance of AC-01/03/05 or this full Case. The creator
+  is asserted zero. No shared preparation family is used. Bindings describe implemented
+  assertion locations only. This Case remains blocked pending full Runtime/Ops application
+  lifespans, public chat-stream persistence, and configured database/cache cold reads.
+  The creator
   regression uses the public NL2Agent and NL2Skill routes, real signed AgentOS requests
   over isolated ASGI transport, real Runtime workers and HTTP model capture, and cold file
   reads. PG history and model catalog reads are controlled. It owns no additional shared

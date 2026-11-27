@@ -11,7 +11,7 @@ export function archivePayload() {
 import sys, tempfile, json, base64
 from pathlib import Path
 root = Path(sys.argv[1])
-for path in (root / 'backend', root / 'sdk'):
+for path in (root, root / 'backend', root / 'sdk'):
     sys.path.insert(0, str(path))
 sys.path.append(str(root / 'test-e2e/infra/automation/shared'))
 from pytest import MonkeyPatch
@@ -39,8 +39,12 @@ with tempfile.TemporaryDirectory() as directory:
     ["-c", source, repo],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 30000 },
   );
+  if (child.error)
+    throw new Error(`Archive fixture could not run: ${child.error.message}`);
   if (child.status !== 0)
-    throw new Error(`Archive fixture failed: ${child.stderr}`);
+    throw new Error(
+      `Archive fixture exited with ${child.signal || child.status}: ${child.stderr || child.stdout}`,
+    );
   return JSON.parse(child.stdout);
 }
 
@@ -74,9 +78,10 @@ export async function installArchiveBrowser(page, payload) {
     user_email: "archive@example.test",
     tenant_id: "source",
     user_role: state.role,
-    groupIds: [],
+    roles: [state.role],
+    group_ids: [],
     permissions: [],
-    accessibleRoutes: state.role === "OPS" ? ["/", "/observability"] : ["/"],
+    accessiblePages: state.role === "OPS" ? ["/", "/observability"] : ["/"],
   });
   await page.context().addCookies([
     {
