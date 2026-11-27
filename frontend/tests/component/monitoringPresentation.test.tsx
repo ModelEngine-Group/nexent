@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
@@ -155,20 +156,23 @@ beforeEach(() => {
 });
 
 describe("Monitoring tenant labels", () => {
-  it("uses the current tenant name in the disabled selector and both page headings without listing other tenants", async () => {
+  it("shows the operator's fixed tenant in both page headings without a tenant selector", async () => {
     await mount();
     expect(
       await screen.findByRole("heading", { name: "租户 A" })
     ).toBeVisible();
-    const selector = screen.getByRole("combobox", { name: "租户" });
-    expect(selector).toBeDisabled();
-    expect(selector.closest(".ant-select")).toHaveTextContent("租户 A");
+    expect(
+      screen.queryByRole("combobox", { name: "租户" })
+    ).not.toBeInTheDocument();
     expect(getTenant).toHaveBeenCalledWith("tenant-a");
     expect(listTenants).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
     expect(
       await screen.findByRole("heading", { name: "全部智能体 · 租户 A" })
     ).toBeVisible();
+    expect(
+      screen.queryByRole("combobox", { name: "租户" })
+    ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(agentService.getAgentMonitoringSummary).toHaveBeenCalledWith(
         expect.objectContaining({ tenantId: "tenant-a" }),
@@ -238,4 +242,15 @@ describe("Monitoring tenant labels", () => {
       await screen.findByRole("heading", { name: "租户名称暂不可用" })
     ).toBeVisible();
   });
+});
+
+it("starts the Agent trend on calls and lets the operator switch to Token", async () => {
+  await mount();
+  fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+  const trend = await screen.findByRole("region", { name: "调用趋势" });
+  const calls = within(trend).getByRole("radio", { name: "调用量" });
+  const tokens = within(trend).getByRole("radio", { name: "Token" });
+  expect(calls.closest("label")).toHaveClass("ant-segmented-item-selected");
+  fireEvent.click(tokens);
+  expect(tokens.closest("label")).toHaveClass("ant-segmented-item-selected");
 });

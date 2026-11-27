@@ -180,17 +180,7 @@ function MonitoringScope({
         dispatch({ type: "tenant", value });
       }}
     />
-  ) : (
-    <Select
-      aria-label={t("ops.tenant")}
-      className={styles.select}
-      disabled
-      loading={directories.tenants.isFetching}
-      status={directories.tenants.isError ? "error" : undefined}
-      value={userTenant}
-      options={[{ value: userTenant, label: tenantLabel(userTenant) }]}
-    />
-  );
+  ) : null;
 
   const onOverview = tab === "overview";
   const resourceSelection = onOverview ? "" : (filters.resources[tab] ?? "");

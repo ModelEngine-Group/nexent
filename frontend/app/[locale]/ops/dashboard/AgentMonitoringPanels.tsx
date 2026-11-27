@@ -44,7 +44,8 @@ function AgentTrend({
   hasRange: boolean;
 }) {
   const { t, i18n } = useTranslation("common");
-  const [metric, setMetric] = useState<AgentMonitoringMetric>("total_tokens");
+  const [metric, setMetric] =
+    useState<AgentMonitoringMetric>("execution_count");
   const titleId = useId();
   const gradientId = useId();
   const response: AgentMonitoringTrends | undefined = trends.data;

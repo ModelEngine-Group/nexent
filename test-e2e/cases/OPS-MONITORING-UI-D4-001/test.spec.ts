@@ -1561,16 +1561,18 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       trend.getByText("数据截至 2026-11-23 06:01:02 UTC", { exact: true }),
     ).toHaveCount(0);
     await expect(trend.getByText("数据滞后", { exact: true })).toHaveCount(0);
-    await expect(curve).toBeVisible();
-    await expect(curve).toHaveAttribute("d", /M.+M/);
-    await screenshot("agent-token-trend");
-
-    const beforeToggle = stats.length;
-    await chooseMetric("调用量");
     await expect(
       trend.getByRole("group", { name: "调用量", exact: true }),
     ).toBeVisible();
     await screenshot("agent-execution-trend");
+    const beforeToggle = stats.length;
+    await chooseMetric("Token");
+    await expect(
+      trend.getByRole("group", { name: "Token", exact: true }),
+    ).toBeVisible();
+    await expect(curve).toBeVisible();
+    await expect(curve).toHaveAttribute("d", /M.+M/);
+    await screenshot("agent-token-trend");
     await chooseMetric("成功率");
     await expect(
       trend.getByRole("group", { name: "成功率", exact: true }),

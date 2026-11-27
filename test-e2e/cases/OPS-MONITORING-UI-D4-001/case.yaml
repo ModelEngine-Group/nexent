@@ -31,7 +31,7 @@ case:
     expected: The inventory count stays stable under group and date filtering. Summary and trend requests use the current scope. The Token card uses a compact value and shows the full integer on hover. Missing values stay distinct from zero. Refresh repeats both reads.
   - order: 5
     action: Hold a request, change the Agent scope, release the earlier response, and exercise empty and failed reads.
-    expected: Overview and trend loading resolve independently. Missing samples, no data, failure and true zero remain distinguishable. Earlier responses cannot replace the current Agent view.
+    expected: Overview and trend loading resolve independently. The trend starts on call count and can switch to Token or success rate. Missing samples, no data, failure and true zero remain distinguishable. Earlier responses cannot replace the current Agent view.
   - order: 6
     action: Inspect Agent rows, page and sort, open search from the display-name header, search each name field, clear the search, and drill into an Agent from the second tenant.
     expected: Display names occupy one line without a tenant subtitle. Search uses the current scope and preserves empty and error responses. Detail rows preserve missing and zero values and exact Tokens. Drilling into a directory Agent changes the dashboard to that Agent and tenant.
