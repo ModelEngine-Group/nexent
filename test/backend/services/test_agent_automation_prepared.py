@@ -36,6 +36,9 @@ def automation(mocker):
         return function(*args, **kwargs)
 
     mocker.patch.object(runner, "run_blocking", side_effect=inline)
+    mocker.patch.object(runner, "get_conversation", return_value={
+        "conversation_id": REFERENCE.conversation_id, "workbench_config": None,
+    })
     mocker.patch.object(runner, "validate_bindings_available", return_value={"available": True})
     mocker.patch.object(runner.automation_conversation_adapter, "append_run_prompt", return_value={
         "user_message_id": 31, "history": [], "assistant_message_index": 9,
@@ -71,6 +74,8 @@ async def test_automation_records_projection_before_dispatch_and_keeps_uncertain
     assert result["status"] == "RUNNING" and result["projection_message_index"] == 9
     assert compile_snapshot.await_args.args[1:] == (REFERENCE, *ACTOR)
     assert compile_snapshot.await_args.kwargs["current_user_message_id"] == 31
+    assert compile_snapshot.await_args.kwargs["owned_conversation"] == runner.get_conversation.return_value
+    runner.get_conversation.assert_called_once_with(REFERENCE.conversation_id, user_id=ACTOR[0], tenant_id=ACTOR[1])
     legacy.assert_not_awaited()
 
 
