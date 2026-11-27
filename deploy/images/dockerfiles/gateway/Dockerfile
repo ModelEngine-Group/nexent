@@ -25,6 +25,7 @@ RUN if [ -n "$MIRROR" ]; then \
       pip install --no-cache-dir -r /tmp/gateway-requirements.txt; \
     fi
 COPY backend/gateway /opt/backend/gateway
+COPY backend/contracts/identity_session.py /opt/backend/contracts/identity_session.py
 COPY infrastructure/__init__.py /opt/infrastructure/__init__.py
 COPY infrastructure/rdb/__init__.py infrastructure/rdb/identity.py /opt/infrastructure/rdb/
 COPY backend/__init__.py /opt/backend/__init__.py
