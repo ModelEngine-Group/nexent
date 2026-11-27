@@ -1833,3 +1833,12 @@ ALTER TABLE nexent.sys_configuration_t ADD CONSTRAINT ck_sys_configuration_value
 
 COMMENT ON COLUMN nexent.sys_configuration_t.configuration_value IS
     'Validated configuration value, including structured resource denylist settings';
+
+
+-- Source migration: v2.9.0_002_mcp_ssl_verify.sql
+-- Source SHA-256: 8cb8171684f8028c82ee50dbeb543bbeb81de772c772863cd022c09ec9a9f397
+
+ALTER TABLE nexent.mcp_record_t
+    ADD COLUMN IF NOT EXISTS ssl_verify BOOLEAN NOT NULL DEFAULT TRUE;
+COMMENT ON COLUMN nexent.mcp_record_t.ssl_verify IS
+    'Verify remote MCP server TLS certificate for discovery, health checks and agent invocation';
