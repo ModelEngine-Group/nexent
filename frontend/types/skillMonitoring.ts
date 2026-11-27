@@ -4,6 +4,7 @@ import type { MonitoringDateScope, MonitoringPublication } from "./operations";
 export interface SkillMonitoringSelection extends MonitoringDateScope {
   skillId: string | null;
   groupIds: number[];
+  resourceGroup?: string;
 }
 
 export interface SkillMonitoringSummary extends MonitoringPublication {

@@ -19,6 +19,36 @@ export type MonitoringRange = [start: string, end: string];
 export const dateFormat = "YYYY-MM-DD";
 export const maxRangeDays = 366;
 
+// Sentinel filter value for resources that carry no group ownership. Group
+// filtering only reads ``group_ids`` and ignores ``ingroup_permission``.
+export const UNGROUPED_GROUP = "ungrouped";
+
+export function matchesGroupScope(
+  groupIds: readonly number[] | null | undefined,
+  group: string
+): boolean {
+  if (group === "") return true;
+  if (groupIds == null) return false;
+  if (group === UNGROUPED_GROUP) return groupIds.length === 0;
+  const id = Number(group);
+  return Number.isInteger(id) && groupIds.includes(id);
+}
+
+export function matchesMcpGroupScope(
+  service: { type: string; group_ids?: readonly number[] | null },
+  group: string
+): boolean {
+  return (
+    group === "" ||
+    (service.type !== "builtin" &&
+      matchesGroupScope(service.group_ids ?? [], group))
+  );
+}
+
+export function getMonitoringToday(now = new Date()): string {
+  return dayjs.utc(now).format(dateFormat);
+}
+
 interface MonitoringFilters {
   tenant: string;
   group: string;
@@ -58,17 +88,6 @@ export function updateMonitoringFilters(
             resources: {},
             tool: "",
           };
-    case "group":
-      return action.value === state.group
-        ? state
-        : {
-            ...state,
-            group: action.value,
-            // The MCP service directory follows the group filter; drop a
-            // selection the new group may exclude, like the tenant reset.
-            resources: { ...state.resources, mcp: "" },
-            tool: "",
-          };
     case "resource":
       if (action.value === (state.resources[action.tab] ?? "")) return state;
       return {
@@ -80,7 +99,8 @@ export function updateMonitoringFilters(
       if (action.value) {
         const [start, end] = action.value;
         const days = dayjs.utc(end).diff(dayjs.utc(start), "day");
-        if (!(days >= 0 && days < maxRangeDays)) return state;
+        if (!(days >= 0 && days < maxRangeDays) || end > getMonitoringToday())
+          return state;
       }
       return { ...state, customRange: action.value };
     }
@@ -96,10 +116,13 @@ export function getMonitoringRange(
 ): MonitoringRange | null {
   if (preset === "custom") return custom;
   // The deployed Ops default is UTC. Send calendar dates without timestamp conversion.
-  const today = dayjs.utc(now);
+  const today = getMonitoringToday(now);
   const days = preset === "week" ? 7 : 30;
   return [
-    today.subtract(days - 1, "day").format(dateFormat),
-    today.format(dateFormat),
+    dayjs
+      .utc(today)
+      .subtract(days - 1, "day")
+      .format(dateFormat),
+    today,
   ];
 }

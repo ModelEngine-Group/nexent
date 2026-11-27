@@ -55,10 +55,9 @@ export function McpMonitoring({
   });
   const summaryLoading =
     scopeLoading || (selection !== null && summary.isPending);
+  const summaryData = summary.isError ? undefined : summary.data?.data;
   const published =
-    !summary.isError && summary.data?.coverage_state !== "uncovered"
-      ? summary.data?.data
-      : undefined;
+    summary.data?.coverage_state === "uncovered" ? undefined : summaryData;
   const points = trends.data?.data.map((day) => ({
     date: day.statistic_date,
     value: day.request_count,
@@ -89,7 +88,7 @@ export function McpMonitoring({
                 Icon: allServices ? Puzzle : Layers,
                 value: allServices
                   ? format(registeredServices.count, registeredServices.loading)
-                  : format(published?.tool_count ?? null, summaryLoading),
+                  : format(summaryData?.tool_count ?? null, summaryLoading),
               },
             ]
           : []),

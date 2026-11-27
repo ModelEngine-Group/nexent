@@ -178,9 +178,7 @@ export function MonitoringOverview({
             points: agent.data?.data.map((day) => ({
               date: day.statistic_date,
               value: day.execution_count,
-              coverage: day.coverage_state,
             })),
-            publication: agent.data,
             loading:
               scopeLoading ||
               (selection !== null && (agent.isPending || agent.isFetching)),
@@ -195,7 +193,6 @@ export function MonitoringOverview({
               date: day.statistic_date,
               value: day.request_count,
             })),
-            publication: model.data,
             loading:
               scopeLoading ||
               (selection !== null && (model.isPending || model.isFetching)),
@@ -213,7 +210,6 @@ export function MonitoringOverview({
               date: day.statistic_date,
               value: day.request_count,
             })),
-            publication: mcp.data,
             loading:
               scopeLoading ||
               (selection !== null && (mcp.isPending || mcp.isFetching)),

@@ -10,6 +10,7 @@ export interface OperationsResource {
   id: number;
   name: string | null;
   tenant_id: string;
+  group_ids?: number[];
 }
 
 export interface OperationsResourcePage {

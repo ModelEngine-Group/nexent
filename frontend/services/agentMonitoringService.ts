@@ -25,6 +25,8 @@ async function readAgentMonitoring<T>(
   if (selection.tenantId !== null) params.set("tenant_id", selection.tenantId);
   if (selection.agentId !== null)
     params.set("agent_id", String(selection.agentId));
+  if (selection.resourceGroup)
+    params.set("resource_group", selection.resourceGroup);
   for (const groupId of selection.groupIds)
     params.append("group_ids", String(groupId));
   const response = await fetchWithAuth(`${endpoint}?${params}`, { signal });

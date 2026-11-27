@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import date
 
 from ops.monitoring.model import TOKEN_FIELDS, summarize
-from ops.monitoring.query import _publication_status, _read_published_rows, agent_catalog_tenants, days_inclusive
+from ops.monitoring.query import (_publication_status, _read_published_rows, agent_catalog_tenants, days_inclusive,
+                                  group_scope_ids)
 
 
 @dataclass
@@ -24,11 +25,13 @@ def _token_values(rows, status):
     return {field: values[field] for field in TOKEN_FIELDS}
 
 
-def read_agent_tokens(service, *, tenant, start, end, groups, agent_id, identities=None):
+def read_agent_tokens(service, *, tenant, start, end, groups, agent_id, identities=None, resource_group=None):
     """Count each attributed model request under its actual Agent and start date."""
+    scoped = group_scope_ids(tenant, "agent", resource_group) if resource_group is not None else None
     rows, states, published = _read_published_rows(
         service, tenant=tenant, kind="model", start=start, end=end,
         initiator_group_ids=groups, agent_id=agent_id, has_agent_run=True, exclude_system_agents=True,
+        **({"resource_scope": ("agent_id", scoped)} if scoped is not None else {}),
     )
     rows = [row for row in rows if row.get("agent_id") is not None and row.get("has_agent_run")]
     identities = None if identities is None else set(identities)
