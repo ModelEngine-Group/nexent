@@ -2,12 +2,22 @@
 
 // @vitest-environment jsdom
 import React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render as renderWithTestingLibrary, screen, waitFor, cleanup, act } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Form } from 'antd';
 import AgentPrompt from '@/app/[locale]/agents/[agentId]/components/agent-prompt';
 import AgentDebugPanel from '@/app/[locale]/agents/[agentId]/components/debug/agent-debug';
 import { Thread } from '@/app/[locale]/newchat/assistant-ui/thread';
+
+function render(element: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWithTestingLibrary(element, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 const h = vi.hoisted(() => ({
   modelList: { models: [] as any[], availableLlmModels: [] as any[], isSuccess: false },
@@ -33,7 +43,7 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/hooks/model/useModelList', () => ({
   useModelList: () => ({
     models: h.modelList.models,
-    llmModels: [],
+    llmModels: h.modelList.availableLlmModels,
     availableModels: h.modelList.models.filter((m: any) => m.connect_status === 'available'),
     availableLlmModels: h.modelList.availableLlmModels,
     embeddingModels: [],
@@ -84,7 +94,10 @@ vi.mock('@/hooks/agent/useAgentInfo', () => ({
   }),
 }));
 
-vi.mock('@/lib/auth', () => ({ canManageModels: () => true }));
+vi.mock('@/lib/auth', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/auth')>(),
+  canManageModels: () => true,
+}));
 vi.mock('@/components/providers/AuthorizationProvider', () => ({
   useAuthorizationContext: () => ({ user: { role: 'admin' } }),
 }));
@@ -210,6 +223,9 @@ vi.mock('@/app/[locale]/newchat/assistant-ui/composer', () => ({
     return null;
   },
 }));
+vi.mock('@/app/[locale]/newchat/assistant-ui/viewport-scroll-rescue', () => ({
+  ViewportScrollRescue: () => null,
+}));
 
 vi.mock('@/app/[locale]/newchat/ui/markdown-text', () => ({ MarkdownText: () => null }));
 vi.mock('@/app/[locale]/newchat/ui/reasoning', () => ({
@@ -221,10 +237,6 @@ vi.mock('@/app/[locale]/newchat/ui/subagent', () => ({ SubAgentContainer: () => 
 vi.mock('@/app/[locale]/newchat/ui/tooltip-icon-button', () => ({ TooltipIconButton: (p: any) => p.children }));
 vi.mock('@/app/[locale]/newchat/ui/sources', () => ({ Sources: () => null }));
 vi.mock('@/app/[locale]/newchat/ui/sources-panel', () => ({ SourcesPanel: () => null }));
-vi.mock('@/app/[locale]/newchat/ui/sources-panel-context', () => ({
-  SourcesPanelProvider: (p: any) => p.children,
-  useSourcesPanel: () => ({ selection: null, isOpen: false, open: () => {}, toggle: () => {}, close: () => {} }),
-}));
 vi.mock('@/app/[locale]/newchat/ui/attachment', () => ({
   AssistantMessageAttachments: () => null,
   UserMessageAttachments: () => null,
@@ -282,6 +294,11 @@ const buildEditedAgent = (overrides: Record<string, any> = {}) => ({
   model_names: [],
   prompt: '',
   ...overrides,
+});
+
+let threadNumber = 0;
+beforeEach(() => {
+  h.auiState.threads.mainThreadId = `model-control-thread-${++threadNumber}`;
 });
 
 afterEach(() => {
@@ -356,18 +373,24 @@ describe(' 模型可用性过滤与主模型回退', () => {
     expect(screen.queryByText('Model A')).toBeNull();
   });
 
-  it('Debug Panel 通过真实 Chat/Thread 过滤不可用模型并回退首个可用 ID', async () => {
+  it('Debug Panel 保留检测失败的候选及其状态', async () => {
     h.modelList.models = [model(1, 'Model A'), model(3, 'Model C', 'unavailable')];
     h.agentStore.agentId = 1;
     h.agentStore.editedAgent = buildEditedAgent({ model_ids: [1, 3], model_names: ['Model A', 'Model C'] });
     render(<AgentDebugPanel />);
     await waitFor(() => expect(h.composerProps).toBeTruthy());
-    expect(h.composerProps.models.map((m: any) => m.id)).toEqual(['1']);
+    expect(h.composerProps.models).toMatchObject([
+      { id: '1', connectStatus: 'available' },
+      { id: '3', connectStatus: 'unavailable' },
+    ]);
     expect(h.composerProps.selectedModelId).toBe('1');
+    act(() => h.composerProps.onModelChange('3'));
+    await waitFor(() => expect(h.composerProps.selectedModelId).toBe('3'));
+    expect(h.composerProps.disabled).toBe(false);
   });
 
-  it('Debug Panel 全部不可用时模型列表为空且禁止发送', async () => {
-    h.modelList.models = [model(3, 'Model C', 'unavailable')];
+  it('Debug Panel 模型均已移除时列表为空且禁止发送', async () => {
+    h.modelList.models = [];
     h.agentStore.agentId = 1;
     h.agentStore.editedAgent = buildEditedAgent({ model_ids: [3] });
     render(<AgentDebugPanel />);
@@ -383,7 +406,7 @@ describe(' 模型可用性过滤与主模型回退', () => {
     h.agentStore.editedAgent = buildEditedAgent({ model_ids: [2, 1], model_names: ['Model B', 'Model A'] });
     const view = render(<AgentDebugPanel />);
     await waitFor(() => expect(h.composerProps.selectedModelId).toBe('2'));
-    h.modelList.models = [model(1, 'Model A'), model(2, 'Model B', 'unavailable')];
+    h.modelList.models = [model(1, 'Model A')];
     view.rerender(<AgentDebugPanel />);
     await waitFor(() => expect(h.composerProps.selectedModelId).toBe(''));
     expect(h.composerProps.disabled).toBe(true);
@@ -393,15 +416,15 @@ describe(' 模型可用性过滤与主模型回退', () => {
     expect(h.composerProps.models.map((m: any) => m.id)).toEqual(['1']);
   });
 
-  it(' Thread useAgentModels 仅保留 connect_status=available 并回退首个可用模型', async () => {
+  it(' Thread 保留检测状态并只自动选择检测通过的模型', async () => {
     h.modelList.models = [model(1, 'Model A'), model(3, 'Model C', 'unavailable')];
     const agent = {
       id: 1,
       name: 'test-agent',
       display_name: 'Test Agent',
       description: '',
-      model_ids: [1, 3],
-      model_names: ['Model A', 'Model C'],
+      model_ids: [3, 1],
+      model_names: ['Model C', 'Model A'],
       example_questions: [],
       greeting_message: '',
       allow_chat_metadata: false,
@@ -412,11 +435,14 @@ describe(' 模型可用性过滤与主模型回退', () => {
     await waitFor(() => {
       expect(h.composerProps).toBeTruthy();
     });
-    expect(h.composerProps.models.map((m: any) => m.id)).toEqual(['1']);
+    expect(h.composerProps.models).toMatchObject([
+      { id: '3', connectStatus: 'unavailable' },
+      { id: '1', connectStatus: 'available' },
+    ]);
     expect(h.composerProps.selectedModelId).toBe('1');
   });
 
-  it(' Thread useAgentModels 全部不可用时返回空列表', async () => {
+  it(' Thread 检测均未通过时保留候选且不自动选择', async () => {
     h.modelList.models = [model(1, 'Model A', 'unavailable'), model(3, 'Model C', 'unavailable')];
     const agent = {
       id: 1,
@@ -435,7 +461,10 @@ describe(' 模型可用性过滤与主模型回退', () => {
     await waitFor(() => {
       expect(h.composerProps).toBeTruthy();
     });
-    expect(h.composerProps.models).toEqual([]);
+    expect(h.composerProps.models).toMatchObject([
+      { id: '1', connectStatus: 'unavailable' },
+      { id: '3', connectStatus: 'unavailable' },
+    ]);
     expect(h.composerProps.selectedModelId).toBe('');
     expect(h.composerProps.disabled).toBe(true);
   });

@@ -140,17 +140,16 @@ export function ParamDialog({
               autoInsertSpace={false}
               onClick={onClose}
               disabled={cancelDisabled}
-              className={styles.cancelButton}
             >
               {cancelText ?? t("common.cancel")}
             </Button>
             {onConfirm && (
               <Button
+                type="primary"
                 autoInsertSpace={false}
                 onClick={onConfirm}
                 disabled={confirmDisabled}
                 loading={confirmLoading}
-                className={styles.confirmButton}
               >
                 {confirmText ?? t("common.confirm")}
               </Button>
@@ -168,14 +167,17 @@ export function ParamDialog({
 export function ParamSwitch({
   checked,
   onChange,
+  "aria-label": ariaLabel,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
+  "aria-label"?: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
+      aria-label={ariaLabel}
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={cn(
@@ -439,7 +441,7 @@ export function TestRunLink({
       data-config-part="test-run"
       onClick={onClick}
       disabled={disabled}
-      className="flex h-[22px] cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[14px] leading-[22px] text-[#2673E5] disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex h-[22px] cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[14px] leading-[22px] text-[var(--color-brand)] enabled:hover:text-[var(--color-brand-hover)] enabled:active:text-[var(--color-brand-active)] disabled:cursor-not-allowed disabled:text-[var(--color-text-disabled)]"
     >
       <RotateCw size={16} />
       {label ?? t("ui.localization.runTest")}

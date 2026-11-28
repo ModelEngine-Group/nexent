@@ -59,7 +59,7 @@ vi.mock('@/stores/agentStore', () => ({
 
 vi.mock('@/hooks/model/useModelList', () => ({
   useModelList: () => ({
-    availableLlmModels: modelList.availableLlmModels,
+    llmModels: modelList.availableLlmModels,
     isSuccess: modelList.isSuccess,
   }),
 }));

@@ -113,9 +113,9 @@ export function AgentSelectionCard({
       }}
       className={cn(
         styles.agentCard,
+        "bg-white",
         !disabled &&
           "cursor-pointer hover:!shadow-[inset_0_0_0_1px_#0067d1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-        selected ? styles.agentCardSelected : "bg-white",
         disabled && "cursor-not-allowed opacity-50"
       )}
     >

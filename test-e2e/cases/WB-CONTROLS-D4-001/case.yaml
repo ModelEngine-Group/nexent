@@ -32,7 +32,7 @@ case:
       Send is icon-only with transparent background and no border; its icon is blue with sendable text and gray when cleared,
       including hover. The new-conversation action reads 新对话 with white background and black text; sidebar collapse is a separate
       button outside the search field. Agent resources are single-column compact rows in both tabs; Mine has no edit action.
-      New conversation and icon-only search share one row with the collapse action outside the input. Search opens focused
+      Icon-only search and collapse share the sidebar title row, and the full-width new-conversation action is underneath. Search opens focused
       input, filters history, and closing clears the filter. All three Workbench resource drawers use single-column compact
       text rows with name, description and tags only; no decorative icons, source/version metadata badges or resource-edit
       actions. Both Mine and Repository preserve required selection/import/install controls.

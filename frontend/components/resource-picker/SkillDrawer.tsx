@@ -12,13 +12,14 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert } from "antd";
-import { Pencil, Settings } from "lucide-react";
+import { Pencil } from "lucide-react";
 
 import { ResourceDrawer } from "./ResourceDrawer";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { ResourceCollection, ResourceItem } from "./ResourceItem";
+import { SkillConfigButton } from "./SkillConfigButton";
 import { fetchSkillInstances } from "@/services/agentConfigService";
 import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
 import SkillConfigModal from "@/components/skill-config/SkillConfigModal";
@@ -556,22 +557,11 @@ export function SkillDrawer({
                           <Pencil className="size-4" />
                         </button>
                       )}
-                      <button
-                        type="button"
-                        disabled={
-                          isReadOnly || saving || !hasConfigurableParams
-                        }
+                      <SkillConfigButton
+                        disabled={isReadOnly || saving}
+                        hasParameters={hasConfigurableParams}
                         onClick={(event) => openSkillConfig(skill, event)}
-                        aria-label={t("skillPool.configure")}
-                        title={t(
-                          hasConfigurableParams
-                            ? "skillPool.configure"
-                            : "resourcePicker.skill.noParameters"
-                        )}
-                        className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        <Settings className="size-4" />
-                      </button>
+                      />
                     </div>
                   ),
                 }}

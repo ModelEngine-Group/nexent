@@ -209,7 +209,6 @@
   "workbench.controls.searchSkills": "Search skills by name or description",
   "workbench.controls.searchKnowledge": "Search knowledge bases by name or description",
   "workbench.controls.searchKnowledgeLabel": "Search knowledge bases",
-  "workbench.controls.requiredConfig": "Required configuration is missing",
   "workbench.controls.restoreDefaults": "Restore defaults",
   "workbench.controls.skillLoadFailed": "Failed to load skills",
   "workbench.controls.skillInstallMissingId": "The installation response has no skill ID. Refresh to check the result.",

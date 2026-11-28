@@ -209,7 +209,6 @@
   "workbench.controls.searchSkills": "搜索 Skill 名称或描述",
   "workbench.controls.searchKnowledge": "搜索名称或描述",
   "workbench.controls.searchKnowledgeLabel": "搜索知识库",
-  "workbench.controls.requiredConfig": "需要填写必填配置",
   "workbench.controls.restoreDefaults": "恢复默认",
   "workbench.controls.skillLoadFailed": "Skill 加载失败",
   "workbench.controls.skillInstallMissingId": "安装响应缺少 Skill ID，请刷新后检查安装结果",

@@ -3,7 +3,6 @@
 "use client";
 
 import { ResourcePickerPresentation } from "@/features/workbench/components/ResourcePickerPresentation";
-import { ResourceTagFilter } from "@/features/workbench/components/ResourceTagFilter";
 import { useResourceTags } from "@/features/workbench/hooks/useResourceTags";
 
 import { ResourceSelectionActions } from "@/features/workbench/components/ResourceSelectionActions";
@@ -37,6 +36,8 @@ import type {
 import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
 import { ResourceCard } from "@/features/workbench";
 import { KnowledgeSelectionList } from "@/components/resource-picker/KnowledgeSelectionList";
+import { ResourceTagFilterControl } from "@/components/resource-picker/ResourceTagFilterControl";
+import drawerStyles from "@/components/resource-picker/ResourcePickerDrawer.module.css";
 import { WorkbenchResourceDrawer } from "@/features/workbench/components/WorkbenchResourceDrawer";
 import { RESOURCE_PAGE_SIZE } from "@/features/workbench/components/ResourcePagination";
 import { RestoreDefaultsButton } from "@/features/workbench/components/RestoreDefaultsButton";
@@ -711,20 +712,6 @@ export const ConversationKnowledgeScopeModal: FC<
                 ? t("chat.knowledgeScope.embeddingMismatch")
                 : undefined,
           }}
-          slots={{
-            renderTags: (item) => (
-              <>
-                {(item.tags ?? []).map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded bg-muted px-1.5 text-xs text-muted-foreground"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </>
-            ),
-          }}
         />
       );
     }
@@ -962,6 +949,7 @@ export const ConversationKnowledgeScopeModal: FC<
         (!!tags.predicates.length && tags.loading)
       }
       picker={{
+        bodyClassName: `${drawerStyles.drawer} ${drawerStyles.knowledge}`,
         keyword: search,
         searchPlaceholder: t(
           "resourcePicker.search.knowledge",
@@ -970,7 +958,10 @@ export const ConversationKnowledgeScopeModal: FC<
         onSearch: setSearch,
         tagFilter:
           source === "local" ? (
-            <ResourceTagFilter filter={tags} onChange={() => setPage(1)} />
+            <ResourceTagFilterControl
+              filter={tags}
+              onChange={() => setPage(1)}
+            />
           ) : undefined,
         listTitle: t("resourcePicker.list.knowledge", "知识库列表"),
         selected: drawerKnowledge
@@ -1090,11 +1081,11 @@ export const ConversationKnowledgeScopeModal: FC<
           <Spin spinning={loading || !isDeploymentReady}>
             {configuredSource ? (
               <div className="space-y-3 py-2">
-                <ResourceTagFilter
-                  filter={tags}
-                  onChange={() => setPage(1)}
-                  showFilter={false}
-                  search={
+                <div
+                  className="flex min-w-0 items-center gap-2"
+                  data-resource-search-row
+                >
+                  <div className="min-w-0 flex-1">
                     <Input.Search
                       aria-label={t("workbench.controls.searchKnowledgeLabel")}
                       value={search}
@@ -1102,8 +1093,8 @@ export const ConversationKnowledgeScopeModal: FC<
                       placeholder={t("workbench.controls.searchKnowledge")}
                       allowClear
                     />
-                  }
-                />
+                  </div>
+                </div>
                 {renderSource(configuredSource, "all")}
               </div>
             ) : (

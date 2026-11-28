@@ -120,11 +120,6 @@
   padding: 16px 24px;
 }
 
-/* Fade at 45 degrees toward the bottom right; the top-right corner is white. */
-.agentCardSelected {
-  background: linear-gradient(135deg, #e3f5ff 0%, #fff 70%);
-}
-
 .agentMetadata {
   display: flex;
   height: 18px;
