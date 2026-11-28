@@ -576,6 +576,77 @@ export const conversationService = {
       return new WebSocket(getWebSocketUrl(API_ENDPOINTS.tts.ws));
     },
 
+    /** Use the authenticated tenant's default TTS model and collect its audio frames. */
+    synthesize(text: string, signal: AbortSignal): Promise<Blob> {
+      return new Promise((resolve, reject) => {
+        signal.throwIfAborted();
+        const socket = this.createWebSocket();
+        socket.binaryType = "arraybuffer";
+        const chunks: ArrayBuffer[] = [];
+        let timer: ReturnType<typeof setTimeout>;
+
+        const cleanup = () => {
+          clearTimeout(timer);
+          signal.removeEventListener("abort", abort);
+          socket.onopen = null;
+          socket.onmessage = null;
+          socket.onerror = null;
+          socket.onclose = null;
+          socket.close();
+        };
+        const fail = (error: unknown) => {
+          cleanup();
+          reject(error);
+        };
+        const abort = () => fail(signal.reason);
+        const resetTimeout = () => {
+          clearTimeout(timer);
+          timer = setTimeout(
+            () => fail(new Error("TTS response timed out")),
+            60_000
+          );
+        };
+
+        signal.addEventListener("abort", abort, { once: true });
+        resetTimeout();
+        socket.onopen = () => {
+          try {
+            socket.send(JSON.stringify({ text }));
+          } catch (error) {
+            fail(error);
+          }
+        };
+        socket.onmessage = ({ data }) => {
+          if (data instanceof ArrayBuffer) {
+            if (data.byteLength) {
+              chunks.push(data);
+              resetTimeout();
+            }
+            return;
+          }
+          try {
+            const event = JSON.parse(data);
+            if (event.error) {
+              fail(new Error("TTS service returned an error"));
+            } else if (event.status === "completed") {
+              if (!chunks.length) {
+                fail(new Error("TTS service returned no audio"));
+                return;
+              }
+              cleanup();
+              resolve(new Blob(chunks, { type: "audio/mpeg" }));
+            }
+          } catch (error) {
+            fail(error);
+          }
+        };
+        socket.onerror = () =>
+          fail(new Error("TTS WebSocket connection failed"));
+        socket.onclose = () =>
+          fail(new Error("TTS WebSocket closed before completion"));
+      });
+    },
+
     // TTS playback status management
     createTTSService() {
       const audioRef = { current: null as HTMLAudioElement | null };

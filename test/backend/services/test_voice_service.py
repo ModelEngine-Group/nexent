@@ -94,6 +94,43 @@ def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=N
 # ---------------------------------------------------------------------------
 import runtime.model.voice
 from runtime.model.voice import VoiceService, get_voice_service
+from runtime.model.health import _perform_connectivity_check
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("model_name", "expected_resource"), [
+    ("speech_istreaming", "volc.bigasr.sauc.duration"),
+    ("legacy-custom-name", "volc.bigasr.sauc.duration"),
+    ("volc.seedasr.sauc.duration", "volc.seedasr.sauc.duration"),
+])
+async def test_volc_stt_probe_and_chat_use_the_same_resource(model_name, expected_resource):
+    """Both entry points route the submitted model name to the appropriate resource."""
+    ws_url = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+    service = VoiceService()
+    websocket = AsyncMock()
+    with patch("runtime.model.health.get_voice_service", return_value=service), patch(
+        "runtime.model.voice.VolcSTTModel", return_value=MockSTTModel()
+    ) as model_class:
+        connected = await _perform_connectivity_check(
+            model_name=model_name, model_type="stt", model_base_url=ws_url,
+            model_api_key="", model_factory="volcengine",
+            model_appid="test_app", access_token="test_token",
+        )
+        assert connected is True
+        await service.start_stt_streaming_session(websocket, stt_config={
+            "model": model_name, "model_factory": "volcengine",
+            "model_appid": "test_app", "access_token": "test_token", "base_url": ws_url,
+        })
+
+    assert model_class.call_count == 2
+    expected_url = f"{ws_url}_async" if model_name == "volc.seedasr.sauc.duration" else ws_url
+    for call in model_class.call_args_list:
+        config = call.args[0]
+        assert config.resourceid == expected_resource
+        assert config.ws_url == expected_url
+        assert config.appid == "test_app"
+        assert config.access_token == "test_token"
+    model_class.return_value.start_streaming_session.assert_awaited_once_with(websocket)
 
 
 # ---------------------------------------------------------------------------

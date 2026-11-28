@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for Ali STT model.
 
@@ -80,7 +81,7 @@ class TestAliSTTConfig:
         assert config.timeout == 60
         assert config.enable_vad is True
         assert config.vad_threshold == 0.5
-        assert config.vad_silence_duration_ms == 2000
+        assert config.vad_silence_duration_ms == 4000
 
     def test_config_custom_values(self):
         """Test AliSTTConfig with custom values."""
@@ -983,8 +984,12 @@ class TestAliSTTModelStreamingSession:
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             await ali_model.start_streaming_session(mock_ws_client)
+
+        session_update = json.loads(mock_ws_server.send.await_args_list[0].args[0])
+        assert session_update["type"] == "session.update"
+        assert session_update["session"]["turn_detection"]["silence_duration_ms"] == 4000
 
     @pytest.mark.asyncio
     async def test_start_streaming_session_client_disconnect_before_audio(self, ali_model):

@@ -83,31 +83,48 @@
 
 #### 🔃 重排模型
 使用与大语言模型相同的API Key，但模型URL一般会有所差异，一般以`/v1/rerank`为结尾。
-#### 🎤 语音模型
 
-目前支持阿里灵积和火山引擎语音模型，阿里灵积需配置与大语言模型相同的apikey，火山引擎模型需配置appid与token
+### 🎤 语音模型
 
-**火山引擎**
-- **网站**: [volcengine.com/product/voice-tech](https://www.volcengine.com/product/voice-tech)
-- **免费额度**: 个人使用可用
-- **特色**: 高质量中英文语音合成
-- 推荐使用**豆包语音合成模型2.0和大模型流式语音识别模型**
-- **开始使用**:
+**语音识别（STT）**将麦克风录入的语音转为聊天输入文字。**语音合成（TTS）**用于朗读助手回复。这两类模型可以分别配置。
 
-   1. 注册火山引擎账户
-   2. 访问语音技术服务
-   3. 创建应用并获取appid和token
-   4. 在添加模型页面中配置 TTS/STT 设置
+#### 阿里云百炼（DashScope）
 
-**阿里灵积**
-- **网站**: [aliyun.com/benefit/scene/voice](https://www.aliyun.com/benefit/scene/voice)
-- 推荐使用**千问3-TTS-Instruct-Flash-Realtime/千问3-TTS-Flash-Realtime和千问3-ASR-Flash-Realtime**
-- **开始使用**:
+1. 在百炼业务空间创建 **API Key**，确认密钥所属地域与接口地址一致。[百炼 API Key 指南](https://help.aliyun.com/zh/model-studio/get-api-key)
+2. 在 Nexent 进入 **模型库 → 添加模型 → 单个添加**，**服务商**选 **自定义**。按下表填写模型类型和模型名称，在主表单填写 **API Key**。
 
-   1. 注册阿里云账户
-   2. 访问阿里千问实时语音技术服务
-   3. 创建应用并获取 API Key
-   4. 在添加模型页面中配置 TTS/STT 设置
+   | 模型类型 | 模型名称 | Base URL（华北 2，北京） |
+   | --- | --- | --- |
+   | 语音识别模型 | `qwen3-asr-flash-realtime` | `wss://dashscope.aliyuncs.com/api-ws/v1/realtime` |
+   | 语音合成模型 | `qwen3-tts-flash-realtime` | `wss://dashscope.aliyuncs.com/api-ws/v1/realtime` |
+
+3. 如需指定语音服务商，在 **高级设置** 的 **STT 服务商**或 **TTS 服务商**中选 `dashscope`，保存后检测连通性。
+
+语音模型使用 `wss://` 地址。使用北京业务空间专属域名接入语音识别时，可填 `wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime`，并替换 `{WorkspaceId}`。Nexent 会自动追加 `?model=...`，Base URL 只填到 `/realtime`。[百炼实时语音识别](https://help.aliyun.com/zh/model-studio/qwen-asr-realtime-interaction-process) · [百炼实时语音合成](https://help.aliyun.com/zh/model-studio/interactive-process-of-qwen-tts-realtime-synthesis)
+
+#### 火山引擎（豆包语音）
+
+1. 打开[豆包语音控制台](https://console.volcengine.com/speech/app)，在左上角切换到 **旧版**。在 **API 服务中心** 选择已开通对应服务的应用，从 **服务接口认证信息** 获取 **App ID** 和 **Access Token**。当前 Nexent 的火山语音接入使用这组凭据。[火山控制台指引](https://docs.volcengine.com/docs/doubao-voice/console-guidance?lang=zh)
+2. 在 Nexent 选择 **模型库 → 添加模型 → 单个添加**，**服务商**选 **自定义**，按已开通的服务填写下表对应的一行。
+
+   | 模型类型 | 火山服务 | Nexent 模型名称 | Base URL |
+   | --- | --- | --- | --- |
+   | 语音识别模型 | 豆包流式语音识别 1.0 小时版 | `speech_istreaming` | `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel` |
+   | 语音识别模型 | 豆包流式语音识别 2.0 小时版 | `volc.seedasr.sauc.duration` | `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async` |
+   | 语音合成模型 | 火山语音合成（内置配置） | `speech_tts` | `wss://openspeech.bytedance.com/api/v1/tts/ws_binary` |
+
+3. 点 **高级设置**，将 **STT 服务商**或 **TTS 服务商**设为 `volcengine`，填写 **App ID** 和 **Access Token**，再点 **保存**。主表单的 **API Key** 留空。
+
+语音识别的 **1.0／2.0** 是服务版本，**小时版**按识别时长计费。选择与你的应用已开通版本一致的模型名称。Nexent 会发送对应的资源 ID。[火山实时语音识别接口](https://docs.volcengine.com/docs/doubao-voice/bidirectional-streaming-automatic-speech-recognition-websocket?lang=zh)
+
+Nexent 内置的 `speech_tts` 配置使用资源 ID `seed-tts-2.0` 和表中的旧版 WebSocket 地址。请通过连通性检测确认你的应用可以访问该接口。[火山旧版语音合成接口](https://docs.volcengine.com/docs/doubao-voice/websocket-interface?lang=zh)
+
+#### 检测并在聊天中使用
+
+1. 点 **检测连通性**，显示 **已连通**后点 **添加模型**。火山检测失败时，先确认高级设置已保存，并核对应用开通的服务版本、模型名称和 Base URL。
+2. 回到 **默认配置**，在 **语音识别模型**或 **语音合成模型**下拉框中选中刚添加的模型。只添加到模型库时，还需要这一步才能在聊天中使用。
+3. **语音输入**：在聊天输入框旁点击麦克风，按浏览器提示允许使用麦克风。说完再点一次停止，转写文字会进入输入框，可编辑后发送。
+4. **朗读回复**：在助手回复的操作栏点喇叭图标 **朗读**，再点一次可停止。选定默认语音合成模型后，聊天才会显示此按钮。
 
 ## 💡 需要帮助
 

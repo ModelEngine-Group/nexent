@@ -45,6 +45,18 @@ def test_independent_images_do_not_package_other_service_implementations():
     assert not sql_sources
 
 
+def test_runtime_image_packages_stt_connectivity_sample():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    runtime = dockerfile.split(" AS runtime\n", 1)[1].split("\nFROM ", 1)[0]
+    sample = "backend/assets/test_voice.pcm"
+    assert (ROOT / sample).stat().st_size > 0
+    assert any(
+        parts[0] == "COPY" and sample in parts[1:-1] and parts[-1] == "/opt/backend/assets/"
+        for line in runtime.replace("\\\n", " ").splitlines()
+        if (parts := line.split())
+    )
+
+
 def test_management_packages_creator_imports_without_sharing_them_with_runtime():
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
     nl2agent_sources = {"backend/services/__init__.py"} | {

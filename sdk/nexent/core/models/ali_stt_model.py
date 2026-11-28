@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import base64
 import json
@@ -32,7 +33,7 @@ class AliSTTConfig:
         timeout: int = 60,
         enable_vad: bool = True,
         vad_threshold: float = 0.5,
-        vad_silence_duration_ms: int = 2000,
+        vad_silence_duration_ms: int = 4000,
     ):
         self.api_key = api_key
         self.model = model
@@ -534,7 +535,6 @@ class AliSTTModel(BaseSTTModel):
                 logger.info(f"STT server session created: {response}")
 
                 # Session update with VAD (matching official example)
-                # VAD settings: threshold 0.5 (balanced), silence 2000ms (wait longer before ending turn)
                 session_update = {
                     "event_id": "event_123",
                     "type": "session.update",
