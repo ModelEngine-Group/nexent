@@ -128,21 +128,6 @@ class TestChunkMetadataBatchEndpoints:
         assert edit_metadata.call_args.kwargs["async_mode"] is True
         assert response.json() == result
 
-    def test_sync_tags_uses_the_path_kb_id(self):
-        from ext_components.aidp.apps import aidp_chunk_routes
-
-        with patch.object(self._perms(), "require_permission",
-                          return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_chunk_routes, "sync_ontology_tags_impl",
-                          return_value={"task_id": 10086}) as sync_tags:
-            response = _client().post(
-                "/aidp-mgmt/knowledge-bases/7/tags/sync",
-                headers=_bearer(),
-            )
-        assert response.status_code == HTTPStatus.OK
-        assert sync_tags.call_args.kwargs["kb_ids"] == [7]
-        assert response.json() == {"task_id": 10086}
-
 
 class TestOntologyChunkMetadataEndpoints:
     """Ontology-domain chunk metadata export/import/unbind/tag-sync proxies."""

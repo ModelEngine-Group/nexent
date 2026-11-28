@@ -152,7 +152,7 @@ async def get_ontology_domain(
     request: Request,
     domain_id: Annotated[str, _domain_id_path()],
 ) -> JSONResponse:
-    await _auth(request)
+    user_id, tenant_id = await _auth(request)
     server_url, api_key = _credentials()
 
     async def load_entity_count() -> int | None:
@@ -203,7 +203,7 @@ async def get_ontology_domain(
             lane="control-io",
             owner="config",
         ),
-        _binding_count(domain_id),
+        _binding_count(domain_id, user_id, tenant_id),
         load_entity_count(),
         load_metadata_count(),
     )
@@ -235,7 +235,7 @@ async def update_ontology_domain(
         lane="control-io",
         owner="config",
     )
-    count = await _binding_count(domain_id)
+    count = await _binding_count(domain_id, user_id, tenant_id)
     return JSONResponse(
         status_code=HTTPStatus.OK, content=_domain_summary(result, count)
     )

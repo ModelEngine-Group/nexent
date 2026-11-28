@@ -90,7 +90,6 @@ export interface AidpOntologyBinding {
   kds_id: string;
   kds_name?: string | null;
   description?: string | null;
-  create_time?: string | null;
 }
 
 export interface AidpOntologyBindingListResponse {
@@ -108,9 +107,6 @@ export interface AidpOntologyMetadataField {
   field_name: string;
   field_type: AidpMetadataFieldType;
   column_index?: number | null;
-  /** AIDP does not return audit times for definitions; the columns show —. */
-  create_time?: string | null;
-  update_time?: string | null;
 }
 
 export interface AidpOntologyMetadataFieldListResponse {

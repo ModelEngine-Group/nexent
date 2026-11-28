@@ -40,9 +40,6 @@ from ext_components.aidp.services.aidp_chunk_service import (
     update_aidp_chunk_impl,
     update_chunk_metadata_impl,
 )
-from ext_components.aidp.services.aidp_ontology_metadata_service import (
-    sync_ontology_tags_impl,
-)
 
 
 aidp_chunk_router = APIRouter()
@@ -487,35 +484,6 @@ async def update_chunk(
         kds_id,
         chunk_id,
         body.chunk_text,
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-
-@aidp_chunk_router.post("/knowledge-bases/{kds_id}/tags/sync")
-async def sync_knowledge_base_tags(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-) -> JSONResponse:
-    """Trigger AIDP's incremental auto-tagging for this knowledge base.
-
-    The knowledge base must be bound to an ontology domain; AIDP validates
-    that and reports a business error otherwise. Tagging runs asynchronously
-    and the tags surface on later chunk reads (``tag`` field).
-    """
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-
-    kb_id: int | str = int(kds_id) if str(kds_id).isdigit() else kds_id
-    server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-sync-chunk-tags",
-        sync_ontology_tags_impl,
-        server_url,
-        api_key,
-        kb_ids=[kb_id],
-        tenant_id=tenant_id,
         lane="control-io",
         owner="config",
     )

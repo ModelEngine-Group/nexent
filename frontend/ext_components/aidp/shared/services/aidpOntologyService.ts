@@ -168,6 +168,16 @@ class AidpOntologyService {
     );
   }
 
+  syncOntologyTags(kbIds: number[]): Promise<{
+    task_id?: number | string | null;
+    task_type?: string | null;
+  }> {
+    return jsonRequest(API_ENDPOINTS.aidpMgmt.ontology.tagSync, {
+      method: "POST",
+      body: JSON.stringify({ kb_ids: kbIds }),
+    });
+  }
+
   createBinding(
     domainId: string,
     kdsId: string

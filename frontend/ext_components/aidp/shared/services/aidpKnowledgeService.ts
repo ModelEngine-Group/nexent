@@ -860,17 +860,6 @@ class AidpKnowledgeService {
     return response.json();
   }
 
-  /** Queue AIDP's incremental auto-tagging for this knowledge base. */
-  async syncKnowledgeBaseTags(
-    id: string
-  ): Promise<{ task_id?: number | string | null; message?: string }> {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.aidpMgmt.kbTagSync(id),
-      { method: "POST", headers: getAuthHeaders() }
-    );
-    return response.json();
-  }
-
   /** Export one chunk's user metadata through its ontology domain. */
   async exportChunkMetadata(
     domainId: string,

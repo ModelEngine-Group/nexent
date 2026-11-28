@@ -11,9 +11,7 @@ from typing import Any
 
 from nexent.core.concurrency import run_blocking
 
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 from contracts.errors.exceptions import AppException
-from contracts.roles import has_any_role
 from ext_components.aidp.apps.aidp_mgmt_common import _credentials
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
@@ -31,7 +29,6 @@ from ext_components.aidp.services.aidp_ontology_metadata_service import (
     list_ontology_metadata_fields_impl,
 )
 from ext_components.aidp.services.aidp_service import get_aidp_kb_impl
-from management.db.identity.user_tenant import get_user_role_by_tenant
 
 
 logger = logging.getLogger("aidp_ontology_app")
@@ -43,11 +40,11 @@ async def _load_bindings(
     *,
     domain_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Load binding rows and drop KBs the caller cannot read.
+    """Load binding rows and keep only KBs the caller can edit.
 
-    The ontology page is shared by management roles and KB owners; filtering
-    keeps names and identifiers of other tenants' knowledge bases out of the
-    response without changing the upstream count used for the domain owner.
+    The ontology page is shared by management roles and KB owners; a binding
+    row is actionable only when the caller has EDIT on that KB, so rows below
+    EDIT are dropped for every role.
     """
     server_url, api_key = _credentials()
     rows = await run_blocking(
@@ -59,16 +56,14 @@ async def _load_bindings(
         lane="control-io",
         owner="config",
     )
-    role = get_user_role_by_tenant(user_id, tenant_id)
-    # Ontology managers see every binding so the tab agrees with the trusted
-    # binding count. Other callers only see knowledge bases they can read.
-    if rows and not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
+    if rows:
         allowed = await run_blocking(
             "aidp-ontology-binding-access",
             perms.filter_accessible_kds,
             [row["kds_id"] for row in rows],
             user_id,
             tenant_id,
+            required=perms.REQUIRE_EDIT,
             lane="control-io",
             owner="config",
         )
@@ -109,14 +104,15 @@ def _enrich_bindings_sync(
                 "od_name": domain_names.get(row["od_id"]),
                 "kds_id": row["kds_id"],
                 "kds_name": kds_name,
-                "create_time": row.get("create_time"),
             }
         )
     return enriched
 
 
-async def _binding_count(domain_id: str) -> int | None:
-    """Return the trusted binding count, or ``None`` when it cannot be read."""
+async def _binding_count(
+    domain_id: str, user_id: str, tenant_id: str
+) -> int | None:
+    """Return the caller-visible (EDIT) binding count, or ``None``."""
     server_url, api_key = _credentials()
     try:
         rows = await run_blocking(
@@ -128,6 +124,19 @@ async def _binding_count(domain_id: str) -> int | None:
             lane="control-io",
             owner="config",
         )
+        if rows:
+            allowed = await run_blocking(
+                "aidp-ontology-binding-count-access",
+                perms.filter_accessible_kds,
+                [row["kds_id"] for row in rows],
+                user_id,
+                tenant_id,
+                required=perms.REQUIRE_EDIT,
+                lane="control-io",
+                owner="config",
+            )
+            allowed_set = set(allowed)
+            rows = [row for row in rows if row["kds_id"] in allowed_set]
         return len(rows)
     except AppException as error:
         logger.warning(

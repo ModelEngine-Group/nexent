@@ -1334,17 +1334,6 @@
       ]
     },
     {
-      "method": "POST",
-      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/tags/sync",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_chunk_routes.py",
-      "route_id": "route-b3f79034c9fe8599",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
       "method": "GET",
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/upload-tasks",
       "transport": "http",

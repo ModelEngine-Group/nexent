@@ -551,9 +551,6 @@ export const API_ENDPOINTS = {
     /** Batch user-metadata/tag edit; sync caps chunk_id_list at 300 ids. */
     batchUpdateKbChunks: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/batch-metadata`,
-    /** Trigger AIDP's incremental auto-tagging for one knowledge base. */
-    kbTagSync: (id: string) =>
-      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/tags/sync`,
     /** One file's AIDP summary (READ). */
     kbFileSummary: (id: string, fileUuid: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/summary`,

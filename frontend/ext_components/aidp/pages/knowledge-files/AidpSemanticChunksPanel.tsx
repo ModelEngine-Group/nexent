@@ -471,11 +471,6 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
             icon: <TagsOutlined />,
             disabled: selectedIds.length === 0,
           },
-          {
-            key: "retag",
-            label: t("aidpKnowledge.chunkRetag"),
-            icon: <TagsOutlined />,
-          },
         ]
       : []),
   ];
@@ -485,18 +480,6 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
     }
     if (key === "batch-metadata") {
       setBatchMetadataOpen(true);
-    }
-    if (key === "retag") {
-      void (async () => {
-        try {
-          await aidpKnowledgeService.syncKnowledgeBaseTags(kdsId);
-          message.success(t("aidpKnowledge.chunkRetagSubmitted"));
-        } catch (error) {
-          message.error(
-            getAidpErrorMessage(error, t, t("aidpKnowledge.chunkRetagFailed"))
-          );
-        }
-      })();
     }
   };
   const handleSaveBatchMetadata = useCallback(

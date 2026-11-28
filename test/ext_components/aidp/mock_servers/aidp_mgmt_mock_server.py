@@ -609,23 +609,20 @@ def _seed_ontology_data() -> None:
             {
                 "id": 1,
                 "od_id": 1,
-                "kds_id": "aidp-kb-faq",
+                "kds_id": "14",
                 "kb_name": "AIDP FAQ",
-                "create_time": "2026-02-01 09:00:00",
             },
             {
                 "id": 2,
                 "od_id": 1,
-                "kds_id": "aidp-kb-product",
+                "kds_id": "30",
                 "kb_name": "AIDP Product Handbook",
-                "create_time": "2026-02-01 09:05:00",
             },
             {
                 "id": 3,
                 "od_id": 2,
-                "kds_id": "aidp-kb-api",
+                "kds_id": "31",
                 "kb_name": "AIDP API Guide",
-                "create_time": "2026-02-10 14:00:00",
             },
         ]
     )
@@ -4605,6 +4602,30 @@ def _next_numeric_id(values: List[Any], prefix: int = 0) -> str:
 
 def _public_entity(item: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in item.items() if not key.startswith("_")}
+
+
+_TAG_SYNC_TASK_SEQ = 1000
+
+
+@app.post(f"{_ONTOLOGY_PREFIX}/TagSync")
+def sync_ontology_tags(
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Queue one ontology auto-tagging task for the given numeric KB ids."""
+    _check_auth(authorization)
+    kb_ids = body.get("kb_ids")
+    if (
+        not isinstance(kb_ids, list)
+        or not kb_ids
+        or any(not isinstance(item, int) or isinstance(item, bool) for item in kb_ids)
+    ):
+        raise HTTPException(status_code=400, detail="kb_ids must be a non-empty integer list")
+    global _TAG_SYNC_TASK_SEQ
+    _TAG_SYNC_TASK_SEQ += 1
+    return JSONResponse(
+        content={"task_id": _TAG_SYNC_TASK_SEQ, "task_type": "ontology_auto_extract"}
+    )
 
 
 @app.get(_ONTOLOGY_PREFIX)

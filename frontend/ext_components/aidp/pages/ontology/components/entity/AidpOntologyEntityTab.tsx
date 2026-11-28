@@ -25,6 +25,7 @@ import {
   ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
+  TagsOutlined,
 } from "@ant-design/icons";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -44,6 +45,7 @@ import type { AidpOntologyEntity } from "@/ext_components/aidp/shared/types/onto
 import styles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
 import AidpOntologyEntityDrawer from "./AidpOntologyEntityDrawer";
 import AidpOntologyEntityDetailDrawer from "./AidpOntologyEntityDetailDrawer";
+import AidpOntologyRetagModal from "./AidpOntologyRetagModal";
 import entityStyles from "./AidpOntologyEntityTab.module.css";
 
 interface AidpOntologyEntityTabProps {
@@ -80,6 +82,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(autoOpenCreate);
+  const [retagOpen, setRetagOpen] = useState(false);
   const [editing, setEditing] = useState<AidpOntologyEntity | null>(null);
   const [detailEntity, setDetailEntity] = useState<AidpOntologyEntity | null>(
     null
@@ -584,6 +587,14 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
             icon={<ReloadOutlined spin={query.isFetching} />}
             onClick={refresh}
           />
+          {canManage && (
+            <Button
+              icon={<TagsOutlined />}
+              onClick={() => setRetagOpen(true)}
+            >
+              {t("aidpKnowledge.ontologyRetagTitle")}
+            </Button>
+          )}
           <Button
             disabled={!canManage || selectedKeys.length === 0}
             onClick={handleBatchDelete}
@@ -766,6 +777,17 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
         onDelete={(record) => {
           setDetailEntity(null);
           handleDelete(record);
+        }}
+      />
+
+      <AidpOntologyRetagModal
+        open={retagOpen}
+        domainId={domainId}
+        onClose={() => setRetagOpen(false)}
+        onSubmitted={() => {
+          void queryClient.invalidateQueries({
+            queryKey: [...scope.key, "ontology-bindings", domainId],
+          });
         }}
       />
     </div>

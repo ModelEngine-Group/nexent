@@ -34,7 +34,6 @@ def _normalize_binding(item: dict[str, Any]) -> dict[str, Any] | None:
         "kds_name": item.get("kb_name")
         or item.get("kds_name")
         or item.get("knowledge_base_name"),
-        "create_time": item.get("create_time"),
     }
 
 

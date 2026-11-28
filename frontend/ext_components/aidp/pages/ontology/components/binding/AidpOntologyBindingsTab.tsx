@@ -221,7 +221,6 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
     useAidpOntologyColumnWidths(columnKeys, {
       kds_name: 1.5,
       description: 1.9,
-      create_time: 1.2,
       actions: 0.9,
     });
   const resizableColumns = columns.map((column, index) => {

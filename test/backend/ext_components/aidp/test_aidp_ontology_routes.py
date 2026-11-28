@@ -102,7 +102,7 @@ def _allow_manager(monkeypatch):
 def _patch_domain_helpers(monkeypatch):
     from ext_components.aidp.apps import aidp_ontology_domain_routes as routes
 
-    async def binding_count(_domain_id):
+    async def binding_count(*_args, **_kwargs):
         return 1
 
     async def reconcile(*_a, **_kw):
@@ -726,7 +726,7 @@ def test_domain_count_failures_degrade(monkeypatch):
 
     _allow_manager(monkeypatch)
 
-    async def failing_count(_domain_id):
+    async def failing_count(*_args, **_kwargs):
         raise routes.AppException(_Code(), "down")
 
     monkeypatch.setattr(routes, "_binding_count", failing_count)
