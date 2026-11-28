@@ -25,11 +25,13 @@ from management.services.permission.identity import northbound as nb
 
 
 def make_request(path="/nb/v1/automations", method="GET", headers=None):
+    # Starlette headers are case-insensitive; normalize the fake the same way
+    # so request-id lookups behave like the real request.
     return SimpleNamespace(
         scope={"path": path},
         url=SimpleNamespace(path=path),
         method=method,
-        headers=headers or {},
+        headers={str(k).lower(): v for k, v in (headers or {}).items()},
         state=SimpleNamespace(),
     )
 

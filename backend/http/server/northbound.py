@@ -23,6 +23,7 @@ from contracts.constants.environment import (
     NORTHBOUND_RATE_LIMIT_PER_MINUTE,
 )
 from contracts.errors.exceptions import LimitExceededError
+from backend.http.server.request_context import get_request_id
 from infrastructure.rdb.token_usage import log_token_usage
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,10 @@ def record_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None
     ):
         return
     try:
-        request_id = request.headers.get("X-Request-Id") if request is not None else None
+        # Same resolution order as the response envelope (header, then the id
+        # bound to the request by the identity dependency, then a fresh one),
+        # so a usage row can be correlated with the requestId the client saw.
+        request_id = get_request_id(request) if request is not None else str(uuid.uuid4())
         # call_function_name is VARCHAR(100): store the stable route template
         # (e.g. /nb/v1/file/download/{object_name:path}), never the raw object
         # path, which can legally exceed the column. The full path stays in
@@ -158,7 +162,7 @@ def record_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None
             related_id=None,
             created_by=principal.user_id,
             metadata={"method": request.method if request is not None else None,
-                      "request_id": request_id or str(uuid.uuid4()),
+                      "request_id": request_id,
                       "path": path},
         )
     except Exception as exc:

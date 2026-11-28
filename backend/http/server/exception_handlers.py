@@ -180,6 +180,23 @@ def register_exception_handlers(app: FastAPI) -> None:
             return JSONResponse(status_code=domain_body["status"], content=domain_body)
 
         logger.error(f"Generic Exception: {exc}")
+        # This catch-all runs in the outermost ServerErrorMiddleware, ahead of
+        # any service response middleware, so northbound paths must get their
+        # published three-field contract body here: the envelope middleware
+        # never sees an uncaught exception's response.
+        from backend.http.server.northbound import is_northbound_path
+
+        if request is not None and is_northbound_path(
+                request.scope.get("path") or str(getattr(request.url, "path", ""))):
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "code": "INTERNAL_ERROR",
+                    "message": "Internal server error, please try again later.",
+                    "status": 500,
+                    "requestId": get_request_id(request),
+                },
+            )
         return JSONResponse(
             status_code=500,
             content={"message": "Internal server error, please try again later."},

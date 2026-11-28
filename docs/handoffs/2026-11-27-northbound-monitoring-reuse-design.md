@@ -184,14 +184,14 @@ sequenceDiagram
 | monitoring.models.summary | GET | models/summary | 模型监控汇总 |
 | monitoring.models.rankings | GET | models/rankings | 模型 Top 5 |
 | monitoring.models.trends | GET | models/trends | 模型趋势 |
-| monitoring.models.refresh | POST | models/refresh | 触发重算（202，限流） |
-| monitoring.models.refresh_status | GET | models/refreshes/{refresh_id} | 重算状态 |
+| monitoring.models.refresh | POST | models/refresh | 提交重算等待令牌（202，限流） |
+| monitoring.models.refresh_status | GET | models/refreshes/{refresh_id} | 源版本发布进度 |
 | monitoring.skills.list | GET | skills | 技能监控列表 |
 | monitoring.skills.summary | GET | skills/summary | 技能监控汇总 |
 | monitoring.skills.rankings | GET | skills/rankings | 技能 Top 5 |
 | monitoring.skills.trends | GET | skills/trends | 技能趋势 |
-| monitoring.skills.refresh | POST | skills/refresh | 触发重算（202，限流） |
-| monitoring.skills.refresh_status | GET | skills/refreshes/{refresh_id} | 重算状态 |
+| monitoring.skills.refresh | POST | skills/refresh | 提交重算等待令牌（202，限流） |
+| monitoring.skills.refresh_status | GET | skills/refreshes/{refresh_id} | 源版本发布进度 |
 | monitoring.agents.list | GET | agents | Agent 监控列表 |
 | monitoring.agents.summary | GET | agents/summary | Agent 监控汇总（含 Token 用量） |
 | monitoring.agents.trends | GET | agents/trends | Agent 趋势 |
@@ -202,8 +202,15 @@ sequenceDiagram
 | monitoring.mcp_tools.trends | GET | mcp-tools/trends | MCP 调用趋势 |
 | monitoring.mcp_tools.catalog | GET | mcp-tools/catalog | MCP 服务目录（筛选项） |
 | monitoring.mcp_tools.overview | GET | mcp-tools/overview | 平台总览 |
-| monitoring.mcp_tools.refresh | POST | mcp-tools/refresh | 触发重算（202，限流） |
-| monitoring.mcp_tools.refresh_status | GET | mcp-tools/refreshes/{refresh_id} | 重算状态 |
+| monitoring.mcp_tools.refresh | POST | mcp-tools/refresh | 提交重算等待令牌（202，限流） |
+| monitoring.mcp_tools.refresh_status | GET | mcp-tools/refreshes/{refresh_id} | 源版本发布进度 |
+
+### 3.1 refresh 的真实语义（评审勘误）
+
+`POST .../refresh` **不创建重算任务**：它读取区间当前的 `source_revision`
+并签发轮询令牌；`GET .../refreshes/{id}` 轮询该源版本是否已发布为可查询
+统计（读己之写）。源版本已发布时首次轮询即 `completed`；区间无源数据时
+POST 返回 409。文档（zh/en）已按此语义表述。
 
 ## 4. 请求与响应示例
 
@@ -227,7 +234,7 @@ curl -X GET "https://your-nexent-domain.com/nb/v1/monitoring/models/summary?star
 }
 ```
 
-触发重算（动作类，受限流约束）：
+提交重算等待令牌（读己之写：等待当前源版本发布；动作类，受限流约束）：
 
 ```bash
 curl -X POST "https://your-nexent-domain.com/nb/v1/monitoring/models/refresh" \

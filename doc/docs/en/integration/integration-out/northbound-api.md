@@ -952,14 +952,14 @@ read monitoring data for the tenant that owns the API key: passing a
 | `/nb/v1/monitoring/models/summary` | GET | Model monitoring summary |
 | `/nb/v1/monitoring/models/rankings` | GET | Top 5 models |
 | `/nb/v1/monitoring/models/trends` | GET | Model usage trends |
-| `/nb/v1/monitoring/models/refresh` | POST | Trigger model recompute (async, 202) |
-| `/nb/v1/monitoring/models/refreshes/{refresh_id}` | GET | Query recompute status |
+| `/nb/v1/monitoring/models/refresh` | POST | Submit a model recompute wait token (202) |
+| `/nb/v1/monitoring/models/refreshes/{refresh_id}` | GET | Query source revision publication progress |
 | `/nb/v1/monitoring/skills` | GET | Skill monitoring list |
 | `/nb/v1/monitoring/skills/summary` | GET | Skill monitoring summary |
 | `/nb/v1/monitoring/skills/rankings` | GET | Top 5 skills |
 | `/nb/v1/monitoring/skills/trends` | GET | Skill usage trends |
-| `/nb/v1/monitoring/skills/refresh` | POST | Trigger skill recompute (async, 202) |
-| `/nb/v1/monitoring/skills/refreshes/{refresh_id}` | GET | Query recompute status |
+| `/nb/v1/monitoring/skills/refresh` | POST | Submit a skill recompute wait token (202) |
+| `/nb/v1/monitoring/skills/refreshes/{refresh_id}` | GET | Query source revision publication progress |
 | `/nb/v1/monitoring/agents` | GET | Agent monitoring list |
 | `/nb/v1/monitoring/agents/summary` | GET | Agent monitoring summary (incl. token usage) |
 | `/nb/v1/monitoring/agents/trends` | GET | Agent execution trends |
@@ -970,8 +970,8 @@ read monitoring data for the tenant that owns the API key: passing a
 | `/nb/v1/monitoring/mcp-tools/trends` | GET | MCP call trends |
 | `/nb/v1/monitoring/mcp-tools/catalog` | GET | MCP service catalog (filter options) |
 | `/nb/v1/monitoring/mcp-tools/overview` | GET | Platform overview (per-tenant inventory and call trend) |
-| `/nb/v1/monitoring/mcp-tools/refresh` | POST | Trigger MCP recompute (async, 202) |
-| `/nb/v1/monitoring/mcp-tools/refreshes/{refresh_id}` | GET | Query recompute status |
+| `/nb/v1/monitoring/mcp-tools/refresh` | POST | Submit an MCP recompute wait token (202) |
+| `/nb/v1/monitoring/mcp-tools/refreshes/{refresh_id}` | GET | Query source revision publication progress |
 
 ### Common Query Parameters
 
@@ -1000,6 +1000,18 @@ dashboard-native body (its `data` result field plus the `data_as_of` /
   }
 }
 ```
+
+### Semantics of the recompute wait token
+
+`POST .../refresh` **does not create a recompute job**: it reads the current
+source data revision (`source_revision`) for the selected window and issues a
+polling token. The caller then polls `GET .../refreshes/{refresh_id}` until
+that source revision has been published as queryable statistics (a
+read-your-writes semantic). When the source revision is already published, the
+first poll returns `completed` immediately; when the window has no confirmed
+source data, the POST answers `409 MONITORING_DATES_UNCOVERED` (with
+`missing_dates`). While waiting the status is `running`; a timeout is
+reported as `timed_out`.
 
 Error responses use the three-field shape `{code, message, status, requestId}`.
 Common errors: `403 HTTP_403` (tenant mismatch), `404 HTTP_404` (recompute job

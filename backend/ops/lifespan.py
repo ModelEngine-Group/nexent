@@ -25,12 +25,18 @@ def create_trajectory_workers():
 @asynccontextmanager
 async def ops_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Own readiness, managed I/O and all enabled operations resources."""
+    from infrastructure.redis.run_state import runtime_state_service
+
     manager = create_thread_manager()
     workers = None
     app.state.thread_manager = manager
     async with AsyncExitStack() as stack:
         try:
             manager.start()
+            # The northbound rate limiter (and any other Redis state call in
+            # this process) runs its blocking pipeline I/O on the bounded
+            # control-io lane instead of the request event loop.
+            runtime_state_service.set_thread_manager(manager)
             if trajectory_enabled():
                 workers = create_trajectory_workers()
                 workers.start(manager)
@@ -42,6 +48,7 @@ async def ops_lifespan(app: FastAPI) -> AsyncIterator[None]:
             yield
         finally:
             app.state.ready = False
+            runtime_state_service.set_thread_manager(None)
             try:
                 if workers is not None:
                     await workers.stop(manager)

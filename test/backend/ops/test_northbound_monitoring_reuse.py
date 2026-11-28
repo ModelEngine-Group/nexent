@@ -324,7 +324,8 @@ def test_record_api_key_usage_writes_the_same_ledger_fields(monkeypatch):
     monkeypatch.setattr(shared, "log_token_usage", fake_log)
     request = SimpleNamespace(
         url=SimpleNamespace(path="/nb/v1/monitoring/models/summary"),
-        method="GET", headers={"X-Request-Id": "req-42"},
+        method="GET", headers={"x-request-id": "req-42"},
+        state=SimpleNamespace(request_id=None),
         scope={"route": SimpleNamespace(path="/nb/v1/monitoring/models/summary")},
     )
     principal = AuthenticatedIdentity(user_id="partner-user", tenant_id="tenantA",
@@ -361,7 +362,7 @@ def test_record_api_key_usage_skips_legacy_self_accounting_routes(monkeypatch):
     principal = AuthenticatedIdentity(user_id="u", tenant_id="t", token_id=7,
                                       kind=CredentialKind.API_KEY)
     request = SimpleNamespace(url=SimpleNamespace(path="/nb/v1/chat/run"), method="POST",
-                              headers={}, scope={})
+                              headers={}, state=SimpleNamespace(request_id=None), scope={})
     shared.record_api_key_usage(principal, request)
     assert calls == []
 
@@ -563,10 +564,10 @@ def test_record_usage_skips_legacy_self_accounting_paths(monkeypatch):
                                       kind=CredentialKind.API_KEY)
     shared.record_api_key_usage(
         principal, SimpleNamespace(url=SimpleNamespace(path="/nb/v1/chat/stop/abc"),
-                                   method="GET", headers={}, scope={}))
+                                   method="GET", headers={}, state=SimpleNamespace(request_id=None), scope={}))
     shared.record_api_key_usage(
         principal, SimpleNamespace(url=SimpleNamespace(path="/nb/v1/conversations/1/title"),
-                                   method="PUT", headers={}, scope={}))
+                                   method="PUT", headers={}, state=SimpleNamespace(request_id=None), scope={}))
     assert calls == []
 
 
@@ -678,7 +679,7 @@ def test_record_api_key_usage_records_gate_templates_verbatim(monkeypatch):
                                       kind=CredentialKind.API_KEY)
     request = SimpleNamespace(
         url=SimpleNamespace(path="/nb/v1/monitoring/models/refreshes/<jwt>"),
-        method="GET", headers={},
+        method="GET", headers={}, state=SimpleNamespace(request_id=None),
         scope={"route": SimpleNamespace(path="/nb/v1/monitoring/models/refreshes/{refresh_id}")},
     )
     shared.record_api_key_usage(principal, request)
@@ -688,7 +689,7 @@ def test_record_api_key_usage_records_gate_templates_verbatim(monkeypatch):
     captured.clear()
     request = SimpleNamespace(
         url=SimpleNamespace(path="/nb/v1/automations"),
-        method="GET", headers={},
+        method="GET", headers={}, state=SimpleNamespace(request_id=None),
         scope={"route": SimpleNamespace(path="/nb/v1/automations")},
     )
     shared.record_api_key_usage(principal, request)
@@ -731,3 +732,79 @@ async def test_action_guard_throttles_only_api_key_principals(monkeypatch):
         user_id="u", tenant_id="tenantA", token_id=7, kind=CredentialKind.API_KEY))
     await monitoring.nb_action_guard(None, key_principal)
     assert calls == ["tenantA"]
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: rate-limit off the event loop, uncaught-500 contract body,
+# ledger requestId correlation.
+# ---------------------------------------------------------------------------
+
+def test_ops_lifespan_wires_the_rate_limit_adapter_to_the_thread_manager(monkeypatch):
+    """The Redis state adapter must run its pipeline I/O on the control-io lane."""
+    from infrastructure.redis import run_state
+
+    wired = []
+    monkeypatch.setattr(run_state.runtime_state_service, "set_thread_manager",
+                        lambda manager: wired.append(manager))
+    monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", False)
+    monkeypatch.setattr(application, "trajectory_enabled", lambda: False)
+    app = application.create_app()
+    with TestClient(app, raise_server_exceptions=False):
+        pass  # lifespan start + shutdown
+    assert wired and wired[0] is app.state.thread_manager
+    # shutdown clears the adapter again so a reused process cannot leak the lane.
+    assert run_state.runtime_state_service._thread_manager is None or wired[-1] is None
+
+
+def test_uncaught_500_on_nb_paths_returns_the_contract_body(nb_client, monkeypatch):
+    """An unregistered exception behind a /nb gate still answers three-field."""
+    client, _, _ = nb_client
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("catalog db down")
+
+    monkeypatch.setattr(monitoring, "mcp_server_catalog", broken)
+    probe = TestClient(client.app, raise_server_exceptions=False)
+    response = probe.get("/nb/v1/monitoring/mcp-tools/catalog")
+    assert response.status_code == 500
+    body = response.json()
+    assert body["code"] == "INTERNAL_ERROR"
+    assert body["status"] == 500
+    assert body["requestId"]
+
+
+def test_ledger_request_id_matches_the_envelope_request_id(nb_client, monkeypatch):
+    """Without an X-Request-Id header the usage row carries the envelope's id."""
+    from backend.http.server import northbound as shared
+
+    client, _, _ = nb_client
+    client.app.dependency_overrides.pop(ops_principal, None)
+    record = {"kind": "api_key", "user_id": "partner-user", "tenant_id": "tenantA",
+              "token_id": 7, "roles": []}
+    monkeypatch.setattr(monitoring, "trusted_identity", lambda: record)
+
+    submitted = {}
+
+    class Manager:
+        def submit(self, lane, spec, fn, *args):
+            submitted["fn"], submitted["args"] = fn, args
+
+    client.app.state.thread_manager = Manager()
+    captured = {}
+
+    def fake_log(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(shared, "log_token_usage", fake_log)
+    try:
+        monkeypatch.setattr(monitoring, "read_models", lambda *_a, **_k: (
+            [], [], [DAY], {"coverage_state": "covered", "is_stale": False, "data_as_of": None}))
+        response = client.get("/nb/v1/monitoring/models/summary",
+                              params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+        assert response.status_code == 200
+        envelope_id = response.json()["requestId"]
+        assert submitted["fn"].__name__ == "record_api_key_usage"
+        submitted["fn"](*submitted["args"])  # run the accounting task synchronously
+        assert captured["metadata"]["request_id"] == envelope_id
+    finally:
+        client.app.dependency_overrides.pop(ops_principal, None)
