@@ -108,6 +108,8 @@ New deployments default to `dynamic`. The charts create PVCs and let Kubernetes 
 
 When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; the chart does not pin these workloads to a node. Use this mode only on a single-node cluster so backend Pods see the same workspace. On multiple nodes, use `dynamic` or `existing` with actual shared RWX storage. In local mode, shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
+Config, Runtime, and MCP share the `nexent-ssh-keys` PVC at `/opt/ssh-keys`, mounted read-only. Their init containers and the bootstrap Job use the same mount. In local mode the host directory defaults to `/var/lib/nexent-data/nexent-ssh-keys`. In `existing` mode, provision a shared filesystem PVC and set `global.sharedStorage.sshKeys.existingClaim` or use `--existing-claim-prefix` with the deployment script.
+
 Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
 
 Config and Data Process remain single-replica workloads. Runtime also defaults to one replica and retains the Kubernetes `Recreate` strategy. Web keeps its existing scaling controls, but project-configuration write consistency is supported only for the default single replica.
@@ -321,7 +323,7 @@ After successful deployment:
 
 ### Preserved Data
 
-By default, `bash uninstall.sh k8s` removes the Helm release and retains dynamic PVCs, their namespace, and local PV data. The interactive prompt for dynamic PVC deletion defaults to keeping them. Use `--delete-pvc false` to keep them without a prompt. Retaining a dynamic PVC also retains its namespace, including when `delete` or `delete-all` requests namespace deletion.
+By default, `bash uninstall.sh k8s` removes the Helm release and retains dynamic PVCs, their namespace, and local PV data. At the dynamic PVC prompt, the exact answer `y` selects deletion. Press Enter to keep the PVCs. Use `--delete-pvc false` to keep them without a prompt. Retaining a dynamic PVC also retains its namespace, including when `delete` or `delete-all` requests namespace deletion.
 
 Helm uses the keep policy in the installed release manifest. To retain dynamic PVCs from a release installed with an older chart, first upgrade that release with the current chart so Helm records the policy.
 
@@ -330,6 +332,7 @@ The following local PersistentVolumes can preserve data:
 - `nexent-workspace-pv` - Shared user workspace mounted at `/mnt/nexent`
 - `nexent-skills-pv` - Shared skills data mounted at `/mnt/nexent-data/skills`
 - `nexent-project-config-pv` - Web names, localized customization, and logos mounted at `/mnt/nexent-data/project-config`
+- `nexent-ssh-keys-pv` - Shared SSH key files mounted read-only at `/opt/ssh-keys`
 - `nexent-elasticsearch-pv` - Search index data
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
@@ -339,7 +342,7 @@ The following local PersistentVolumes can preserve data:
 
 ### Deleted Data
 
-To remove dynamic PVCs and keep the namespace, run `bash uninstall.sh k8s --delete-pvc true --keep-namespace`. The script removes only the selected releases' dynamic PVCs. Kubernetes applies the bound PV's reclaim policy to the underlying data.
+To remove dynamic PVCs and keep the namespace, run `bash uninstall.sh k8s --delete-pvc true --keep-namespace`. The script uninstalls the selected Helm releases and cleans up leftover workloads before requesting deletion of their dynamic PVCs. It displays a separate progress message for PVC deletion. Kubernetes can defer removal until Pods stop using the PVCs and applies the bound PV's reclaim policy to the underlying data.
 
 Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, `/var/lib/nexent-data/project-config`, and `/var/lib/nexent-data/nexent-*`. `delete-all` requests namespace deletion and removes local PV data by default. Use `--keep-local-data` to preserve local volume contents.
 
@@ -455,6 +458,9 @@ helm upgrade --install nexent nexent \
 | `global.sharedStorage.projectConfig.size` | Web project configuration PVC size | `1Gi` |
 | `global.sharedStorage.projectConfig.localPath` | Host path for Web project configuration | `/var/lib/nexent-data/project-config` |
 | `global.sharedStorage.projectConfig.existingClaim` | Existing project configuration PVC | `nexent-project-config` |
+| `global.sharedStorage.sshKeys.size` | Shared SSH key PVC size | `1Gi` |
+| `global.sharedStorage.sshKeys.localPath` | Host path for the SSH key directory in local mode | `/var/lib/nexent-data/nexent-ssh-keys` |
+| `global.sharedStorage.sshKeys.existingClaim` | Existing SSH key PVC in existing-storage mode | `nexent-ssh-keys` |
 | `nexent-web.config.fileUploadSizeLimit` | File upload limit synchronized into persisted locale configuration at Web startup | `10` |
 | `deploymentVersion` | Deployment version | `speed` |
 

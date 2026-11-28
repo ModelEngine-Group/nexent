@@ -2369,15 +2369,21 @@ class SandboxPoolManager:
             if removed:
                 self._destroy_executor(owner, logger_)
 
-        def get_or_create_owner() -> Any:
-            self._check_system_startup_cancelled(cancellation_scope)
+        def get_existing_owner() -> Any:
             with self._lock:
                 owner = self._system_containers.get(pool_key)
                 if owner is not None:
                     previous = getattr(owner, "_nexent_sandbox_config", None)
-                    if isinstance(previous, SandboxConfig):
-                        if previous.bind_workspace() != config.bind_workspace():
-                            raise RuntimeError("System sandbox workspace changed; restart runtime before reuse")
+                    if isinstance(previous, SandboxConfig) and (
+                        previous.bind_workspace() != config.bind_workspace()
+                        or previous.docker_workspace() != config.docker_workspace()
+                    ):
+                        raise RuntimeError("System sandbox workspace changed; restart runtime before reuse")
+                return owner
+
+        def get_or_create_owner() -> Any:
+            self._check_system_startup_cancelled(cancellation_scope)
+            owner = get_existing_owner()
             if owner is not None and self._is_alive(owner):
                 return owner
             if owner is not None:
@@ -2387,8 +2393,7 @@ class SandboxPoolManager:
                 self._check_system_startup_cancelled(cancellation_scope)
             try:
                 self._check_system_startup_cancelled(cancellation_scope)
-                with self._lock:
-                    owner = self._system_containers.get(pool_key)
+                owner = get_existing_owner()
                 if owner is not None and self._is_alive(owner):
                     return owner
                 if owner is not None:
@@ -2726,7 +2731,7 @@ class SandboxPoolManager:
 
             workspace_volume_name = config.extra_kwargs.get("workspace_volume_name")
             workspace_root = config.extra_kwargs.get("workspace_root")
-            mapping = config.bind_workspace()
+            mapping = config.docker_workspace()
             if mapping is not None:
                 mounts = container.attrs.get("Mounts") or []
                 if labels.get("com.nexent.workspace") != mapping.mount_id or not any(
@@ -3183,13 +3188,14 @@ class SandboxPoolManager:
             container_environment.update(_ONLINE_PACKAGE_ENV)
             container_run_kwargs["environment"] = container_environment
         workspace_root = config.extra_kwargs.get("workspace_root")
-        mapping = config.bind_workspace()
+        mapping = config.docker_workspace()
         if mapping is not None:
             from docker.types import Mount
 
-            mapping.host_root.mkdir(parents=True, exist_ok=True)
+            if not config.docker_workspace_source:
+                Path(mapping.source).mkdir(parents=True, exist_ok=True)
             container_run_kwargs["mounts"] = [Mount(
-                source=str(mapping.host_root), target=str(mapping.container_root), type="bind",
+                source=mapping.source, target=str(mapping.target), type="bind",
             )]
             container_run_kwargs["labels"] = {"com.nexent.workspace": mapping.mount_id}
         elif workspace_root:

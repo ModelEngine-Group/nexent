@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-PVC-UNINSTALL-IMMEDIATE-20261128
+  change_type: bugfix
+  bug_id: K8S-PVC-UNINSTALL-IMMEDIATE-20261128
+  title: Delete approved Kubernetes PVCs after Helm uninstall and workload cleanup
+  description: Show separate progress messages for Helm uninstall and UID-guarded PVC deletion.
+  observed_behavior: The script combined the progress messages and submitted PVC deletion requests before cleaning up leftover workloads.
+  expected_behavior: >-
+    After the user confirms deletion once, uninstall the selected Helm releases, clean up leftover workloads, and then request deletion of their dynamic PVCs.
+    Show when PVC deletion begins. Omit Helm's keep message in this path and retain error diagnostics. A Helm failure other than an already absent release leaves the PVCs intact.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing assertions expected PVC deletion requests before leftover cleanup and a combined progress message.
+  feature_contract_changed: false
+  affected_features:
+    existing: [RUNTIME-REPLICAS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/deploy/test_k8s_uninstall_pvc.py::test_prompt_only_deletes_for_literal_lowercase_y
+    - test/backend/deploy/test_k8s_uninstall_pvc.py::test_preserving_claims_also_preserves_the_namespace
+    - test/backend/deploy/test_k8s_uninstall_pvc.py::test_failed_helm_uninstall_leaves_pvcs_and_namespace_alone
+    - test/backend/deploy/test_k8s_uninstall_pvc.py::test_explicit_delete_is_scoped_and_uses_the_discovered_uid
+    - test/backend/deploy/test_k8s_uninstall_pvc.py::test_replaced_pvc_prevents_namespace_deletion
+    behaviors:
+    - Confirm the interactive Bash entry point submits UID-guarded delete requests after Helm success and leftover workload cleanup.
+    - Verify separate progress messages, omission of Helm's keep message, and visible Helm diagnostics in the confirmed deletion path.
+    - Preserve existing claims when Helm fails and preserve the existing namespace decision.
+    reason: Isolated Helm and kubectl commands exercise Bash command ordering, output and failure paths without altering a cluster.
+  no_case_change_reason: RUNTIME-OFFLINE-DEPLOY-D5-001 covers real default retention and explicit deletion. This fix changes Bash command ordering and output, while the existing claim selection, UID guard and Kubernetes finalizer contracts continue to apply.
+  notes: >-
+    K8S-DYNAMIC-PVC-UNINSTALL-20261126 and the deployment guide describe the retention contract. The sibling SPEC repository is unavailable.
+    The adjacent RUNTIME-OFFLINE-DEPLOY-D5-001 case is routed to deployment and remains blocked pending an isolated cluster with dedicated dynamic RWX storage.

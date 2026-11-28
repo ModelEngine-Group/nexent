@@ -3,3 +3,4 @@
 此页由结构化用例生成，不手工编辑。
 
 - D5 [DEP-001](../../cases/DEP-001/case.yaml) · active
+- D5 [DEPLOY-WORKSPACE-D5-001](../../cases/DEPLOY-WORKSPACE-D5-001/case.yaml) · active

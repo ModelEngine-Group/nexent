@@ -42,6 +42,10 @@ global:
       size: "1Gi"
       localPath: "/var/lib/nexent-data/project-config"
       existingClaim: "nexent-project-config"
+    sshKeys:
+      size: "1Gi"
+      localPath: "/var/lib/nexent-data/nexent-ssh-keys"
+      existingClaim: "nexent-ssh-keys"
   deploymentVersion: "full"
   deploymentComponents:
     infrastructure: false

@@ -329,6 +329,11 @@ render_shared_storage_persistence_values() {
     printf '      size: "1Gi"\n'
     printf '      localPath: "%s/project-config"\n' "$LOCAL_PATH"
     printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-project-config")"
+    printf '    sshKeys:\n'
+    printf '      localPath: %s\n' "$(yaml_quote "${LOCAL_PATH%/}/nexent-ssh-keys")"
+    if [ "$PERSISTENCE_MODE" = "existing" ]; then
+      printf '      existingClaim: %s\n' "$(yaml_quote "$(persistence_existing_claim "nexent-ssh-keys")")"
+    fi
   } >> "$output_file"
 }
 
@@ -1650,6 +1655,9 @@ apply() {
     fi
     if [ "$PERSISTENCE_MODE" = "local" ] && release_scope_includes_nexent; then
         stale_pvs="$stale_pvs nexent-workspace-pv nexent-skills-pv nexent-project-config-pv"
+        if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+            stale_pvs="$stale_pvs nexent-ssh-keys-pv"
+        fi
     fi
     for pv in $stale_pvs; do
         pv_status=$(kubectl get pv "$pv" -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")

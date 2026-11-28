@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from nexent.core.agents.resources.workspace import SandboxWorkspace, validate_container_root
+from nexent.core.agents.resources.workspace import DockerWorkspaceMount, SandboxWorkspace, validate_container_root
 from nexent.core.agents.sandbox_contracts import SandboxOwner, SystemSandboxProfile
 
 
@@ -90,6 +90,8 @@ class SandboxConfig:
     callback_endpoint: Optional[str] = None
     workspace_access: Any = field(default=None, repr=False)
     run_lifecycle: Any = field(default=None, repr=False)
+    # The deployment supplies this path separately from serialized Agent policies.
+    docker_workspace_source: Optional[str] = None
 
     @property
     def execution_image(self) -> str:
@@ -114,6 +116,20 @@ class SandboxConfig:
         if not root or not Path(root).is_absolute():
             raise ValueError("bind workspace requires an absolute host workspace_root")
         return SandboxWorkspace(Path(root), validate_container_root(self.container_workspace_root))
+
+    def docker_workspace(self) -> Optional[DockerWorkspaceMount]:
+        """Resolve the Docker mount without changing the Runtime's workspace paths."""
+        mapping = self.bind_workspace()
+        if mapping is not None:
+            source = self.docker_workspace_source or str(mapping.host_root)
+            return DockerWorkspaceMount(source, mapping.container_root)
+        if self.docker_workspace_source:
+            root = self.extra_kwargs.get("workspace_root")
+            if not root or not Path(root).is_absolute():
+                raise ValueError("Docker workspace requires an absolute workspace_root")
+            target = validate_container_root(str(Path(root).resolve()))
+            return DockerWorkspaceMount(self.docker_workspace_source, target)
+        return None
 
     @classmethod
     def from_dict(cls, data: Optional[dict[str, Any]]) -> "SandboxConfig":

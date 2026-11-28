@@ -90,7 +90,6 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
 
 # Create SSH key directory for Terminal tool
 RUN mkdir -p /opt/ssh-keys
-VOLUME ["/opt/ssh-keys"]
 
 WORKDIR /opt
 

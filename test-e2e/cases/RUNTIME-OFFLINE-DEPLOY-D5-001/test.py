@@ -29,6 +29,9 @@ BUSINESS = {
     RUNTIME, "nexent-mcp", "nexent-data-process",
 }
 AUTOSCALERS = {"horizontalpodautoscalers.autoscaling", "scaledobjects.keda.sh", "scaledjobs.keda.sh"}
+SSH_KEYS_CLAIM = "nexent-ssh-keys"
+SSH_KEYS_APPS = {"nexent-config", RUNTIME, "nexent-mcp"}
+SSH_KEYS_INIT_CONTAINERS = {"wait-for-management", "sandbox-workspace-permissions"}
 pytestmark = [pytest.mark.case_id(CASE_ID), pytest.mark.stage("D5"), pytest.mark.p0, pytest.mark.deploy]
 
 
@@ -107,6 +110,33 @@ def assert_paused(state):
     assert not state["pods"] and not any(state["counts"].values())
 
 
+def ssh_keys_mount_receipt(pod, app):
+    spec = pod["spec"]
+    identity = pod["metadata"]["name"]
+    main, = (container for container in spec["containers"] if container["name"] == app)
+    init = [container for container in spec.get("initContainers", [])
+            if container["name"] in SSH_KEYS_INIT_CONTAINERS]
+    if app in {RUNTIME, "nexent-mcp"}:
+        assert any(container["name"] == "wait-for-management" for container in init), identity
+    volumes = {volume["name"]: volume for volume in spec["volumes"]}
+    containers = []
+    for container in [main, *init]:
+        mount, = (entry for entry in container.get("volumeMounts", []) if entry["mountPath"] == "/opt/ssh-keys")
+        assert mount.get("readOnly") is True, (identity, container["name"], mount)
+        assert volumes[mount["name"]].get("persistentVolumeClaim", {}).get("claimName") == SSH_KEYS_CLAIM
+        containers.append(container["name"])
+    return {"pod": identity, "claim": SSH_KEYS_CLAIM, "containers": containers}
+
+
+def ssh_keys_workload_receipts(cluster):
+    receipts = {}
+    for app in sorted(SSH_KEYS_APPS):
+        pods = cluster.resources("pods", "-l", f"app={app}")["items"]
+        assert pods, app
+        receipts[app] = [ssh_keys_mount_receipt(pod, app) for pod in pods]
+    return receipts
+
+
 def install_gate(directory, tool, script):
     wrapper = directory / tool
     shutil.copyfile(Path(__file__).with_name(script), wrapper)
@@ -126,10 +156,12 @@ def test_offline_replica_sequence(isolated_release):
     assert_ready(cluster, previous, 1)
     claims = {claim["metadata"]["name"]: claim for claim in cluster.resources("pvc")["items"]}
     for name in ("nexent-postgresql", "nexent-elasticsearch", "nexent-redis", "nexent-minio",
-                 "nexent-workspace", "nexent-skills", "nexent-logs", "nexent-trajectory", "nexent-memory-plugins"):
+                 "nexent-workspace", "nexent-skills", "nexent-logs", "nexent-trajectory", "nexent-memory-plugins",
+                 SSH_KEYS_CLAIM):
         assert claims[name]["status"]["phase"] == "Bound"
         assert claims[name]["spec"]["storageClassName"] == cluster.profile.storage_class
         assert claims[name]["spec"]["volumeName"] != f"{name}-pv"
+    initial_ssh_keys_mounts = ssh_keys_workload_receipts(cluster)
     pod, = cluster.runtime_pods()
     identity = cluster.seed_runtime_identities(pod)["owner"]
     cluster.create_runtime_model(pod, mode="admission")
@@ -179,6 +211,8 @@ def test_offline_replica_sequence(isolated_release):
                     paused = observe_release(cluster)
                     assert_paused(paused)
                     bootstrap = cluster.bootstrap_image_receipts()
+                    bootstrap_ssh_keys = [ssh_keys_mount_receipt(cluster.resources("pod", item["pod"]), "nexent-config")
+                                          for item in bootstrap]
                     deployment_log, = set(log_dir.glob("deploy-*")) - previous_logs
                     assert "[sql-migrations] apply __init.sql" in deployment_log.read_text(encoding="utf-8")
                     decision = "allow"
@@ -195,9 +229,12 @@ def test_offline_replica_sequence(isolated_release):
         with owner_client(cluster) as gateway:
             assert conversation_history(gateway, sign_in(gateway, identity), conversation) == history
         assert cluster.runtime_model_control("probe")["calls_by_tag"] == calls
-        receipts.append({"paused": paused, "bootstrap": bootstrap, "ready": ready})
+        receipts.append({"paused": paused, "bootstrap": bootstrap, "ready": ready,
+                         "ssh_keys": {"bootstrap": bootstrap_ssh_keys, "workloads": ssh_keys_workload_receipts(cluster)}})
         previous = ready
-    write_case_evidence("runtime-idle-offline-sequence", {"deployments": receipts, "committed_run": before})
+    write_case_evidence("runtime-idle-offline-sequence", {
+        "deployments": receipts, "committed_run": before, "initial_ssh_keys_mounts": initial_ssh_keys_mounts,
+    })
 
 
 def terminate_deployment_lock(cluster):
@@ -233,7 +270,7 @@ def test_dynamic_pvc_uninstall_retains_then_deletes_claims(isolated_release):
         cluster.require_owned_namespace()
 
     original = dynamic_claims()
-    assert {"nexent-workspace", "nexent-postgresql"} <= original.keys()
+    assert {"nexent-workspace", "nexent-postgresql", SSH_KEYS_CLAIM} <= original.keys()
     uninstall("--remove-namespace")
     wait_for(lambda: not cluster.resources("deployments")["items"], cluster.profile.wait_seconds,
              "Deployments remain after uninstall")

@@ -638,6 +638,9 @@ for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   assert_contains "$RUNTIME_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker runtime service should load monitoring.env after root .env"
   assert_contains "$CONFIG_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker config service should mount external memory provider plugins"
   assert_contains "$RUNTIME_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker runtime service should mount external memory provider plugins"
+  assert_contains "$RUNTIME_COMPOSE_BLOCK" '${ROOT_DIR}/agent-workspace:/mnt/nexent/workdir' "docker runtime should bind its workspace under ROOT_DIR"
+  assert_contains "$RUNTIME_COMPOSE_BLOCK" 'NEXENT_SANDBOX_DOCKER_WORKSPACE_SOURCE: "${ROOT_DIR}/agent-workspace"' "docker runtime should pass the workspace host path to the sandbox"
+  assert_not_contains "$(cat "$compose_file")" $'\nvolumes:' "docker compose should define workspace mounts on the runtime service"
   assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-gateway:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-gateway:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-data-process:/,/^  redis:/' "$compose_file")" "monitoring.env" "docker data-process service should not receive monitoring.env"
@@ -782,6 +785,7 @@ assert_contains "$DOCKER_UNINSTALL_CONTENT" 'nexent-zipkin' "docker uninstall sh
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'monitor_langfuse-postgres-data' "docker uninstall should include monitoring volumes in delete-all cleanup"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'remove_docker_volumes_by_name < <(monitoring_volume_names)' "docker uninstall should remove monitoring volumes when delete-volumes is enabled"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" '"$root_dir/project-config"' "docker uninstall should delete project configuration only with persistent data cleanup"
+assert_contains "$(awk '/^remove_nexent_data_dirs\(\)/,/^\}/' "$SCRIPT_DIR/../docker/uninstall.sh")" '"$root_dir/agent-workspace"' "docker uninstall should include the agent workspace in persistent data cleanup"
 
 K8S_UNINSTALL_CONTENT="$(cat "$SCRIPT_DIR/../k8s/uninstall.sh")"
 assert_contains "$K8S_UNINSTALL_CONTENT" "cleanup_leftover_monitoring_resources()" "k8s uninstall should define monitoring fallback cleanup"

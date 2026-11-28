@@ -28,6 +28,8 @@ feature:
     description: 稳定 Service 下公开路由、成功响应、运行标识、鉴权、冲突和容量错误兼容；语音 WebSocket 保留连接语义，附件经对象存储跨副本合法可读。
   - rule_id: RUNTIME-REPLICAS-RULE-10
     description: 已激活的应用可在无在途业务的窗口使用 --direct-upgrade 更新。仅修改 Runtime 副本数时，按目标增减 Runtime Pod，其他应用 Pod 保持原 UID，历史仍然可读且可继续对话。
+  - rule_id: RUNTIME-REPLICAS-RULE-11
+    description: Config、Runtime、MCP 及其部署时初始化容器通过同一个 PVC 只读挂载 /opt/ssh-keys。Config 的 bootstrap Job 也使用此挂载。
   required_test_stages:
   - D2
   - D3

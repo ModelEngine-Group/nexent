@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEPLOY-UNINSTALL-D5-001
+  feature_id: F-173
+  requirement_ids: [DOCKER-UNINSTALL-PRESERVE-DATA]
+  business_rule_ids: [F-173-RULE-05]
+  title: Failed Docker Compose uninstall preserves host data directories
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the Docker uninstall entry point preserves host data after a real Compose configuration failure.
+  preconditions:
+  - Docker Compose is installed and the test owns its temporary checkout and data directories.
+  test_data:
+    docker: A Docker endpoint pointing to an unused socket and a malformed monitoring Compose file.
+    host_data: Sentinel files in the Agent workspace, PostgreSQL data directory, and Nexent user directory.
+  steps:
+  - order: 1
+    action: Run the Docker uninstall script with explicit data deletion against the isolated malformed Compose configuration.
+    expected: Docker Compose reports a configuration error. The uninstall process returns a nonzero exit status and reports that host data directories were preserved.
+  - order: 2
+    action: Check the sentinel files in the workspace, PostgreSQL data directory, and user directory.
+    expected: Each file is still present with its original content.
+  expected_results:
+  - A real Docker Compose error cannot produce a successful uninstall result.
+  - All tested host data directories are preserved when uninstall fails.
+  forbidden_side_effects:
+  - Contact or modify the installed Docker deployment, or leave the owned test directory behind.
+  acceptance:
+  - id: AC-01
+    description: Propagate a real Compose failure without successful uninstall or deletion of host files.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  source:
+    primary_domain: deployment
+    preparation_plan: Create a disposable copy of the uninstall script, malformed Compose file, unused Docker endpoint, and host data directories.
+    cleanup_plan: Remove and verify the test-owned directory after the assertions. No Docker resources are created.
+  risk_type: DEPLOYMENT
+  risk: A failed Docker uninstall deletes host data before teardown completes.
+  condition:
+  - An explicit delete-data uninstall encounters a Compose parsing failure.
+  metrics:
+  - Exit status, failure diagnostic, sentinel contents, and temporary resource cleanup.
+  thresholds:
+  - Exit status is nonzero, the preservation diagnostic is present, and each sentinel retains its original bytes.
+  recovery_expectations:
+  - The host data remain available after failure and the isolated test directory is cleaned up.

@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: BACKEND-SSH-KEY-ANONYMOUS-VOLUME-20261128
+  change_type: bugfix
+  bug_id: BACKEND-SSH-KEY-ANONYMOUS-VOLUME-20261128
+  title: Keep backend images from allocating implicit SSH key volumes
+  description: Remove the shared backend image's SSH directory volume declaration while retaining the directory and the explicit Docker Compose bindings.
+  observed_behavior: The inherited image volume declaration causes Docker-backed Kubernetes containers to allocate an anonymous volume at /opt/ssh-keys when no explicit mount overrides it.
+  expected_behavior: The directory exists in each backend image and requires no Docker-managed volume. The standard and production Compose services bind the configured SSH keys directory read-only.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: Image source tests checked target inheritance and the service wiring but did not check whether an inherited image declaration would allocate the SSH volume.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-173]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Verify backend images do not declare a volume for the SSH key directory and still create the directory.
+    - Verify the standard and production Compose services retain their explicit read-only SSH key binds.
+    reason: Existing image source tests own regression coverage for shared Dockerfile instructions and service Compose wiring.
+    test_selectors:
+    - test/backend/deploy/test_service_image_sources.py::test_backend_images_do_not_declare_ssh_key_volumes
+    - test/backend/deploy/test_service_image_sources.py::test_compose_preserves_explicit_read_only_ssh_key_bind
+  no_case_change_reason: DEP-IMAGE-BASE-TOOLS verifies troubleshooting package layers. The current fix changes only image configuration for the SSH directory, which can be verified with a focused image metadata check.
+  notes: >-
+    F-173 routes to deployment. The sibling SPEC repository is unavailable. Existing anonymous volumes are runtime state and are outside this source change.

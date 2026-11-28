@@ -385,8 +385,25 @@ deployment_run_compose() {
   local -a compose_command
   read -r -a compose_command <<< "$docker_compose_command"
   if [ "$docker_compose_command" = "docker compose" ]; then
-    # Keep Compose progress readable when its output is piped to tee.
     local -x COMPOSE_PROGRESS=plain COMPOSE_ANSI=never
+    if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ]; then
+      # Compose sees the logging pipe, so select its terminal renderer explicitly.
+      COMPOSE_PROGRESS=tty
+      COMPOSE_ANSI=always
+      if [ -n "${NEXENT_DEPLOY_LOG_FILE:-}" ]; then
+        (
+          set -o pipefail
+          "${compose_command[@]}" "$@" 2>&1 |
+            tee /dev/fd/3 |
+            tr '\r' '\n' |
+            LC_ALL=C awk '
+              { gsub(/\033\[[0-?]*[ -/]*[@-~]/, "") }
+              NF { print; fflush() }
+            ' >> "$NEXENT_DEPLOY_LOG_FILE"
+        ) 3>&1
+        return
+      fi
+    fi
   fi
   deployment_run_visible "${compose_command[@]}" "$@"
 }

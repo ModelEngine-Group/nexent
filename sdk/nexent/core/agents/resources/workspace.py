@@ -33,6 +33,44 @@ def validate_container_root(value: str) -> PurePosixPath:
 
 
 @dataclass(frozen=True)
+class DockerWorkspaceMount:
+    """A bind mount addressed in the Docker daemon's filesystem."""
+
+    source: str
+    target: PurePosixPath
+
+    def __post_init__(self):
+        posix_source = PurePosixPath(self.source)
+        if posix_source.is_absolute():
+            object.__setattr__(self, 'source', str(posix_source))
+        elif not PureWindowsPath(self.source).is_absolute():
+            raise ValueError("Docker workspace source must be an absolute path")
+
+    @property
+    def mount_id(self) -> str:
+        payload = json.dumps([os.path.normcase(self.source), str(self.target)])
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def matches_mount(self, mount: dict) -> bool:
+        """Check the writable bind, including Desktop's Linux view of Windows paths."""
+        source = str(mount.get('Source', '')).replace('\\', '/')
+        expected = self.source.replace('\\', '/')
+        if PureWindowsPath(self.source).drive:
+            for prefix in ('/run/desktop/mnt/host/', '/host_mnt/'):
+                if source.startswith(prefix):
+                    tail = source[len(prefix):]
+                    if len(tail) >= 2 and tail[1] == '/':
+                        source = tail[0] + ':' + tail[1:]
+                    break
+            source, expected = source.casefold(), expected.casefold()
+        return (
+            mount.get('Type') == 'bind' and mount.get('RW') is True
+            and mount.get('Destination') == str(self.target)
+            and source.rstrip('/') == expected.rstrip('/')
+        )
+
+
+@dataclass(frozen=True)
 class SandboxWorkspace:
     host_root: Path
     container_root: PurePosixPath
@@ -74,26 +112,11 @@ class SandboxWorkspace:
 
     @property
     def mount_id(self) -> str:
-        payload = json.dumps([os.path.normcase(str(self.host_root)), str(self.container_root)])
-        return hashlib.sha256(payload.encode()).hexdigest()
+        return DockerWorkspaceMount(str(self.host_root), self.container_root).mount_id
 
     def matches_mount(self, mount: dict) -> bool:
         """Compare Desktop's Linux view of drive paths with the configured source."""
-        source = str(mount.get('Source', '')).replace('\\', '/')
-        expected = str(self.host_root).replace('\\', '/')
-        if self.host_root.drive:
-            for prefix in ('/run/desktop/mnt/host/', '/host_mnt/'):
-                if source.startswith(prefix):
-                    tail = source[len(prefix):]
-                    if len(tail) >= 2 and tail[1] == '/':
-                        source = tail[0] + ':' + tail[1:]
-                    break
-            source, expected = source.casefold(), expected.casefold()
-        return (
-            mount.get('Type') == 'bind' and mount.get('RW') is True
-            and mount.get('Destination') == str(self.container_root)
-            and source.rstrip('/') == expected.rstrip('/')
-        )
+        return DockerWorkspaceMount(str(self.host_root), self.container_root).matches_mount(mount)
 
 
 def probe_workspace(container, workspace: PurePosixPath) -> None:
@@ -288,13 +311,16 @@ class WorkspaceResources:
 
 
     def _uses_shared_file_workspace(self) -> bool:
-        """Return whether the runtime and sandbox use the same workspace volume."""
+        """Return whether the runtime and sandbox share workspace storage."""
         if getattr(self, "workspace_mapping", None) is not None:
             return True
         extra_kwargs = getattr(self.sandbox_config, "extra_kwargs", {}) or {}
         return bool(
             extra_kwargs.get("shared_workspace")
-            and extra_kwargs.get("workspace_volume_name")
+            and (
+                extra_kwargs.get("workspace_volume_name")
+                or getattr(self.sandbox_config, "docker_workspace_source", None)
+            )
         )
 
 

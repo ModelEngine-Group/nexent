@@ -21,6 +21,9 @@
 {{- $skillsStorage := default dict $sharedStorage.skills -}}
 {{- $memoryPluginsStorage := default dict $sharedStorage.memoryPlugins -}}
 {{- $logsStorage := default dict $sharedStorage.logs -}}
+{{- $sshKeysStorage := default dict $sharedStorage.sshKeys -}}
+{{- $sshKeysClaim := ternary (default "nexent-ssh-keys" $sshKeysStorage.existingClaim) "nexent-ssh-keys" (eq $storageMode "existing") -}}
+{{- $mountSshKeys := dig "deploymentComponents" "application" true $global -}}
 {{- $kubernetesSandbox := and (eq (default "docker" $global.sandboxProvider) "kubernetes") (ne (default "lightweight" $global.sandboxMode) "disabled") -}}
 {{- $networkVerified := default false $global.sandboxNetworkPolicyVerified -}}
 {{- if and $kubernetesSandbox (not (kindIs "bool" $networkVerified)) -}}
@@ -69,6 +72,12 @@ spec:
             - /bin/sh
             - -c
             - until curl --noproxy '*' -fsS http://nexent-config:5010/health/ready >/dev/null; do sleep 2; done
+{{- if $mountSshKeys }}
+          volumeMounts:
+            - name: nexent-ssh-keys
+              mountPath: /opt/ssh-keys
+              readOnly: true
+{{- end }}
 {{- if $kubernetesSandbox }}
         - name: sandbox-workspace-permissions
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -99,6 +108,11 @@ spec:
           volumeMounts:
             - name: nexent-workspace
               mountPath: /mnt/nexent
+{{- if $mountSshKeys }}
+            - name: nexent-ssh-keys
+              mountPath: /opt/ssh-keys
+              readOnly: true
+{{- end }}
 {{- end }}
       containers:
         - name: nexent-runtime
@@ -188,6 +202,11 @@ spec:
           volumeMounts:
             - name: nexent-workspace
               mountPath: /mnt/nexent
+{{- if $mountSshKeys }}
+            - name: nexent-ssh-keys
+              mountPath: /opt/ssh-keys
+              readOnly: true
+{{- end }}
             - name: nexent-skills
               mountPath: /mnt/nexent-data/skills
             - name: nexent-memory-plugins
@@ -207,6 +226,12 @@ spec:
         - name: nexent-workspace
           persistentVolumeClaim:
             claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}
+{{- if $mountSshKeys }}
+        - name: nexent-ssh-keys
+          persistentVolumeClaim:
+            claimName: {{ $sshKeysClaim | quote }}
+            readOnly: true
+{{- end }}
         - name: nexent-skills
           persistentVolumeClaim:
             claimName: {{ default "nexent-skills" $skillsStorage.existingClaim }}

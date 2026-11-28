@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: DOCKER-WORKSPACE-HOST-STORAGE
+  change_type: requirement
+  requirement_id: DOCKER-WORKSPACE-HOST-STORAGE
+  title: Store the Docker Agent workspace under the deployment data directory
+  description: Bind ROOT_DIR/agent-workspace directly in the Runtime service and share that host path with the SYSTEM Docker Sandbox for new deployments.
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-172]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [DEPLOY-WORKSPACE-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Create a fresh host workspace before Runtime startup, retain its files on repeated preparation, and fail on a path conflict.
+    - Pass the deployed host workspace source to SYSTEM and explicit-bind Docker Sandboxes and verify mount identity for reuse.
+    - Use the session workspace for a legacy SESSION Sandbox.
+    reason: Traditional pytest exercises directory preparation and Sandbox mount selection in isolation. Existing Shell deployment checks verify configuration wiring. D5 separately verifies bind mounts through a real Docker daemon.
+    test_selectors:
+    - test/backend/deploy/test_docker_workspace.py::test_prepare_agent_workspace
+    - test/backend/app/test_agentos_prepared_evaluation.py::test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings
+    - test/sdk/core/agents/test_sandbox_workspace.py::test_deployment_bind_mount_uses_docker_host_source
+    - test/sdk/core/agents/test_sandbox_workspace.py::test_recovery_checks_deployment_bind_mount
+    - test/sdk/core/agents/test_sandbox_workspace.py::test_docker_workspace_source_is_deployment_only
+    - test/sdk/core/agents/test_sandbox_workspace.py::test_docker_workspace_source_requires_absolute_path
+    - test/sdk/core/agents/test_sandbox_workspace.py::test_deployment_bind_workspace_skips_archive_transfer
+    - test/sdk/core/agents/test_sandbox_system_network.py::test_changed_system_workspace_does_not_destroy_active_owner
+  notes: >-
+    F-172 routes to deployment. Existing DEP-001 and DEP-01 cover broad deployment smoke. The D5 case verifies the fresh workspace bind with two disposable containers and a host directory. The sibling Nexent documentation checkout is unavailable.

@@ -502,8 +502,19 @@ async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mo
     reader.assert_called_once_with(7, 2, "tenant-a", ["lookup"])
 
 
-@pytest.mark.parametrize("level", ["local", "docker"])
-def test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings(mocker, tmp_path, level):
+@pytest.mark.parametrize(
+    ("level", "scope", "workspace_mode", "has_deployment_source", "storage"),
+    [
+        ("local", "system", "legacy", True, None),
+        ("docker", "system", "legacy", False, "volume"),
+        ("docker", "system", "legacy", True, "bind"),
+        ("docker", "session", "legacy", True, None),
+        ("docker", "session", "bind", True, "bind"),
+    ],
+)
+def test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings(
+    mocker, tmp_path, level, scope, workspace_mode, has_deployment_source, storage
+):
     from contracts.constants import environment
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent.preparation.evaluation_snapshot import export_snapshot
@@ -524,9 +535,12 @@ def test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings(moc
     mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=record)
     mocker.patch("runtime.agentos.prepared_evaluation.AGENT_WORKSPACE_ROOT", str(tmp_path))
     mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", level)
-    mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_SCOPE", "system")
-    mocker.patch.object(environment, "NEXENT_SANDBOX_WORKSPACE_MODE", "legacy")
+    mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_SCOPE", scope)
+    mocker.patch.object(environment, "NEXENT_SANDBOX_WORKSPACE_MODE", workspace_mode)
+    mocker.patch.object(environment, "NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT", "/mnt/nexent/workdir")
     mocker.patch.object(environment, "NEXENT_SANDBOX_WORKSPACE_VOLUME", "runtime-managed-volume")
+    docker_workspace_source = "/srv/nexent-data/agent-workspace" if has_deployment_source else ""
+    mocker.patch.object(environment, "NEXENT_SANDBOX_DOCKER_WORKSPACE_SOURCE", docker_workspace_source)
     mocker.patch.object(environment, "NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS", True)
     client = mocker.patch("runtime.adapters.nexent.factory.get_sandbox_minio_client")
 
@@ -541,7 +555,13 @@ def test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings(moc
     hint, = hints
     if level == "docker":
         assert info.sandbox_config.level.value == "docker"
-        assert info.sandbox_config.extra_kwargs["workspace_volume_name"] == "runtime-managed-volume"
+        assert info.sandbox_config.scope.value == scope
+        assert info.sandbox_config.workspace_mode == workspace_mode
+        assert info.sandbox_config.docker_workspace_source == (docker_workspace_source if storage == "bind" else None)
+        assert info.sandbox_config.extra_kwargs.get("shared_workspace", False) is (storage is not None)
+        volume_name = "runtime-managed-volume" if storage == "volume" else None
+        assert info.sandbox_config.extra_kwargs.get("workspace_volume_name") == volume_name
+        assert info.sandbox_config.extra_kwargs["workspace_root"] == str(tmp_path.resolve())
         assert info.sandbox_config.extra_kwargs["workspace_path"] == info.workspace_path
         assert info.sandbox_config.output_dir.endswith("outputs")
         assert info.minio_client is client.return_value

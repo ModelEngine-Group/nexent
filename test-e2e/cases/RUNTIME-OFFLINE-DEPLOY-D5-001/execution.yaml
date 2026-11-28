@@ -15,6 +15,9 @@ acceptance_bindings:
   - test_unfinished_bootstrap_job_does_not_pause_the_running_release
   AC-P1-003:
   - test_dynamic_pvc_uninstall_retains_then_deletes_claims
+  AC-P1-004:
+  - test_offline_replica_sequence
+  - test_dynamic_pvc_uninstall_retains_then_deletes_claims
 preparation:
   families: []
   anchors: false
@@ -28,4 +31,5 @@ notes: >-
   transition. Separate releases intercept the observed bootstrap result and
   either return a failure or terminate the uniquely labeled deployment lock
   session. A suspended bootstrap Job exercises prior-writer rejection. Cleanup
-  uses the namespace UID and verifies storage reclamation.
+  uses the namespace UID and verifies storage reclamation, including the shared
+  SSH keys claim verified in the application and bootstrap Pods.

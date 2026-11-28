@@ -9,6 +9,9 @@
 {{- $skillsStorage := default dict $sharedStorage.skills -}}
 {{- $memoryPluginsStorage := default dict $sharedStorage.memoryPlugins -}}
 {{- $logsStorage := default dict $sharedStorage.logs -}}
+{{- $sshKeysStorage := default dict $sharedStorage.sshKeys -}}
+{{- $sshKeysClaim := ternary (default "nexent-ssh-keys" $sshKeysStorage.existingClaim) "nexent-ssh-keys" (eq $sharedStorage.mode "existing") -}}
+{{- $mountSshKeys := dig "deploymentComponents" "application" true $global -}}
 serviceAccountName: {{ .Values.serviceAccount.name }}
 containers:
   - name: nexent-config
@@ -71,6 +74,11 @@ containers:
       - name: nexent-sql-files
         mountPath: /opt/nexent/sql
         readOnly: true
+{{- if $mountSshKeys }}
+      - name: nexent-ssh-keys
+        mountPath: /opt/ssh-keys
+        readOnly: true
+{{- end }}
       - name: nexent-workspace
         mountPath: /mnt/nexent
       - name: nexent-skills
@@ -101,6 +109,12 @@ volumes:
         - key: {{ printf "migrations-%s" $name | quote }}
           path: {{ printf "migrations/%s" $name | quote }}
 {{ end }}
+{{- if $mountSshKeys }}
+  - name: nexent-ssh-keys
+    persistentVolumeClaim:
+      claimName: {{ $sshKeysClaim | quote }}
+      readOnly: true
+{{- end }}
   - name: nexent-workspace
     persistentVolumeClaim:
       claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

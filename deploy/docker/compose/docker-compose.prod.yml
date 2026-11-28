@@ -116,7 +116,7 @@ services:
     restart: always
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
-      - nexent_agent_workspace:/mnt/nexent/workdir
+      - ${ROOT_DIR}/agent-workspace:/mnt/nexent/workdir
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
@@ -125,6 +125,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
       GATEWAY_AUTH_ENABLED: "true"
+      NEXENT_SANDBOX_DOCKER_WORKSPACE_SOURCE: "${ROOT_DIR}/agent-workspace"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: "off"
@@ -405,8 +406,3 @@ networks:
   nexent:
     name: nexent_network
     driver: bridge
-
-volumes:
-  redis_data:
-  nexent_agent_workspace:
-    name: ${NEXENT_SANDBOX_WORKSPACE_VOLUME:-nexent-agent-workspace}

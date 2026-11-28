@@ -141,6 +141,54 @@ exit "$status"
         assert f"+ {compose_command}" not in destination
 
 
+@pytest.mark.skipif(not hasattr(os, "openpty"), reason="The test requires a POSIX pseudo-terminal")
+@pytest.mark.parametrize("compose_status", [0, 17])
+def test_interactive_compose_preserves_native_progress_and_cleans_the_log(tmp_path, monkeypatch, compose_status):
+    log = tmp_path / "deployment log.txt"
+    monkeypatch.setenv("NEXENT_DEPLOY_LOG_FILE", log.as_posix())
+    monkeypatch.delenv("NEXENT_DEPLOY_PROMPT_FD", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("FIXTURE_COMPOSE_STATUS", str(compose_status))
+    script = r'''
+set -euo pipefail
+source "$1"
+docker_compose_command='docker compose'
+docker() {
+  [ "$*" = 'compose up -d' ] || return 9
+  if [ "$COMPOSE_PROGRESS:$COMPOSE_ANSI" != 'tty:always' ]; then
+    printf 'Unexpected Compose mode: %s/%s\n' "$COMPOSE_PROGRESS" "$COMPOSE_ANSI" >&2
+    return 9
+  fi
+  printf '\r\033[2K[+] Running 1/1\n' >&2
+  printf 'Compose stdout detail\n'
+  printf '\033[31mCompose stderr diagnostic\033[0m\n' >&2
+  return "$FIXTURE_COMPOSE_STATUS"
+}
+deployment_run_compose up -d
+'''
+    master, slave = os.openpty()
+    try:
+        result = subprocess.run(
+            [BASH, "-c", script, "deploy-test", (REPO / "deploy/common/common.sh").as_posix()],
+            stdout=slave, stderr=slave, check=False, timeout=20,
+        )
+        os.set_blocking(master, False)
+        with os.fdopen(os.dup(master), "rb", buffering=0) as terminal:
+            output = terminal.readall()
+    finally:
+        os.close(slave)
+        os.close(master)
+
+    assert result.returncode == compose_status, output
+    assert b"\r\x1b[2K[+] Running 1/1" in output
+    assert b"\x1b[31mCompose stderr diagnostic\x1b[0m" in output
+    contents = log.read_bytes()
+    assert b"\x1b" not in contents and b"\r" not in contents
+    for detail in (b"[+] Running 1/1", b"Compose stdout detail", b"Compose stderr diagnostic"):
+        assert output.count(detail) == 1
+        assert contents.count(detail) == 1
+
+
 @pytest.mark.parametrize("compose_status", [0, 17])
 def test_workbench_publication_output_stays_in_deploy_log(tmp_path, monkeypatch, compose_status):
     log = tmp_path / "deployment.log"

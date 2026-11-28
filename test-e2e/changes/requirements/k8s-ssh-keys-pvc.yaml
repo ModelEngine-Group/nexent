@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-SSH-KEYS-PVC-20261128
+  change_type: requirement
+  requirement_id: K8S-SSH-KEYS-PVC-20261128
+  title: Mount a shared Kubernetes PVC for SSH keys
+  description: Mount the application's shared SSH keys PVC read-only at /opt/ssh-keys in Config, Runtime, MCP, their init containers, and the Config bootstrap Job.
+  affected_features:
+    existing: []
+    added: []
+    modified: [RUNTIME-REPLICAS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [RUNTIME-OFFLINE-DEPLOY-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/deploy/test_k8s_persistence.py::test_default_storage_uses_dynamically_provisioned_claims
+    - test/backend/deploy/test_k8s_persistence.py::test_explicit_local_storage_renders_matching_static_pvs_and_claims
+    - test/backend/deploy/test_k8s_persistence.py::test_backend_pods_mount_the_shared_ssh_claim_read_only
+    - test/backend/deploy/test_k8s_persistence.py::test_application_disabled_does_not_provision_ssh_storage
+    - test/backend/deploy/test_k8s_persistence.py::test_deployment_persistence_values_configure_the_ssh_claim
+    - test/backend/deploy/test_k8s_uninstall_pvc.py::test_shared_ssh_claim_follows_dynamic_pvc_retention
+    behaviors:
+    - Verify that Helm renders read-only SSH keys mounts and resolves the same claim in all affected Pod templates, including the bootstrap Job and init containers.
+    - Verify provisioned dynamic, local and operator-owned claim selection without changing the expected storage mode.
+    - Verify that normal uninstall keeps the dynamic SSH keys claim and explicit cleanup targets its recorded UID.
+    reason: Helm rendering and isolated script tests exercise the template, configuration and deletion boundary. The existing deployment case verifies real PVC binding, Pod mounts and uninstall behavior on dedicated storage.
+  notes: The sibling documentation checkout is unavailable. The product Helm README and existing deployment case document the storage baseline. The deployment case owns the namespace, StorageClass and claim lifecycle through its isolated fixture. Live acceptance requires an explicitly configured isolated cluster with dedicated dynamic RWX storage.

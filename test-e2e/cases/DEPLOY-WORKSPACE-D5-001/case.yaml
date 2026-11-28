@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEPLOY-WORKSPACE-D5-001
+  feature_id: F-172
+  requirement_ids: [DOCKER-WORKSPACE-HOST-STORAGE]
+  business_rule_ids: [F-172-RULE-02]
+  title: New Docker Agent workspace stores files in the host data directory
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify Runtime and SYSTEM Sandbox access the selected host workspace through bind mounts.
+  preconditions:
+  - An accessible Linux Docker daemon, Docker Compose, and a local Gateway image are available.
+  - The case owns its host data directory and two uniquely labeled helper containers.
+  test_data:
+    workspace: A unique temporary data directory.
+    sentinel: Files written to a bind mount by the host and each helper container.
+  steps:
+  - order: 1
+    action: Parse and render the standard and production Compose configurations with isolated host data directories.
+    expected: Runtime declares a writable service-level bind to agent-workspace and passes the same source to the Sandbox. The Compose files omit a top-level volumes section.
+  - order: 2
+    action: Start disposable Runtime-side and Sandbox-side containers using the rendered mount source and supplied Sandbox source to read and write the workspace.
+    expected: Both helpers see each other's files through the bind mounts, and the host data directory contains the files.
+  expected_results:
+  - Both Compose variants use the same host source for the Runtime bind mount and Docker Sandbox.
+  - Reads and writes in both real Docker containers reach the selected host directory without creating a Docker volume.
+  forbidden_side_effects:
+  - Change an installed Nexent deployment or leak any resource owned by the test.
+  acceptance:
+  - id: AC-01
+    description: Both Compose variants map the Runtime workspace and Sandbox source under the selected host data directory using service-level configuration only.
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: Real bind mounts let each container and the host read the same workspace files.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  source:
+    primary_domain: deployment
+    preparation_plan: Create a disposable host directory and uniquely labeled helper containers.
+    cleanup_plan: Remove and verify the case-owned containers and directory after the assertions, including on failure.
+  risk_type: DEPLOYMENT
+  risk: Agent workspace files bypass the deployment's host data directory.
+  condition:
+  - A fresh service-level bind on a real Docker daemon.
+  metrics:
+  - Rendered workspace mount, file bytes seen on the host and in the container, and verified cleanup.
+  thresholds:
+  - Both container views and the host report the same bytes, and the temporary containers and directory are absent after cleanup.
+  recovery_expectations:
+  - The owned containers and directory are removed even if a write or mount fails.

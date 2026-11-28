@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: DOCKER-UNINSTALL-PRESERVE-DATA
+  change_type: bugfix
+  bug_id: DOCKER-UNINSTALL-PRESERVE-DATA
+  title: Preserve host data when Docker uninstall fails
+  description: Stop before deleting host directories if Docker Compose teardown or Docker resource cleanup fails.
+  observed_behavior: The uninstall script suppressed Compose and Docker cleanup errors, deleted host directories in delete-data mode, and printed a success message.
+  expected_behavior: Return a nonzero status and preserve host data directories whenever Docker teardown or requested resource cleanup fails.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_case
+    description: Existing Docker workspace coverage proves the bind mount, and existing teardown failure coverage exercises Kubernetes. Neither invokes Docker uninstall against a failing Compose configuration to verify data retention.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-173]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [DEPLOY-UNINSTALL-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/deploy/test_docker_uninstall.py::test_uninstall_failure_preserves_host_data
+    - test/backend/deploy/test_docker_uninstall.py::test_successful_uninstall_respects_delete_volumes
+    - test/backend/deploy/test_docker_uninstall.py::test_missing_docker_resources_allow_host_data_cleanup
+    behaviors:
+    - Preserve host data when Compose teardown, Docker resource discovery, or Docker resource removal fails.
+    - Keep host data when requested and delete it only after a successful delete-data uninstall.
+    reason: Isolated UT inject failure at individual Docker operations. The D5 Case runs the real Docker Compose parser and the uninstall entry point in a disposable configuration.
+  notes: >-
+    F-173 routes to deployment. DEPLOY-WORKSPACE-D5-001 and the Kubernetes PVC uninstall cases prove different behavior.
+    The sibling SPEC repository is unavailable. The current Case owns and removes its temporary checkout, Docker endpoint, and host data directory.

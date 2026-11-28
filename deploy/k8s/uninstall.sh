@@ -382,11 +382,11 @@ resolve_delete_pvcs() {
   [ "$COMMAND" = "uninstall" ] && [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ] && [ -t 0 ] || return 1
   local answer
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    read -r -p "删除所选 release 的动态 PVC？这可能删除卷中的数据。[y/N]：" answer || return 1
+    IFS= read -r -p "删除所选 release 的动态 PVC？这可能删除卷中的数据。直接回车保留，输入小写 y 删除。[y/N]：" answer || return 1
   else
-    read -r -p "Delete dynamic PVCs for the selected releases? This can delete volume data. [y/N]: " answer || return 1
+    IFS= read -r -p "Delete dynamic PVCs for the selected releases? This can delete volume data. Press Enter to keep them or type lowercase y to delete. [y/N]: " answer || return 1
   fi
-  [[ "$(sanitize_input "$answer")" =~ ^[Yy]$ ]]
+  [ "${answer%$'\r'}" = "y" ]
 }
 
 prepare_dynamic_pvcs() {
@@ -422,6 +422,11 @@ cleanup_dynamic_pvcs() {
     return 0
   fi
 
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "正在删除动态 PVC..."
+  else
+    echo "Deleting dynamic PVCs..."
+  fi
   local index name uid output
   for index in "${!DYNAMIC_PVC_NAMES[@]}"; do
     name="${DYNAMIC_PVC_NAMES[index]}"
@@ -468,16 +473,18 @@ clean_helm_state() {
 helm_uninstall_release() {
   local release_name="$1"
   local output
-  local status
-  if output=$(helm uninstall "$release_name" --namespace "$NAMESPACE" 2>&1); then
-    [ -z "$output" ] || printf '%s\n' "$output"
-    return 0
+  local status=0
+  if [ "$DELETE_PVC" = "true" ] && [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ]; then
+    # Helm prints the keep-policy notice before the script submits PVC deletions.
+    output=$(helm uninstall "$release_name" --namespace "$NAMESPACE" 2>&1 >/dev/null) || status=$?
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
   else
-    status=$?
+    output=$(helm uninstall "$release_name" --namespace "$NAMESPACE" 2>&1) || status=$?
+    [ -z "$output" ] || printf '%s\n' "$output"
   fi
+  [ "$status" -ne 0 ] || return 0
 
-  [ -z "$output" ] || printf '%s\n' "$output"
-  if printf '%s\n' "$output" | grep -qi 'not found'; then
+  if grep -qiF -e 'release: not found' -e "release \"$release_name\" not found" <<< "$output"; then
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "Helm release '$release_name' 已不存在；继续清理。"
     else
@@ -569,6 +576,7 @@ local_volume_paths() {
       "/var/lib/nexent-data/skills" \
       "/var/lib/nexent-data/logs" \
       "/var/lib/nexent-data/project-config" \
+      "/var/lib/nexent-data/nexent-ssh-keys" \
       "/var/lib/nexent-data/nexent-supabase-db" \
       "/var/lib/nexent-data/nexent-phoenix" \
       "/var/lib/nexent-data/nexent-grafana" \
@@ -762,9 +770,9 @@ uninstall_preserve_data() {
 delete_all_data() {
   guard_infrastructure_uninstall || return 1
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    echo "正在删除 Helm release..."
+    echo "正在卸载 Helm release..."
   else
-    echo "Deleting Helm release..."
+    echo "Uninstalling Helm release..."
   fi
   if ! helm_uninstall_scoped_releases; then
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then

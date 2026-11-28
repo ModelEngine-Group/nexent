@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 from nexent.core.agents.sandbox import execution as sandbox
-from nexent.core.agents.resources.workspace import SandboxWorkspace, probe_workspace
+from nexent.core.agents.resources.workspace import SandboxWorkspace, WorkspaceResources, probe_workspace
 from nexent.core.tools.create_file_tool import CreateFileTool
 from nexent.core.tools.read_file_tool import ReadFileTool
 from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
@@ -74,6 +74,124 @@ def test_bind_mount_has_distinct_source_and_target(tmp_path, mocker, scope):
     assert mount['Target'] == '/mnt/work'
     assert mount['Type'] == 'bind'
     assert 'volumes' not in kwargs
+
+
+@pytest.mark.parametrize('scope', list(sandbox.SandboxScope))
+@pytest.mark.parametrize('workspace_mode', ['legacy', 'bind'])
+def test_deployment_bind_mount_uses_docker_host_source(tmp_path, mocker, scope, workspace_mode):
+    manager = object.__new__(sandbox.SandboxPoolManager)
+    runtime_root = tmp_path / 'runtime-workdir'
+    docker_source = tmp_path / 'docker-host' / 'agent workspace'
+    config = sandbox.SandboxConfig(
+        level=sandbox.SandboxLevel.DOCKER, scope=scope, workspace_mode=workspace_mode,
+        container_workspace_root='/mnt/work', failure_policy='error',
+        extra_kwargs={'workspace_root': str(runtime_root), 'workspace_volume_name': 'old-workspace'},
+        docker_workspace_source=str(docker_source),
+    )
+    mocker.patch('smolagents.remote_executors.DockerExecutor', Mock())
+    mocker.patch.object(sandbox, '_wrap_executor', side_effect=lambda executor, *_: executor)
+    mocker.patch.object(sandbox, '_is_containerized_runtime', return_value=False)
+    mocker.patch('docker.from_env')
+    method = '_build_system_docker_executor' if scope == sandbox.SandboxScope.SYSTEM else '_build_session_docker_executor'
+    build = mocker.patch.object(manager, method, return_value=SimpleNamespace())
+
+    manager._build_docker_executor(config, logging.getLogger('test'))
+
+    kwargs = build.call_args.args[2]
+    mount, = kwargs['mounts']
+    assert mount['Source'] == str(docker_source)
+    assert mount['Target'] == ('/mnt/work' if workspace_mode == 'bind' else str(runtime_root))
+    assert mount['Type'] == 'bind'
+    assert 'volumes' not in kwargs
+    assert kwargs['labels']['com.nexent.workspace']
+    assert not docker_source.exists()
+
+
+def test_docker_workspace_source_is_deployment_only():
+    config = sandbox.SandboxConfig.from_dict({
+        'level': 'docker',
+        'docker_workspace_source': '/untrusted/workspace',
+    })
+    assert config.docker_workspace_source is None
+
+
+def test_docker_workspace_source_requires_absolute_path(tmp_path):
+    with pytest.raises(ValueError, match='absolute'):
+        sandbox.SandboxConfig(
+            level=sandbox.SandboxLevel.DOCKER,
+            docker_workspace_source='relative/workspace',
+            extra_kwargs={'workspace_root': str(tmp_path)},
+        ).docker_workspace()
+
+
+def test_deployment_bind_workspace_skips_archive_transfer(tmp_path, mocker):
+    resources = WorkspaceResources()
+    resources.workspace_path = str(tmp_path)
+    resources.sandbox_config = sandbox.SandboxConfig(
+        level=sandbox.SandboxLevel.DOCKER,
+        docker_workspace_source='/srv/nexent-data/agent-workspace',
+        extra_kwargs={'shared_workspace': True},
+    )
+    container = Mock()
+    mocker.patch.object(resources, '_sandbox_containers', return_value=[container])
+    grant = mocker.patch.object(resources, '_grant_sandbox_output_access')
+
+    resources._push_file_workspace_to_sandbox()
+    resources._pull_file_workspace_from_sandbox()
+
+    grant.assert_called_once_with(container, tmp_path)
+    container.put_archive.assert_not_called()
+    container.get_archive.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ('mount_update', 'workspace_label_matches', 'expected'),
+    [
+        ({}, True, True),
+        ({'Type': 'volume'}, True, False),
+        ({'Destination': '/mnt/wrong'}, True, False),
+        ({'RW': False}, True, False),
+        ({'Source': '/srv/other'}, True, False),
+        ({}, False, False),
+    ],
+)
+def test_recovery_checks_deployment_bind_mount(mocker, mount_update, workspace_label_matches, expected):
+    manager = object.__new__(sandbox.SandboxPoolManager)
+    source = '/srv/nexent-data/agent-workspace'
+    target = '/mnt/nexent/workdir'
+    config = sandbox.SandboxConfig(
+        level=sandbox.SandboxLevel.DOCKER, scope=sandbox.SandboxScope.SYSTEM,
+        docker_workspace_source=source, extra_kwargs={'workspace_root': target},
+    )
+    container = Mock(
+        status='running',
+        short_id='sandbox-id',
+        labels={
+            'com.nexent.sandbox': 'runtime',
+            'com.nexent.workspace': config.docker_workspace().mount_id if workspace_label_matches else 'old',
+            sandbox.TLS_LABEL: sandbox.TLS_VERSION,
+        },
+        attrs={
+            'Mounts': [{'Type': 'bind', 'Source': source, 'Destination': target, 'RW': True, **mount_update}],
+            'NetworkSettings': {'Ports': {f'{sandbox.SANDBOX_JUPYTER_PORT}/tcp': [
+                {'HostIp': '127.0.0.1', 'HostPort': '49173'},
+            ]}},
+        },
+    )
+    container.name = sandbox.SANDBOX_CONTAINER_NAME
+    mocker.patch('docker.from_env').return_value.containers.list.return_value = [container]
+    mocker.patch.object(sandbox, '_is_containerized_runtime', return_value=False)
+    tls = mocker.patch.object(sandbox, 'load_container_tls')
+    tls.return_value.http.get.return_value.json.return_value = []
+
+    recovered = manager._recover_docker_container(config, logging.getLogger('test'), host_tools_exist=False)
+
+    if expected:
+        assert recovered.container is container
+        tls.assert_called_once_with(container)
+    else:
+        assert recovered is None
+        tls.assert_not_called()
 
 
 @pytest.mark.parametrize('scope', list(sandbox.SandboxScope))
