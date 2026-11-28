@@ -1,8 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Gateway identity policy over an infrastructure database snapshot."""
 
-from gateway.identity.session_id import is_local_session_id
 from gateway.identity.protocol import IdentityError
+from gateway.identity.token_codec import is_local_session_id
 from gateway.security.management_client import IdentityUnavailable
 from infrastructure.rdb.identity import IdentityRejected, IdentityStoreUnavailable
 
