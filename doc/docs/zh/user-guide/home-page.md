@@ -51,7 +51,7 @@
 3. 按任务需要配置工具、Skill、知识库和记忆。**知识库是可选能力**，仅在需要检索专属资料时准备。
 4. 调试并确认效果后发布智能体，再进入对话页面验证使用体验。
 
-详细操作参见 [智能体配置](./agent-development)。需要处理专属资料时，可参见 [知识库配置](./agent-development/knowledge-configuration)。
+详细操作参见 [智能体配置](./agent-development/agent-configuration)。需要处理专属资料时，可参见 [知识库配置](./agent-development/knowledge-configuration)。
 
 ### 我负责平台初始化或管理
 
@@ -71,7 +71,7 @@
 
 - [智能体对话](./start-chat)：选择智能体、发送问题并查看结果。
 - [自动任务](./auto-tasks)：管理按计划执行的任务。
-- [智能体配置](./agent-development)：创建、配置、调试与发布智能体。
+- [智能体配置](./agent-development/agent-configuration)：创建、配置、调试与发布智能体。
 - [资源仓库](./resource-repository/agent-repository)：查找和复用已有智能体。
 - [常见问题](../quick-start/faq)：查找使用与部署问题的处理方法。
 

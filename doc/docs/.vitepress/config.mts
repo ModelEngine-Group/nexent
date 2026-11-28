@@ -585,13 +585,9 @@ export default defineConfig({
               },
               {
                 "text": "智能体配置",
-                "link": "/zh/user-guide/agent-development",
+                "link": "/zh/user-guide/agent-development/agent-configuration",
                 "collapsed": false,
                 "items": [
-                  {
-                    "text": "创建与配置智能体",
-                    "link": "/zh/user-guide/agent-development/agent-configuration"
-                  },
                   {
                     "text": "添加外部 A2A 智能体",
                     "link": "/zh/user-guide/agent-development/a2a-external"
