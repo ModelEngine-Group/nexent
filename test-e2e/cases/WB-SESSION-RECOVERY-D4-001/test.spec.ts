@@ -26,6 +26,8 @@ journey("WB-SESSION-RECOVERY-D4-001", async ({ page, contract }) => {
   const targetGate = new Promise<void>((resolve) => { releaseTarget = resolve; });
   let releaseRetry = () => {};
   const retryGate = new Promise<void>((resolve) => { releaseRetry = resolve; });
+  let releaseReplay = () => {};
+  const replayGate = new Promise<void>((resolve) => { releaseReplay = resolve; });
   const requests: Array<{ resume: boolean; body: any }> = [];
   const target = { agent_id: 42, name: "recovery_fixture", display_name: "Recovery fixture", description: "Fixture",
     permission: "EDIT", model_ids: [1], model_names: ["Fixture Model"], prompt: "Return the supplied text",
@@ -50,14 +52,20 @@ journey("WB-SESSION-RECOVERY-D4-001", async ({ page, contract }) => {
     let events: object[];
     if (resume) {
       expect(body.conversation_id).toBe(91);
+      expect(body.resume_message_id).toBe(15);
       const running = messages.findLast((message) => message.status === "streaming")!;
-      running.status = "completed";
-      events = [
-        { type: "final_answer", content: "Retry recovered ", answer_phase: "delta", step_id: "retry-step", attempt_id: "retry-attempt" },
-        { type: "final_answer", content: "successfully", answer_phase: "delta", step_id: "retry-step", attempt_id: "retry-attempt" },
-        { type: "final_answer", content: "", answer_phase: "complete", step_id: "retry-step", attempt_id: "retry-attempt" },
-      ];
-      running.message = events;
+      if (requests.filter((request) => request.resume).length === 1) {
+        events = [{ status: "stopped", replay_unavailable: true }];
+      } else {
+        await replayGate;
+        running.status = "completed";
+        running.message = [
+          { type: "final_answer", content: "Retry recovered ", answer_phase: "delta", step_id: "retry-step", attempt_id: "retry-attempt" },
+          { type: "final_answer", content: "successfully", answer_phase: "delta", step_id: "retry-step", attempt_id: "retry-attempt" },
+          { type: "final_answer", content: "", answer_phase: "complete", step_id: "retry-step", attempt_id: "retry-attempt" },
+        ];
+        events = [...running.message, { status: "completed" }];
+      }
     } else if (body.retry_message_index !== undefined) {
       expect(body.retry_message_index).toBe(4);
       expect(body.retry_user_message_id).toBe(13);
@@ -80,7 +88,12 @@ journey("WB-SESSION-RECOVERY-D4-001", async ({ page, contract }) => {
     await route.fulfill({ status: 200, contentType: "text/event-stream", headers: { conversation_id: "91", run_id: "fixture-generation" },
       body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") }).catch(() => {});
   });
-  contract.deferCleanup(async () => { releaseTarget(); releaseRetry(); await page.close(); });
+  contract.deferCleanup(async () => {
+    releaseTarget();
+    releaseRetry();
+    releaseReplay();
+    await page.close();
+  });
   const cards = page.locator('[data-slot="aui-requirement-clarification"]');
   await contract.precondition(contract.expectedIds("preconditions")[0], async () => {
     const read = page.waitForResponse((response) => response.url().endsWith("/api/conversation/91"));
@@ -115,8 +128,14 @@ journey("WB-SESSION-RECOVERY-D4-001", async ({ page, contract }) => {
     await page.goto(`${base}/zh/workbench`);
     releaseRetry();
     await page.goto(`${base}/zh/workbench?conversation_id=91`);
+    await expect.poll(() => requests.filter((request) => request.resume).length).toBe(2);
+    const assistant = page.locator('[data-slot="aui_assistant-message-root"]').last();
+    await expect(assistant.getByText("Retry partial", { exact: true })).toBeVisible();
+    await expect(assistant.locator('[data-slot="aui_assistant-message-completion-indicator"]')).toHaveCount(0);
+    releaseReplay();
     await expect(page.getByText("Retry recovered successfully", { exact: true })).toBeVisible();
-    expect(requests.filter((request) => request.resume)).toHaveLength(1);
+    await expect(assistant.locator('[data-slot="aui_assistant-message-completion-indicator"]')).toContainText("已完成");
+    expect(requests.filter((request) => request.resume)).toHaveLength(2);
     expect(requests.filter((request) => !request.resume)).toHaveLength(3);
     expect(messages.filter((message) => message.role === "user")).toHaveLength(3);
     await page.screenshot({ path: join(contract.caseDir, "recovered-creator.png") });
