@@ -26,7 +26,7 @@ from contracts.roles import has_any_role
 from management.db.identity.cas_session import revoke_cas_session_by_session_id
 from management.db.identity.local_session import revoke_local_session
 from management.services.permission.identity.local_session import InvalidRefreshRequestId, RefreshConflict
-from contracts.identity_session import is_local_session_id
+from gateway.identity.session_id import is_local_session_id
 
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)

@@ -2,7 +2,7 @@
 """Authoritative account, membership and credential-state lookup for Gateway."""
 
 from gateway.identity.downstream import IdentityError
-from contracts.identity_session import is_local_session_id
+from gateway.identity.session_id import is_local_session_id
 from contracts.roles import roles_from_record, primary_role
 
 

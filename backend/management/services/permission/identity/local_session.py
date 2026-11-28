@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 
 from contracts.constants.environment import JWT_EXPIRY_SECONDS, JWT_ISSUER, JWT_SECRET
 from contracts.errors.exceptions import UnauthorizedError
-from contracts.identity_session import LOCAL_SESSION_PREFIX, is_local_session_id
+from gateway.identity.session_id import LOCAL_SESSION_PREFIX, is_local_session_id
 from gateway.identity.token_codec import decode_session
 from infrastructure.rdb.client import get_db_session
 from management.db.identity.models import UserAccount, UserTenant

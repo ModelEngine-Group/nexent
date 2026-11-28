@@ -64,7 +64,7 @@ from management.services.permission.identity.signatures import (
 )
 from management.db.identity.cas_session import is_cas_session_active
 from management.db.identity.local_session import is_local_session_active
-from contracts.identity_session import is_local_session_id
+from gateway.identity.session_id import is_local_session_id
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.utils.request_context import get_user_language
 from permissions.models import CurrentUser
