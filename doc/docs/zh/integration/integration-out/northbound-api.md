@@ -940,37 +940,37 @@ curl "https://your-nexent-domain.com/nb/v1/file/download/knowledge_base/42/abc12
 ## 📊 监控面板接口
 
 北向监控面复用平台监控面板（Ops 仪表盘）的 24 个数据接口，路径前缀为
-`/nb/ops/v1/monitoring`。调用方只能读取**自己 API Key 所属租户**的监控数据：
+`/nb/v1/monitoring`。调用方只能读取**自己 API Key 所属租户**的监控数据：
 传入 `tenant_id` 且与所属租户不匹配时返回 `403`。
 
 ### 接口列表
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| `/nb/ops/v1/monitoring/models` | GET | 模型监控列表（分页、搜索、排序） |
-| `/nb/ops/v1/monitoring/models/summary` | GET | 模型监控汇总 |
-| `/nb/ops/v1/monitoring/models/rankings` | GET | 模型调用量 Top 5 |
-| `/nb/ops/v1/monitoring/models/trends` | GET | 模型用量趋势 |
-| `/nb/ops/v1/monitoring/models/refresh` | POST | 触发模型监控重算（异步，202） |
-| `/nb/ops/v1/monitoring/models/refreshes/{refresh_id}` | GET | 查询重算状态 |
-| `/nb/ops/v1/monitoring/skills` | GET | 技能监控列表 |
-| `/nb/ops/v1/monitoring/skills/summary` | GET | 技能监控汇总 |
-| `/nb/ops/v1/monitoring/skills/rankings` | GET | 技能用量 Top 5 |
-| `/nb/ops/v1/monitoring/skills/trends` | GET | 技能用量趋势 |
-| `/nb/ops/v1/monitoring/skills/refresh` | POST | 触发技能监控重算（异步，202） |
-| `/nb/ops/v1/monitoring/skills/refreshes/{refresh_id}` | GET | 查询重算状态 |
-| `/nb/ops/v1/monitoring/agents` | GET | Agent 监控列表 |
-| `/nb/ops/v1/monitoring/agents/summary` | GET | Agent 监控汇总（含 Token 用量） |
-| `/nb/ops/v1/monitoring/agents/trends` | GET | Agent 执行趋势 |
-| `/nb/ops/v1/monitoring/agents/rankings` | GET | Agent 执行量 Top 5 |
-| `/nb/ops/v1/monitoring/mcp-tools` | GET | MCP 工具监控列表（支持 tools/services 维度） |
-| `/nb/ops/v1/monitoring/mcp-tools/summary` | GET | MCP 监控汇总 |
-| `/nb/ops/v1/monitoring/mcp-tools/rankings` | GET | MCP 调用量 Top 5 |
-| `/nb/ops/v1/monitoring/mcp-tools/trends` | GET | MCP 调用趋势 |
-| `/nb/ops/v1/monitoring/mcp-tools/catalog` | GET | MCP 服务目录（筛选项数据） |
-| `/nb/ops/v1/monitoring/mcp-tools/overview` | GET | 平台总览（按租户的服务清单与调用趋势） |
-| `/nb/ops/v1/monitoring/mcp-tools/refresh` | POST | 触发 MCP 监控重算（异步，202） |
-| `/nb/ops/v1/monitoring/mcp-tools/refreshes/{refresh_id}` | GET | 查询重算状态 |
+| `/nb/v1/monitoring/models` | GET | 模型监控列表（分页、搜索、排序） |
+| `/nb/v1/monitoring/models/summary` | GET | 模型监控汇总 |
+| `/nb/v1/monitoring/models/rankings` | GET | 模型调用量 Top 5 |
+| `/nb/v1/monitoring/models/trends` | GET | 模型用量趋势 |
+| `/nb/v1/monitoring/models/refresh` | POST | 触发模型监控重算（异步，202） |
+| `/nb/v1/monitoring/models/refreshes/{refresh_id}` | GET | 查询重算状态 |
+| `/nb/v1/monitoring/skills` | GET | 技能监控列表 |
+| `/nb/v1/monitoring/skills/summary` | GET | 技能监控汇总 |
+| `/nb/v1/monitoring/skills/rankings` | GET | 技能用量 Top 5 |
+| `/nb/v1/monitoring/skills/trends` | GET | 技能用量趋势 |
+| `/nb/v1/monitoring/skills/refresh` | POST | 触发技能监控重算（异步，202） |
+| `/nb/v1/monitoring/skills/refreshes/{refresh_id}` | GET | 查询重算状态 |
+| `/nb/v1/monitoring/agents` | GET | Agent 监控列表 |
+| `/nb/v1/monitoring/agents/summary` | GET | Agent 监控汇总（含 Token 用量） |
+| `/nb/v1/monitoring/agents/trends` | GET | Agent 执行趋势 |
+| `/nb/v1/monitoring/agents/rankings` | GET | Agent 执行量 Top 5 |
+| `/nb/v1/monitoring/mcp-tools` | GET | MCP 工具监控列表（支持 tools/services 维度） |
+| `/nb/v1/monitoring/mcp-tools/summary` | GET | MCP 监控汇总 |
+| `/nb/v1/monitoring/mcp-tools/rankings` | GET | MCP 调用量 Top 5 |
+| `/nb/v1/monitoring/mcp-tools/trends` | GET | MCP 调用趋势 |
+| `/nb/v1/monitoring/mcp-tools/catalog` | GET | MCP 服务目录（筛选项数据） |
+| `/nb/v1/monitoring/mcp-tools/overview` | GET | 平台总览（按租户的服务清单与调用趋势） |
+| `/nb/v1/monitoring/mcp-tools/refresh` | POST | 触发 MCP 监控重算（异步，202） |
+| `/nb/v1/monitoring/mcp-tools/refreshes/{refresh_id}` | GET | 查询重算状态 |
 
 ### 通用查询参数
 
@@ -1008,10 +1008,10 @@ curl "https://your-nexent-domain.com/nb/v1/file/download/knowledge_base/42/abc12
 ### 示例
 
 ```bash
-curl -X GET "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/summary?start_date=2026-11-20&end_date=2026-11-27" \
+curl -X GET "https://your-nexent-domain.com/nb/v1/monitoring/models/summary?start_date=2026-11-20&end_date=2026-11-27" \
   -H "Authorization: Bearer your-access-key-here"
 
-curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh" \
+curl -X POST "https://your-nexent-domain.com/nb/v1/monitoring/models/refresh" \
   -H "Authorization: Bearer your-access-key-here" \
   -H "Content-Type: application/json" \
   -d '{"start_date": "2026-11-20", "end_date": "2026-11-27"}'

@@ -940,7 +940,7 @@ curl "https://your-nexent-domain.com/nb/v1/file/download/knowledge_base/42/abc12
 ## Monitoring Dashboard APIs
 
 The northbound monitoring surface reuses the platform monitoring dashboard's
-24 data endpoints under the `/nb/ops/v1/monitoring` prefix. A caller may only
+24 data endpoints under the `/nb/v1/monitoring` prefix. A caller may only
 read monitoring data for the tenant that owns the API key: passing a
 `tenant_id` that does not match returns `403`.
 
@@ -948,30 +948,30 @@ read monitoring data for the tenant that owns the API key: passing a
 
 | API | Method | Description |
 |-----|--------|-------------|
-| `/nb/ops/v1/monitoring/models` | GET | Model monitoring list (paginated, searchable, sortable) |
-| `/nb/ops/v1/monitoring/models/summary` | GET | Model monitoring summary |
-| `/nb/ops/v1/monitoring/models/rankings` | GET | Top 5 models |
-| `/nb/ops/v1/monitoring/models/trends` | GET | Model usage trends |
-| `/nb/ops/v1/monitoring/models/refresh` | POST | Trigger model recompute (async, 202) |
-| `/nb/ops/v1/monitoring/models/refreshes/{refresh_id}` | GET | Query recompute status |
-| `/nb/ops/v1/monitoring/skills` | GET | Skill monitoring list |
-| `/nb/ops/v1/monitoring/skills/summary` | GET | Skill monitoring summary |
-| `/nb/ops/v1/monitoring/skills/rankings` | GET | Top 5 skills |
-| `/nb/ops/v1/monitoring/skills/trends` | GET | Skill usage trends |
-| `/nb/ops/v1/monitoring/skills/refresh` | POST | Trigger skill recompute (async, 202) |
-| `/nb/ops/v1/monitoring/skills/refreshes/{refresh_id}` | GET | Query recompute status |
-| `/nb/ops/v1/monitoring/agents` | GET | Agent monitoring list |
-| `/nb/ops/v1/monitoring/agents/summary` | GET | Agent monitoring summary (incl. token usage) |
-| `/nb/ops/v1/monitoring/agents/trends` | GET | Agent execution trends |
-| `/nb/ops/v1/monitoring/agents/rankings` | GET | Top 5 agents |
-| `/nb/ops/v1/monitoring/mcp-tools` | GET | MCP tool monitoring list (tools/services dimension) |
-| `/nb/ops/v1/monitoring/mcp-tools/summary` | GET | MCP monitoring summary |
-| `/nb/ops/v1/monitoring/mcp-tools/rankings` | GET | Top 5 MCP tools |
-| `/nb/ops/v1/monitoring/mcp-tools/trends` | GET | MCP call trends |
-| `/nb/ops/v1/monitoring/mcp-tools/catalog` | GET | MCP service catalog (filter options) |
-| `/nb/ops/v1/monitoring/mcp-tools/overview` | GET | Platform overview (per-tenant inventory and call trend) |
-| `/nb/ops/v1/monitoring/mcp-tools/refresh` | POST | Trigger MCP recompute (async, 202) |
-| `/nb/ops/v1/monitoring/mcp-tools/refreshes/{refresh_id}` | GET | Query recompute status |
+| `/nb/v1/monitoring/models` | GET | Model monitoring list (paginated, searchable, sortable) |
+| `/nb/v1/monitoring/models/summary` | GET | Model monitoring summary |
+| `/nb/v1/monitoring/models/rankings` | GET | Top 5 models |
+| `/nb/v1/monitoring/models/trends` | GET | Model usage trends |
+| `/nb/v1/monitoring/models/refresh` | POST | Trigger model recompute (async, 202) |
+| `/nb/v1/monitoring/models/refreshes/{refresh_id}` | GET | Query recompute status |
+| `/nb/v1/monitoring/skills` | GET | Skill monitoring list |
+| `/nb/v1/monitoring/skills/summary` | GET | Skill monitoring summary |
+| `/nb/v1/monitoring/skills/rankings` | GET | Top 5 skills |
+| `/nb/v1/monitoring/skills/trends` | GET | Skill usage trends |
+| `/nb/v1/monitoring/skills/refresh` | POST | Trigger skill recompute (async, 202) |
+| `/nb/v1/monitoring/skills/refreshes/{refresh_id}` | GET | Query recompute status |
+| `/nb/v1/monitoring/agents` | GET | Agent monitoring list |
+| `/nb/v1/monitoring/agents/summary` | GET | Agent monitoring summary (incl. token usage) |
+| `/nb/v1/monitoring/agents/trends` | GET | Agent execution trends |
+| `/nb/v1/monitoring/agents/rankings` | GET | Top 5 agents |
+| `/nb/v1/monitoring/mcp-tools` | GET | MCP tool monitoring list (tools/services dimension) |
+| `/nb/v1/monitoring/mcp-tools/summary` | GET | MCP monitoring summary |
+| `/nb/v1/monitoring/mcp-tools/rankings` | GET | Top 5 MCP tools |
+| `/nb/v1/monitoring/mcp-tools/trends` | GET | MCP call trends |
+| `/nb/v1/monitoring/mcp-tools/catalog` | GET | MCP service catalog (filter options) |
+| `/nb/v1/monitoring/mcp-tools/overview` | GET | Platform overview (per-tenant inventory and call trend) |
+| `/nb/v1/monitoring/mcp-tools/refresh` | POST | Trigger MCP recompute (async, 202) |
+| `/nb/v1/monitoring/mcp-tools/refreshes/{refresh_id}` | GET | Query recompute status |
 
 ### Common Query Parameters
 
@@ -1011,10 +1011,10 @@ default 120/min), `503 HTTP_503` (monitoring temporarily unavailable).
 ### Example
 
 ```bash
-curl -X GET "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/summary?start_date=2026-11-20&end_date=2026-11-27" \
+curl -X GET "https://your-nexent-domain.com/nb/v1/monitoring/models/summary?start_date=2026-11-20&end_date=2026-11-27" \
   -H "Authorization: Bearer your-access-key-here"
 
-curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh" \
+curl -X POST "https://your-nexent-domain.com/nb/v1/monitoring/models/refresh" \
   -H "Authorization: Bearer your-access-key-here" \
   -H "Content-Type: application/json" \
   -d '{"start_date": "2026-11-20", "end_date": "2026-11-27"}'

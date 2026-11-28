@@ -99,7 +99,7 @@ async def test_nb_monitoring_reuses_ops_handlers_behind_the_api_key_hop(monkeypa
         return actor
 
     monkeypatch.setattr("gateway.application.resolve_identity", resolve)
-    path = "/nb/ops/v1/monitoring/models/summary"
+    path = "/nb/v1/monitoring/models/summary"
     params = {"start_date": "2026-11-18", "end_date": "2026-11-19"}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ops), base_url="http://ops") as downstream:
         async def forward(request):
@@ -124,7 +124,7 @@ async def test_nb_monitoring_reuses_ops_handlers_behind_the_api_key_hop(monkeypa
                 actor["kind"] = "session"
                 assert (await client.get(path, params=params)).status_code == 401
                 actor["kind"] = "api_key"
-                assert (await client.get("/nb/ops/v1/monitoring/unlisted")).status_code == 404
+                assert (await client.get("/nb/v1/monitoring/unlisted")).status_code == 404
         assert (await downstream.get(path, params=params)).status_code == 401
 
 
@@ -165,7 +165,7 @@ async def test_nb_monitoring_routes_every_declared_route_through_the_signed_hop(
     monkeypatch.setattr("gateway.application.resolve_identity", resolve)
     query = {"start_date": day, "end_date": day}
     routes = [
-        ("GET", f"/nb/ops/v1/monitoring/{suffix}", query) for suffix in (
+        ("GET", f"/nb/v1/monitoring/{suffix}", query) for suffix in (
             "models", "models/summary", "models/rankings", "models/trends",
             "skills", "skills/summary", "skills/rankings", "skills/trends",
             "agents", "agents/summary", "agents/trends", "agents/rankings",
@@ -188,9 +188,9 @@ async def test_nb_monitoring_routes_every_declared_route_through_the_signed_hop(
                     assert response.status_code == 200, (path, response.text)
                     assert set(response.json()) == {"message", "data", "requestId"}, path
                 for domain in ("models", "skills", "mcp-tools"):
-                    issued = await client.post(f"/nb/ops/v1/monitoring/{domain}/refresh", json=query)
+                    issued = await client.post(f"/nb/v1/monitoring/{domain}/refresh", json=query)
                     assert issued.status_code == 202, domain
                     token = issued.json()["data"]["data"]["refresh_id"]
-                    status = await client.get(f"/nb/ops/v1/monitoring/{domain}/refreshes/{token}")
+                    status = await client.get(f"/nb/v1/monitoring/{domain}/refreshes/{token}")
                     assert status.status_code == 200, domain
                     assert set(status.json()) == {"message", "data", "requestId"}, domain

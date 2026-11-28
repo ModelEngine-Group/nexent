@@ -29,6 +29,31 @@ EXPECTED_ENABLED = {
     ("GET", "/nb/v1/automations"): "automations.list",
     ("GET", "/nb/v1/automations/{task_id}"): "automations.detail",
     ("GET", "/nb/v1/file/download/{object_name:path}"): "file.download",
+    # Ops monitoring gates.
+    ("GET", "/nb/v1/monitoring/models"): "monitoring.models.list",
+    ("GET", "/nb/v1/monitoring/models/summary"): "monitoring.models.summary",
+    ("GET", "/nb/v1/monitoring/models/rankings"): "monitoring.models.rankings",
+    ("GET", "/nb/v1/monitoring/models/trends"): "monitoring.models.trends",
+    ("POST", "/nb/v1/monitoring/models/refresh"): "monitoring.models.refresh",
+    ("GET", "/nb/v1/monitoring/models/refreshes/{refresh_id}"): "monitoring.models.refresh_status",
+    ("GET", "/nb/v1/monitoring/skills"): "monitoring.skills.list",
+    ("GET", "/nb/v1/monitoring/skills/summary"): "monitoring.skills.summary",
+    ("GET", "/nb/v1/monitoring/skills/rankings"): "monitoring.skills.rankings",
+    ("GET", "/nb/v1/monitoring/skills/trends"): "monitoring.skills.trends",
+    ("POST", "/nb/v1/monitoring/skills/refresh"): "monitoring.skills.refresh",
+    ("GET", "/nb/v1/monitoring/skills/refreshes/{refresh_id}"): "monitoring.skills.refresh_status",
+    ("GET", "/nb/v1/monitoring/agents"): "monitoring.agents.list",
+    ("GET", "/nb/v1/monitoring/agents/summary"): "monitoring.agents.summary",
+    ("GET", "/nb/v1/monitoring/agents/trends"): "monitoring.agents.trends",
+    ("GET", "/nb/v1/monitoring/agents/rankings"): "monitoring.agents.rankings",
+    ("GET", "/nb/v1/monitoring/mcp-tools"): "monitoring.mcp_tools.list",
+    ("GET", "/nb/v1/monitoring/mcp-tools/summary"): "monitoring.mcp_tools.summary",
+    ("GET", "/nb/v1/monitoring/mcp-tools/rankings"): "monitoring.mcp_tools.rankings",
+    ("GET", "/nb/v1/monitoring/mcp-tools/trends"): "monitoring.mcp_tools.trends",
+    ("GET", "/nb/v1/monitoring/mcp-tools/catalog"): "monitoring.mcp_tools.catalog",
+    ("GET", "/nb/v1/monitoring/mcp-tools/overview"): "monitoring.mcp_tools.overview",
+    ("POST", "/nb/v1/monitoring/mcp-tools/refresh"): "monitoring.mcp_tools.refresh",
+    ("GET", "/nb/v1/monitoring/mcp-tools/refreshes/{refresh_id}"): "monitoring.mcp_tools.refresh_status",
 }
 DARK_METHOD_PATHS = {
     ("POST", "/nb/v1/automations/{task_id}/pause"),
@@ -80,7 +105,8 @@ def test_enabled_gates_present_dark_gates_absent():
         row = by_key.get((method, path))
         assert row is not None, f"enabled capability {capability} missing a snapshot row"
         assert row["capability_id"] == capability
-        assert row["target"] == "management"  # real owning service
+        expected_target = "ops" if path.startswith("/nb/v1/monitoring/") else "management"
+        assert row["target"] == expected_target  # real owning service
         assert row["credential_kinds"] == ["api_key"]
     for method, path in DARK_METHOD_PATHS:
         leaked = [r for r in document["routes"] if (r["method"], r["path"]) == (method, path)]

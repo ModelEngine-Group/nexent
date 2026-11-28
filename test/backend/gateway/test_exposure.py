@@ -248,20 +248,20 @@ def test_ops_monitoring_routes_reach_ops_only_for_sessions(method, path):
 
 
 @pytest.mark.parametrize("method,path", [
-    ("GET", "/nb/ops/v1/monitoring/models"),
-    ("GET", "/nb/ops/v1/monitoring/models/summary"),
-    ("GET", "/nb/ops/v1/monitoring/models/trends"),
-    ("GET", "/nb/ops/v1/monitoring/models/rankings"),
-    ("POST", "/nb/ops/v1/monitoring/models/refresh"),
-    ("GET", "/nb/ops/v1/monitoring/models/refreshes/r-1"),
-    ("GET", "/nb/ops/v1/monitoring/skills"),
-    ("POST", "/nb/ops/v1/monitoring/skills/refresh"),
-    ("GET", "/nb/ops/v1/monitoring/agents"),
-    ("GET", "/nb/ops/v1/monitoring/agents/rankings"),
-    ("GET", "/nb/ops/v1/monitoring/mcp-tools"),
-    ("GET", "/nb/ops/v1/monitoring/mcp-tools/catalog"),
-    ("GET", "/nb/ops/v1/monitoring/mcp-tools/overview"),
-    ("POST", "/nb/ops/v1/monitoring/mcp-tools/refresh"),
+    ("GET", "/nb/v1/monitoring/models"),
+    ("GET", "/nb/v1/monitoring/models/summary"),
+    ("GET", "/nb/v1/monitoring/models/trends"),
+    ("GET", "/nb/v1/monitoring/models/rankings"),
+    ("POST", "/nb/v1/monitoring/models/refresh"),
+    ("GET", "/nb/v1/monitoring/models/refreshes/r-1"),
+    ("GET", "/nb/v1/monitoring/skills"),
+    ("POST", "/nb/v1/monitoring/skills/refresh"),
+    ("GET", "/nb/v1/monitoring/agents"),
+    ("GET", "/nb/v1/monitoring/agents/rankings"),
+    ("GET", "/nb/v1/monitoring/mcp-tools"),
+    ("GET", "/nb/v1/monitoring/mcp-tools/catalog"),
+    ("GET", "/nb/v1/monitoring/mcp-tools/overview"),
+    ("POST", "/nb/v1/monitoring/mcp-tools/refresh"),
 ])
 def test_nb_ops_monitoring_mirror_reaches_ops_for_api_keys(method, path):
     """The /nb mirror of the monitoring surface is API-key only and ops-owned."""
@@ -280,7 +280,7 @@ def test_nb_ops_monitoring_rows_can_be_emergency_excluded_by_capability(monkeypa
 
     snapshot = Path(registry_module.__file__).with_name("registry.json")
     document = json.loads(snapshot.read_text(encoding="utf-8"))
-    rows = [row for row in document["routes"] if row["path"].startswith("/nb/ops/v1/monitoring/")]
+    rows = [row for row in document["routes"] if row["path"].startswith("/nb/v1/monitoring/")]
     assert rows and all(row.get("capability_id", "").startswith("monitoring.") for row in rows)
 
     import gateway.configuration as configuration
@@ -292,8 +292,8 @@ def test_nb_ops_monitoring_rows_can_be_emergency_excluded_by_capability(monkeypa
     registry_module.default_registry.cache_clear()
     try:
         excluded = registry_module.default_registry()
-        assert excluded.match("POST", "/nb/ops/v1/monitoring/models/refresh") is None
-        assert excluded.match("GET", "/nb/ops/v1/monitoring/models") is not None
+        assert excluded.match("POST", "/nb/v1/monitoring/models/refresh") is None
+        assert excluded.match("GET", "/nb/v1/monitoring/models") is not None
     finally:
         registry_module.default_registry.cache_clear()
 

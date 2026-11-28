@@ -52,7 +52,7 @@ def nb_client(monkeypatch):
 
 def _nb_refresh_token(client, tenant="tenantA", start=DAY, end=DAY, requested=None):
     response = client.post(
-        "/nb/ops/v1/monitoring/models/refresh",
+        "/nb/v1/monitoring/models/refresh",
         json={"tenant_id": tenant, "start_date": start.isoformat(), "end_date": end.isoformat()},
     )
     return response
@@ -116,7 +116,7 @@ def test_nb_interface_contract_for_every_declared_route(
     json_body = {key: value.isoformat() if hasattr(value, "isoformat") else value
                  for key, value in (json_body or {}).items()} or None
     expected = 202 if method == "POST" else 200
-    response = client.request(method, f"/nb/ops/v1/monitoring/{suffix}",
+    response = client.request(method, f"/nb/v1/monitoring/{suffix}",
                               params=params or None, json=json_body)
     assert response.status_code == expected, response.text
     body = response.json()
@@ -132,11 +132,11 @@ def test_nb_interface_refresh_status_round_trip(nb_client, monkeypatch, domain):
     client, store, _ = nb_client
     for name, fake in _KERNEL_PATCHES.items():
         monkeypatch.setattr(monitoring, name, fake)
-    issued = client.post(f"/nb/ops/v1/monitoring/{domain}/refresh",
+    issued = client.post(f"/nb/v1/monitoring/{domain}/refresh",
                          json={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
     assert issued.status_code == 202
     token = issued.json()["data"]["data"]["refresh_id"]
-    status = client.get(f"/nb/ops/v1/monitoring/{domain}/refreshes/{token}")
+    status = client.get(f"/nb/v1/monitoring/{domain}/refreshes/{token}")
     assert status.status_code == 200
     body = status.json()
     assert set(body) == {"message", "data", "requestId"}
@@ -147,7 +147,7 @@ def test_nb_query_success_uses_the_partner_envelope(nb_client, monkeypatch):
     client, _, _ = nb_client
     monkeypatch.setattr(monitoring, "read_models", lambda *_args, **_kwargs: ([], [], [DAY],
                           {"coverage_state": "covered", "is_stale": False, "data_as_of": None}))
-    response = client.get("/nb/ops/v1/monitoring/models/trends",
+    response = client.get("/nb/v1/monitoring/models/trends",
                           params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
     assert response.status_code == 200
     body = response.json()
@@ -169,12 +169,12 @@ def test_nb_query_locks_the_tenant_to_the_api_key_owner(nb_client, monkeypatch):
 
     monkeypatch.setattr(monitoring, "read_models", fake_read)
     params = {"start_date": DAY.isoformat(), "end_date": DAY.isoformat()}
-    response = client.get("/nb/ops/v1/monitoring/models", params=params)
+    response = client.get("/nb/v1/monitoring/models", params=params)
     assert response.status_code == 200
     assert captured["tenant"] == identity.tenant_id
 
     foreign = dict(params, tenant_id="tenantB")
-    denied = client.get("/nb/ops/v1/monitoring/models", params=foreign)
+    denied = client.get("/nb/v1/monitoring/models", params=foreign)
     assert denied.status_code == 403
     body = denied.json()
     assert body["code"] == "HTTP_403"
@@ -204,7 +204,7 @@ def test_nb_refresh_status_hides_foreign_tenant_tokens(nb_client):
                           "end": DAY.isoformat(), "requested": now.timestamp(),
                           "exp": now + timedelta(minutes=10)},
                          monitoring._refresh_key(), algorithm="HS256")
-    response = client.get(f"/nb/ops/v1/monitoring/models/refreshes/{foreign}")
+    response = client.get(f"/nb/v1/monitoring/models/refreshes/{foreign}")
     assert response.status_code == 404
     assert response.json()["code"] == "HTTP_404"
 
@@ -212,7 +212,7 @@ def test_nb_refresh_status_hides_foreign_tenant_tokens(nb_client):
 def test_nb_refresh_status_resolves_own_tenant_tokens(nb_client):
     client, _, _ = nb_client
     token = _nb_refresh_token(client).json()["data"]["data"]["refresh_id"]
-    response = client.get(f"/nb/ops/v1/monitoring/models/refreshes/{token}")
+    response = client.get(f"/nb/v1/monitoring/models/refreshes/{token}")
     assert response.status_code == 200
     assert response.json()["data"]["data"]["status"] == "completed"
 
@@ -228,7 +228,7 @@ def test_nb_refresh_actions_are_rate_limited_per_tenant(nb_client, monkeypatch):
     # TestClient would re-raise by default; the probe only inspects the
     # delivered response, as the real client receives it.
     probe = TestClient(client.app, raise_server_exceptions=False)
-    response = probe.post("/nb/ops/v1/monitoring/models/refresh",
+    response = probe.post("/nb/v1/monitoring/models/refresh",
                           json={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
     assert response.status_code == 429
     body = response.json()
@@ -239,7 +239,7 @@ def test_nb_refresh_actions_are_rate_limited_per_tenant(nb_client, monkeypatch):
 def test_nb_query_errors_keep_the_three_field_shape(nb_client, monkeypatch):
     client, _, _ = nb_client
     del client.app.state.monitoring
-    response = client.get("/nb/ops/v1/monitoring/models",
+    response = client.get("/nb/v1/monitoring/models",
                           params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
     assert response.status_code == 503
     body = response.json()
@@ -251,7 +251,7 @@ def test_nb_query_errors_keep_the_three_field_shape(nb_client, monkeypatch):
 def test_nb_validation_errors_are_translated(nb_client):
     client, _, _ = nb_client
     far = DAY + timedelta(days=400)
-    response = client.get("/nb/ops/v1/monitoring/models",
+    response = client.get("/nb/v1/monitoring/models",
                           params={"start_date": DAY.isoformat(), "end_date": far.isoformat()})
     assert response.status_code == 422
     body = response.json()
@@ -291,32 +291,6 @@ def test_session_mount_keeps_the_internal_contract(nb_client, monkeypatch):
         client.app.dependency_overrides.pop(monitoring.authenticate, None)
 
 
-def test_registry_rows_match_nb_mounted_routes_and_capabilities(monkeypatch):
-    """Drift guard: snapshot rows, /nb mount and capability ids stay one set."""
-    mounted = set()
-    for route in monitoring.ops_router.routes:
-        # The application mounts ops_router a second time under /nb; FastAPI
-        # wraps included routers, so the mirror is derived from the router
-        # itself and confirmed behaviorally below.
-        mounted.update((method, f"/nb{route.path}") for method in route.methods - {"HEAD"})
-    document = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
-    rows = [row for row in document["routes"] if row["path"].startswith("/nb/ops/v1/monitoring/")]
-    registered = {(row["method"], row["path"]) for row in rows}
-    assert registered == mounted
-    assert len(rows) == 24
-    capabilities = [row["capability_id"] for row in rows]
-    assert len(set(capabilities)) == 24
-    assert all(row["target"] == "ops" for row in rows)
-    assert all(row["credential_kinds"] == ["api_key"] for row in rows)
-    assert all(row["route_id"].startswith("route-") for row in rows)
-
-    # The app keeps the /nb mirror mounted: an identity failure must stay
-    # distinguishable from an unmounted route.
-    monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
-    with TestClient(application.create_app(), raise_server_exceptions=False) as probe:
-        assert probe.get("/nb/ops/v1/monitoring/models").status_code != 404
-
-
 # ---------------------------------------------------------------------------
 # API-key usage accounting: same ledger, same writer, fail-open.
 # ---------------------------------------------------------------------------
@@ -349,20 +323,20 @@ def test_record_api_key_usage_writes_the_same_ledger_fields(monkeypatch):
 
     monkeypatch.setattr(shared, "log_token_usage", fake_log)
     request = SimpleNamespace(
-        url=SimpleNamespace(path="/nb/ops/v1/monitoring/models/summary"),
+        url=SimpleNamespace(path="/nb/v1/monitoring/models/summary"),
         method="GET", headers={"X-Request-Id": "req-42"},
-        scope={"route": SimpleNamespace(path="/nb/ops/v1/monitoring/models/summary")},
+        scope={"route": SimpleNamespace(path="/nb/v1/monitoring/models/summary")},
     )
     principal = AuthenticatedIdentity(user_id="partner-user", tenant_id="tenantA",
                                       token_id=7, kind=CredentialKind.API_KEY)
     shared.record_api_key_usage(principal, request)
     assert captured == {
         "token_id": 7,
-        "call_function_name": "/nb/ops/v1/monitoring/models/summary",
+        "call_function_name": "/nb/v1/monitoring/models/summary",
         "related_id": None,
         "created_by": "partner-user",
         "metadata": {"method": "GET", "request_id": "req-42",
-                     "path": "/nb/ops/v1/monitoring/models/summary"},
+                     "path": "/nb/v1/monitoring/models/summary"},
     }
 
     # No token id: nothing is written.
@@ -409,7 +383,7 @@ def test_nb_lane_accounts_usage_through_the_ops_lane(nb_client, monkeypatch):
     try:
         monkeypatch.setattr(monitoring, "read_models", lambda *_a, **_k: (
             [], [], [DAY], {"coverage_state": "covered", "is_stale": False, "data_as_of": None}))
-        response = client.get("/nb/ops/v1/monitoring/models/summary",
+        response = client.get("/nb/v1/monitoring/models/summary",
                               params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
         assert response.status_code == 200
         assert response.json()["message"] == "success"
@@ -423,7 +397,7 @@ def test_nb_lane_accounts_usage_through_the_ops_lane(nb_client, monkeypatch):
     assert fn is record_api_key_usage
     principal, request = args
     assert (principal.user_id, principal.tenant_id, principal.token_id) == ("partner-user", "tenantA", 7)
-    assert request.url.path == "/nb/ops/v1/monitoring/models/summary"
+    assert request.url.path == "/nb/v1/monitoring/models/summary"
 
     # Lane admission failure drops the accounting, never the request.
     class BrokenManager:
@@ -431,7 +405,7 @@ def test_nb_lane_accounts_usage_through_the_ops_lane(nb_client, monkeypatch):
             raise RuntimeError("lane full")
 
     client.app.state.thread_manager = BrokenManager()
-    response = client.get("/nb/ops/v1/monitoring/models/summary",
+    response = client.get("/nb/v1/monitoring/models/summary",
                           params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
     assert response.status_code == 200
 
@@ -445,7 +419,7 @@ def test_nb_lane_without_gateway_identity_is_rejected(nb_client, monkeypatch):
         # The domain 401 travels the shared catch-all handler; the probe only
         # inspects the delivered response, as the real client receives it.
         probe = TestClient(client.app, raise_server_exceptions=False)
-        response = probe.get("/nb/ops/v1/monitoring/models/summary",
+        response = probe.get("/nb/v1/monitoring/models/summary",
                              params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
         assert response.status_code == 401
         body = response.json()
@@ -461,7 +435,7 @@ def test_nb_lane_rejects_a_session_kind_gateway_identity(nb_client, monkeypatch)
     client.app.dependency_overrides.pop(ops_principal, None)
     try:
         probe = TestClient(client.app, raise_server_exceptions=False)
-        response = probe.get("/nb/ops/v1/monitoring/models/summary",
+        response = probe.get("/nb/v1/monitoring/models/summary",
                              params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
         assert response.status_code == 401
     finally:
@@ -488,7 +462,7 @@ async def test_envelope_middleware_passes_non_json_and_undecodable_bodies_throug
 
     async def drive(app, *, content_type, body):
         sent = []
-        scope = {"type": "http", "path": "/nb/ops/v1/monitoring/models",
+        scope = {"type": "http", "path": "/nb/v1/monitoring/models",
                  "method": "GET", "headers": [], "query_string": b""}
 
         async def receive():
@@ -539,7 +513,7 @@ async def test_envelope_middleware_reassembles_chunked_bodies_and_forwards_other
             return
         sent.append(message)
 
-    scope = {"type": "http", "path": "/nb/ops/v1/monitoring/models",
+    scope = {"type": "http", "path": "/nb/v1/monitoring/models",
              "method": "GET", "headers": [], "query_string": b""}
 
     async def receive():
@@ -618,7 +592,7 @@ def test_nb_lane_rejects_an_incomplete_gateway_identity(nb_client, monkeypatch):
     client.app.dependency_overrides.pop(ops_principal, None)
     try:
         probe = TestClient(client.app, raise_server_exceptions=False)
-        response = probe.get("/nb/ops/v1/monitoring/models/summary",
+        response = probe.get("/nb/v1/monitoring/models/summary",
                              params={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
         assert response.status_code == 401
     finally:
@@ -628,7 +602,7 @@ def test_nb_lane_rejects_an_incomplete_gateway_identity(nb_client, monkeypatch):
 def test_nb_refresh_rejects_an_invalid_date_range(nb_client):
     client, _, _ = nb_client
     far = DAY + timedelta(days=400)
-    response = client.post("/nb/ops/v1/monitoring/models/refresh",
+    response = client.post("/nb/v1/monitoring/models/refresh",
                            json={"start_date": DAY.isoformat(), "end_date": far.isoformat()})
     assert response.status_code == 422
     assert response.json()["status"] == 422
@@ -637,7 +611,7 @@ def test_nb_refresh_rejects_an_invalid_date_range(nb_client):
 def test_nb_refresh_reports_unavailable_without_the_service(nb_client):
     client, _, _ = nb_client
     del client.app.state.monitoring
-    response = client.post("/nb/ops/v1/monitoring/models/refresh",
+    response = client.post("/nb/v1/monitoring/models/refresh",
                            json={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
     assert response.status_code == 503
     assert response.json()["status"] == 503
@@ -655,7 +629,7 @@ def test_nb_refresh_status_hides_foreign_tokens_in_every_domain(nb_client, domai
                           "start": DAY.isoformat(), "end": DAY.isoformat(),
                           "requested": now.timestamp(), "exp": now + timedelta(minutes=10)},
                          key, algorithm="HS256")
-    response = client.get(f"/nb/ops/v1/monitoring/{domain}/refreshes/{foreign}")
+    response = client.get(f"/nb/v1/monitoring/{domain}/refreshes/{foreign}")
     assert response.status_code == 404
     assert response.json()["code"] == "HTTP_404"
 
@@ -688,13 +662,12 @@ def test_audit_record_survives_a_broken_logger(monkeypatch):
                                          user_id="u", tenant_id="t")
 
 
-def test_record_api_key_usage_restores_the_mount_prefix_on_route_templates(monkeypatch):
-    """Mounted /nb routers expose un-prefixed templates; the ledger needs /nb.
+def test_record_api_key_usage_records_gate_templates_verbatim(monkeypatch):
+    """Gate routers embed their prefix in route.path; the ledger records it as-is.
 
-    Found by the containerized interface test: the ops mirror's route objects
-    carry ``/ops/v1/monitoring/...`` as ``route.path`` (include_router mounts
-    keep the original template), so accounting recorded northbound calls as
-    internal ones. The shared writer re-attaches the northbound prefix.
+    The include_router mount shape that once produced un-prefixed templates is
+    gone (gates own their /nb/v1 prefix), so verbatim recording is both the
+    real behavior and the published contract.
     """
     from backend.http.server import northbound as shared
 
@@ -704,15 +677,14 @@ def test_record_api_key_usage_restores_the_mount_prefix_on_route_templates(monke
     principal = AuthenticatedIdentity(user_id="u", tenant_id="t", token_id=7,
                                       kind=CredentialKind.API_KEY)
     request = SimpleNamespace(
-        url=SimpleNamespace(path="/nb/ops/v1/monitoring/models/refreshes/<jwt>"),
+        url=SimpleNamespace(path="/nb/v1/monitoring/models/refreshes/<jwt>"),
         method="GET", headers={},
-        scope={"route": SimpleNamespace(path="/ops/v1/monitoring/models/refreshes/{refresh_id}")},
+        scope={"route": SimpleNamespace(path="/nb/v1/monitoring/models/refreshes/{refresh_id}")},
     )
     shared.record_api_key_usage(principal, request)
-    assert captured["call_function_name"] == \
-        "/nb/ops/v1/monitoring/models/refreshes/{refresh_id}"
+    assert captured["call_function_name"] ==         "/nb/v1/monitoring/models/refreshes/{refresh_id}"
 
-    # Management-style routes already embed their prefix: untouched.
+    # Management-style routes already embed their prefix: also verbatim.
     captured.clear()
     request = SimpleNamespace(
         url=SimpleNamespace(path="/nb/v1/automations"),

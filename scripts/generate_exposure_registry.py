@@ -38,7 +38,7 @@ sys.path.insert(0, str(REPO_ROOT / "backend"))
 sys.path.insert(0, str(REPO_ROOT))  # infrastructure/ lives at the repo root
 
 SNAPSHOT = REPO_ROOT / "backend" / "gateway" / "exposure" / "registry.json"
-GATE_PACKAGE = "management.api.northbound_gates"
+GATE_PACKAGES = ("management.api.northbound_gates", "ops.api.northbound_gates")
 LEGACY_PREFIXES = ("/nb/a2a/",)  # preserved sections owned elsewhere
 
 # Gate module prefix -> the real microservice the gate lives in. The gateway
@@ -82,9 +82,17 @@ def _audit_dependency_present(endpoint) -> bool:
 
 
 def _collect_gate_rows():
-    """Import the gate routers and derive one snapshot row per capability."""
-    module = __import__(GATE_PACKAGE, fromlist=["nb_capability_routers"])
-    routers = module.nb_capability_routers()
+    """Import the gate routers and derive one snapshot row per capability.
+
+    Every service exposing /nb gates owns a ``northbound_gates`` package with
+    a ``nb_capability_routers()`` entry point; importing them all keeps one
+    declaration -> one row pipeline across services (SERVICE_OWNERSHIP maps
+    each package root to the real owning microservice).
+    """
+    routers = []
+    for gate_package in GATE_PACKAGES:
+        module = __import__(gate_package, fromlist=["nb_capability_routers"])
+        routers.extend(module.nb_capability_routers())
 
     rows, seen_ids, seen_keys = [], {}, {}
     for router in routers:

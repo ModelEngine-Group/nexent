@@ -35,6 +35,7 @@ import backend.http.server.northbound
 import management.services.permission.identity.northbound
 import ops.api.monitoring
 import ops.api.northbound_envelope
+import ops.api.northbound_gates
 
 shipped = set(json.loads(sys.argv[2]))
 excluded = ("test/", "test-e2e/", "scripts/", "deploy/", "doc/", "docs/", "frontend/")

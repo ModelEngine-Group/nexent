@@ -44,11 +44,15 @@ def create_app() -> FastAPI:
         from ops.api.monitoring import ops_router
 
         application.include_router(ops_router)
-        # Northbound mirror: the same handlers under /nb resolve API-key
-        # principals (ops_principal) and are wrapped into the partner
-        # envelope by NorthboundEnvelopeMiddleware. Registered by the gateway
-        # exposure snapshot with credential_kinds=["api_key"].
-        application.include_router(ops_router, prefix="/nb", include_in_schema=False)
+        # Northbound gates: hand-written /nb/v1/monitoring routes over the
+        # same handlers, identity dependency and selection contracts; the
+        # envelope middleware wraps their responses into the partner
+        # contract. Declared via @nb_exposed and registered in the gateway
+        # exposure snapshot by the offline generator.
+        from ops.api.northbound_gates import nb_capability_routers
+
+        for gate_router in nb_capability_routers():
+            application.include_router(gate_router)
     return application
 
 

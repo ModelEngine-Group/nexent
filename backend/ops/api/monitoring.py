@@ -481,7 +481,6 @@ def _refresh_key(kind="model"):
 
 @ops_router.post("/models/refresh", status_code=202)
 def refresh_models(request: Request, scope: RefreshSelection,
-                   _guard: Annotated[None, Depends(nb_action_guard)],
                    principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
     tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
     if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
@@ -556,7 +555,6 @@ def model_refresh_status(request: Request, refresh_id: str,
 
 @ops_router.post("/skills/refresh", status_code=202, tags=["skill monitoring"])
 def refresh_skills(request: Request, scope: RefreshSelection,
-                   _guard: Annotated[None, Depends(nb_action_guard)],
                    principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
     tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
     if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
@@ -764,7 +762,6 @@ def _tool_refresh_key():
 
 @ops_router.post("/mcp-tools/refresh", status_code=202)
 def refresh_mcp_tools(request: Request, scope: RefreshSelection,
-                      _guard: Annotated[None, Depends(nb_action_guard)],
                       principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
     tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
     if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
