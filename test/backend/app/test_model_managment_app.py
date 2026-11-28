@@ -2127,21 +2127,24 @@ class TestModelAuditEntries:
 
 @pytest.mark.parametrize("endpoint", ["/model/provider/create", "/model/manage/provider/create"])
 @pytest.mark.parametrize(
-    ("error", "expected_status", "expected_detail"),
+    ("error", "expected_status", "expected_body"),
     [
         (
             ModelProviderError(401, "Provider unavailable"),
-            502,
-            "Model provider authentication failed. Check the model API key.",
+            422,
+            {
+                "code": "MODEL_PROVIDER_AUTH_FAILED",
+                "message": "Model provider authentication failed. Check the model API key.",
+            },
         ),
-        (ModelProviderError(403, "Provider unavailable"), 403, "Provider unavailable"),
-        (ModelProviderError(404, "Provider unavailable"), 404, "Provider unavailable"),
-        (ModelProviderError(502, "Provider unavailable"), 502, "Provider unavailable"),
-        (TokenExpiredError("Session expired"), 401, "Session expired"),
+        (ModelProviderError(403, "Provider unavailable"), 403, {"detail": "Provider unavailable"}),
+        (ModelProviderError(404, "Provider unavailable"), 404, {"detail": "Provider unavailable"}),
+        (ModelProviderError(502, "Provider unavailable"), 502, {"detail": "Provider unavailable"}),
+        (TokenExpiredError("Session expired"), 401, {"detail": "Session expired"}),
     ],
 )
 def test_provider_discovery_distinguishes_provider_and_session_errors(
-    client, auth_header, mocker, endpoint, error, expected_status, expected_detail
+    client, auth_header, mocker, endpoint, error, expected_status, expected_body
 ):
     discover = mocker.patch(
         "management.api.model.model_managment.create_provider_models_for_tenant",
@@ -2152,5 +2155,5 @@ def test_provider_discovery_distinguishes_provider_and_session_errors(
         payload["tenant_id"] = "test_tenant"
     response = client.post(endpoint, json=payload, headers=auth_header)
     assert response.status_code == expected_status
-    assert response.json() == {"detail": expected_detail}
+    assert response.json() == expected_body
     discover.assert_awaited_once()

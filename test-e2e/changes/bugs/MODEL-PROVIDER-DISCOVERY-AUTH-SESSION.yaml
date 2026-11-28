@@ -6,7 +6,7 @@ change:
   title: Preserve the Nexent session when model discovery rejects the provider API key
   description: Distinguish provider authentication from Nexent authentication at both batch model discovery endpoints.
   observed_behavior: A provider 401 reaches the browser as a Nexent 401 and triggers the session-expired flow.
-  expected_behavior: A provider 401 returns a 502 with an API key error. Missing or expired Nexent credentials still return 401.
+  expected_behavior: A provider 401 returns HTTP 422 with MODEL_PROVIDER_AUTH_FAILED. Missing or expired Nexent credentials still return 401.
   escaped_stage: D4
   coverage_gap:
     type: missing_boundary
@@ -25,7 +25,7 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
-    - Both batch discovery endpoints map provider 401 to a safe 502 and retain 401 for Nexent session expiry.
+    - Both batch discovery endpoints map provider 401 to 422 with MODEL_PROVIDER_AUTH_FAILED and retain 401 for Nexent session expiry.
     - Both batch discovery endpoints preserve provider 403, 404 and 502 errors.
     reason: Parameterized endpoint tests reproduce the exact HTTP boundary. A focused browser regression on the test VM verifies the error and successful retry in the same session.
     test_selectors:

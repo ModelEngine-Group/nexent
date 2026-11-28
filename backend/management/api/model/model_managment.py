@@ -210,14 +210,17 @@ def _require_manage_scope(current_user: CurrentUser, target_tenant_id: str) -> N
     )
 
 
-def _provider_discovery_http_error(error: ModelProviderError) -> HTTPException:
+def _provider_discovery_error_response(error: ModelProviderError) -> JSONResponse:
     """Reserve HTTP 401 for failures authenticating to Nexent."""
     if error.upstream_status == HTTPStatus.UNAUTHORIZED:
-        return HTTPException(
-            status_code=HTTPStatus.BAD_GATEWAY,
-            detail="Model provider authentication failed. Check the model API key.",
+        return JSONResponse(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            content={
+                "code": "MODEL_PROVIDER_AUTH_FAILED",
+                "message": "Model provider authentication failed. Check the model API key.",
+            },
         )
-    return HTTPException(status_code=error.upstream_status, detail=error.message)
+    raise HTTPException(status_code=error.upstream_status, detail=error.message) from error
 
 
 def _catalog_unavailable_response(status_code: HTTPStatus, **extra: Any) -> JSONResponse:
@@ -481,7 +484,7 @@ async def create_provider_model(
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ModelProviderError as exc:
-        raise _provider_discovery_http_error(exc) from exc
+        return _provider_discovery_error_response(exc)
     except HTTPException:
         # Surface provider failures (e.g. 502 connection_failed) with the
         # status the service layer classified, instead of flattening every
@@ -1251,7 +1254,7 @@ async def manage_create_provider_models(
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ModelProviderError as exc:
-        raise _provider_discovery_http_error(exc) from exc
+        return _provider_discovery_error_response(exc)
     except HTTPException:
         # Same contract as /provider/create: keep the classified provider
         # status (e.g. 502) instead of flattening it to 500.
