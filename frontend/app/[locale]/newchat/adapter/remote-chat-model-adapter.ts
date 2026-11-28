@@ -421,12 +421,17 @@ export interface Nl2aMessage {
   content: Nl2aPayload;
 }
 
+export type PersistedReplay =
+  | { state: "active" }
+  | { state: "terminal"; result: ChatModelRunResult };
+
 interface NexentRunConfig {
   modelPreferenceScope?: string;
   threadId?: string;
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
   onGenerationStopped?: (conversationId: number) => void;
-  loadPersistedReplay?: () => Promise<ChatModelRunResult | undefined>;
+  loadPersistedReplay?: () => Promise<PersistedReplay | undefined>;
+  resumePreviouslyActive?: boolean;
   onRunId?: (runId: string) => void;
   onRunStarted?: () => void;
   onNl2AgentCardResult?: (card: Nl2aMessage | null) => void;
@@ -1701,6 +1706,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         log.warn("[ChatModelAdapter] Persisted replay unavailable", error);
       }
     };
+    const awaitingReplay = (
+      result: ChatModelRunResult = {}
+    ): ChatModelRunResult => ({
+      ...result,
+      // A finished local subscription must not be promoted to a completed turn.
+      status: { type: "incomplete", reason: "other" },
+      metadata: {
+        ...result.metadata,
+        custom: { ...result.metadata?.custom, awaitingReplay: true },
+      },
+    });
     // Freeze the controls before draft creation or other asynchronous work.
     const creationConfig = custom?.creationWorkbenchConfig
       ? structuredClone(custom.creationWorkbenchConfig)
@@ -2106,21 +2122,28 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     if ("type" in agentResponse) {
       custom?.onNl2AgentCardResult?.(null);
-      cleanupAbortHandler();
-      const payload = agentResponse.data;
-      if (
-        payload &&
-        typeof payload === "object" &&
-        "replay_unavailable" in payload &&
-        payload.replay_unavailable === true
-      ) {
-        const saved = await loadPersistedReplay();
-        if (saved) yield saved;
+      try {
+        const payload = agentResponse.data;
+        if (
+          isResume &&
+          payload &&
+          typeof payload === "object" &&
+          "replay_unavailable" in payload &&
+          payload.replay_unavailable === true
+        ) {
+          const saved = await loadPersistedReplay();
+          if (abortSignal.aborted) return;
+          if (saved?.state === "terminal") yield saved.result;
+          else if (saved?.state === "active" || custom?.resumePreviouslyActive)
+            yield awaitingReplay();
+        }
+        log.log(
+          "[ChatModelAdapter] JSON response (resume finished):",
+          agentResponse.data
+        );
+      } finally {
+        cleanupAbortHandler();
       }
-      log.log(
-        "[ChatModelAdapter] JSON response (resume finished):",
-        agentResponse.data
-      );
       return;
     }
 
@@ -2144,11 +2167,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const streamTokenCounts = new Map<string, StepTokenCount>();
     let terminalOutcome: string | undefined;
     let replayUnavailable = false;
+    let replayFallbackOutcome: string | undefined;
     const updateResumeStatus = (chunk: SseChunk) => {
       replayUnavailable ||= chunk.replayUnavailable === true;
-      if (["completed", "failed", "stopped"].includes(chunk.content)) {
-        terminalOutcome = chunk.content;
-      }
+      if (!["completed", "failed", "stopped"].includes(chunk.content)) return;
+      if (chunk.replayUnavailable) replayFallbackOutcome = chunk.content;
+      else terminalOutcome = chunk.content;
     };
     const parentReasoning = createReasoningAccumulator(contentParts);
     const nl2SkillFilePartIndices = new Map<string, number>();
@@ -2683,20 +2707,32 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    let streamFinished = false;
-    const buildStreamResult = (content: any[]): ChatModelRunResult => {
-      let outcome = userAborted ? "stopped" : terminalOutcome;
-      if (!outcome && streamFinished) {
-        outcome = hasRootExecutionError(content) ? "failed" : "completed";
-      }
-      const status = messageExecutionStatus(outcome ?? "streaming");
+    const resolveStreamStatus = (
+      streamFinished: boolean
+    ): ChatModelRunResult["status"] => {
+      if (terminalOutcome) return messageExecutionStatus(terminalOutcome);
+      if (userAborted) return messageExecutionStatus("stopped");
+      if (!streamFinished) return messageExecutionStatus("streaming");
+      if (replayFallbackOutcome)
+        return messageExecutionStatus(replayFallbackOutcome);
+      // Legacy streams without a terminal event infer their outcome at EOF.
+      return messageExecutionStatus(
+        hasRootExecutionError(contentParts) ? "failed" : "completed"
+      );
+    };
+
+    const buildStreamResult = (
+      content: typeof contentParts,
+      streamFinished = false
+    ): ChatModelRunResult => {
+      const status = resolveStreamStatus(streamFinished);
       return {
         status,
         content: collapseSubAgentParts(
           content.map((part) =>
             part.type === "data" &&
             part.name === "clarification" &&
-            status.type === "incomplete"
+            status?.type === "incomplete"
               ? { ...part, data: { ...part.data, completed: false } }
               : part
           )
@@ -3769,15 +3805,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         });
       }
 
-      streamFinished = true;
-      if (replayUnavailable) {
+      if (isResume && (replayUnavailable || !terminalOutcome)) {
         const saved = await loadPersistedReplay();
-        if (saved) {
-          yield saved;
+        if (abortSignal.aborted) return;
+        if (saved?.state === "terminal") {
+          yield saved.result;
+          return;
+        }
+        if (saved?.state === "active" || custom?.resumePreviouslyActive) {
+          yield awaitingReplay(buildStreamResult(contentParts));
           return;
         }
       }
-      const finalResult = buildStreamResult(contentParts);
+      const finalResult = buildStreamResult(contentParts, true);
       const timingResult =
         storedTiming ??
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);

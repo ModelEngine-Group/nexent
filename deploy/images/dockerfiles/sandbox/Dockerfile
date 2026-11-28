@@ -12,32 +12,39 @@
 # tool-side dependencies so the runtime stage can copy them in as a
 # pre-built artifact (no package installation happens at sandbox startup).
 # ---------------------------------------------------------------------
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim AS debian-base
+
+ARG APT_MIRROR=""
+
+# Use the signed Debian repositories over HTTPS and retry transient download failures.
+RUN set -eu; \
+    for apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \
+        [ -f "$apt_source" ] || continue; \
+        sed -i 's|http://deb.debian.org/|https://deb.debian.org/|g; s|http://security.debian.org/|https://security.debian.org/|g' "$apt_source"; \
+        if [ "$APT_MIRROR" = "tsinghua" ]; then \
+            sed -i \
+                -e 's|https://deb.debian.org/debian-security|https://security.debian.org/debian-security|g' \
+                -e 's|https://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' \
+                "$apt_source"; \
+        fi; \
+    done; \
+    printf '%s\n' 'Acquire::Retries "4";' 'Acquire::https::Timeout "30";' > /etc/apt/apt.conf.d/80-nexent-downloads
+
+FROM debian-base AS builder
 
 ARG MIRROR
-ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
 
 USER root
 RUN umask 0022
 
-# Configure apt sources based on build argument (mirrors main/Dockerfile).
+# Install the build tools.
 RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-sandbox-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     mkdir -p /var/cache/apt/archives /var/lib/apt/lists/partial && \
-    if [ "$APT_MIRROR" = "tsinghua" ]; then \
-        for apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \
-            [ -f "$apt_source" ] || continue; \
-            sed -i \
-                -e 's|https\?://deb.debian.org/debian-security|http://security.debian.org/debian-security|g' \
-                -e 's|https\?://security.debian.org/debian-security|http://security.debian.org/debian-security|g' \
-                -e 's|https\?://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g' \
-                "$apt_source"; \
-        done; \
-    fi && \
-    apt-get update && \
+    apt-get update --error-on=any && \
     apt-get install -y --no-install-recommends curl build-essential
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
@@ -64,11 +71,10 @@ RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv
 # the configured network mode and per-run resource limits; the image itself
 # enforces the in-container invariants (non-root, workdir, libs).
 # ---------------------------------------------------------------------
-FROM python:3.11-slim AS runtime
+FROM debian-base AS runtime
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 
-ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
 LABEL org.opencontainers.image.title="Nexent Sandbox" \
@@ -78,28 +84,19 @@ LABEL org.opencontainers.image.title="Nexent Sandbox" \
 USER root
 RUN umask 0022
 
-# Install runtime utilities and libgomp1 for numpy/scipy wheels.
+# Install runtime utilities, a TrueType CJK font for ReportLab, and libgomp1 for numpy/scipy wheels.
 RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-sandbox-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     mkdir -p /var/cache/apt/archives /var/lib/apt/lists/partial && \
-    if [ "$APT_MIRROR" = "tsinghua" ]; then \
-        for apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \
-            [ -f "$apt_source" ] || continue; \
-            sed -i \
-                -e 's|https\?://deb.debian.org/debian-security|http://security.debian.org/debian-security|g' \
-                -e 's|https\?://security.debian.org/debian-security|http://security.debian.org/debian-security|g' \
-                -e 's|https\?://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g' \
-                "$apt_source"; \
-        done; \
-    fi && \
-    apt-get update && \
+    apt-get update --error-on=any && \
     apt-get install -y --no-install-recommends \
         curl \
         vim \
         procps \
         wget \
         less \
+        fonts-wqy-zenhei \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
@@ -159,6 +156,7 @@ RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv
         "python-dateutil>=2.8,<3.0" \
     $(test -n "$MIRROR" && echo "-i $MIRROR") \
     && python -c "import numpy, pandas, requests, PIL, bs4, lxml, openpyxl, xlsxwriter, xlrd, pyxlsb, docx, docx2txt, pptx, pypdf, pdfplumber, reportlab, odf, defusedxml, matplotlib, scipy, sklearn, pydantic, sympy, statsmodels, tabulate, dateutil; print('OK')" \
+    && python -c "from reportlab.pdfbase.ttfonts import TTFont; face = TTFont('SandboxCJK', '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc').face; assert all(face.charToGlyph.get(codepoint) for codepoint in (0x4E2D, 0x6587))" \
     && pip check
 
 # Create a non-root user and the fixed workspace mount root. Runtime creates
