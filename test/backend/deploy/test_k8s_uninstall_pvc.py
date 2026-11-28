@@ -147,14 +147,21 @@ def test_prompt_only_deletes_for_literal_lowercase_y(uninstall, answer, deleted)
     assert result.returncode == 0, result.stderr
     assert ("kubectl delete --raw" in calls) == deleted
     assert ("kubectl delete namespace" in calls) == deleted
+    assert ("Deleting dynamic PVCs..." in result.stdout) == deleted
     if deleted:
+        application_uninstall = calls.index("helm uninstall nexent --namespace test-ns")
+        infrastructure_uninstall = calls.index("helm uninstall nexent-infrastructure --namespace test-ns")
+        leftover_cleanup_start = calls.index("kubectl delete deployment nexent-data-process")
+        leftover_cleanup_end = calls.index("kubectl delete deployment,service,configmap,rs,pod "
+                                           "-n test-ns -l app=nexent-langfuse-worker")
         first_pvc_delete = calls.index("kubectl delete --raw")
-        last_pvc_delete = calls.index("persistentvolumeclaims/nexent-redis -f -")
-        leftover_cleanup = calls.index("kubectl delete deployment nexent-data-process")
-        assert calls.index("helm uninstall nexent-infrastructure --namespace test-ns") < first_pvc_delete
-        assert last_pvc_delete < leftover_cleanup
+        assert application_uninstall < infrastructure_uninstall < leftover_cleanup_start
+        assert leftover_cleanup_start < leftover_cleanup_end < first_pvc_delete
         assert '"preconditions":{"uid":"uid-redis"}' in calls
-        assert "Uninstalling Helm releases and deleting their dynamic PVCs..." in result.stdout
+        helm_stage = result.stdout.index("Uninstalling Helm release...")
+        leftover_cleanup_log = result.stdout.index("Cleaning up leftover monitoring resources...")
+        pvc_stage = result.stdout.index("Deleting dynamic PVCs...")
+        assert helm_stage < leftover_cleanup_log < pvc_stage
         assert "These resources were kept due to the resource policy:" not in result.stdout + result.stderr
         assert "Warning: Helm uninstall fixture warning" in result.stderr
 
@@ -163,8 +170,9 @@ def test_prompt_only_deletes_for_literal_lowercase_y(uninstall, answer, deleted)
 def test_explicit_delete_is_scoped_and_uses_the_discovered_uid(uninstall, released):
     result, calls = uninstall("--release-scope", "nexent", "--delete-pvc", "true", released=released)
     assert result.returncode == 0, result.stderr
-    assert calls.index("helm uninstall nexent --namespace test-ns") < calls.index("kubectl delete --raw")
-    assert calls.index("kubectl delete --raw") < calls.index("kubectl delete deployment nexent-data-process")
+    helm_uninstall = calls.index("helm uninstall nexent --namespace test-ns")
+    leftover_cleanup = calls.index("kubectl delete deployment nexent-data-process")
+    assert helm_uninstall < leftover_cleanup < calls.index("kubectl delete --raw")
     deletions = [call for call in calls.splitlines() if call.startswith("kubectl delete --raw")]
     assert deletions == ["kubectl delete --raw /api/v1/namespaces/test-ns/persistentvolumeclaims/nexent-workspace -f -"]
     assert '"preconditions":{"uid":"uid-workspace"}' in calls
@@ -213,6 +221,7 @@ def test_failed_helm_uninstall_leaves_pvcs_and_namespace_alone(uninstall, monkey
     result, calls = uninstall("--delete-pvc", "true", "--remove-namespace")
     assert result.returncode != 0
     assert f"Error: {error}" in result.stderr
+    assert "Deleting dynamic PVCs..." not in result.stdout
     assert "kubectl delete --raw" not in calls
     assert "kubectl delete namespace" not in calls
 
@@ -222,5 +231,5 @@ def test_replaced_pvc_prevents_namespace_deletion(uninstall, monkeypatch):
     result, calls = uninstall("--delete-pvc", "true", "--remove-namespace")
     assert result.returncode != 0
     assert "the UID was replaced" in result.stderr
-    assert calls.index("kubectl delete --raw") < calls.index("kubectl delete deployment nexent-data-process")
+    assert calls.index("kubectl delete deployment nexent-data-process") < calls.index("kubectl delete --raw")
     assert "kubectl delete namespace" not in calls

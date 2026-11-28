@@ -3,16 +3,16 @@ change:
   change_id: K8S-PVC-UNINSTALL-IMMEDIATE-20261128
   change_type: bugfix
   bug_id: K8S-PVC-UNINSTALL-IMMEDIATE-20261128
-  title: Start approved Kubernetes PVC deletion immediately after Helm uninstall
-  description: Submit UID-guarded deletion requests during the confirmed uninstall before waiting for leftover workloads.
-  observed_behavior: The uninstall script reported Helm's keep message and waited for leftover Pods before submitting the requested PVC deletions.
+  title: Delete approved Kubernetes PVCs after Helm uninstall and workload cleanup
+  description: Show separate progress messages for Helm uninstall and UID-guarded PVC deletion.
+  observed_behavior: The script combined the progress messages and submitted PVC deletion requests before cleaning up leftover workloads.
   expected_behavior: >-
-    Immediately request deletion of selected dynamic PVCs once all selected Helm releases have been uninstalled or confirmed absent.
-    In this deletion path, omit Helm's keep message and retain error diagnostics. Any other Helm failure leaves the PVCs intact.
+    After the user confirms deletion once, uninstall the selected Helm releases, clean up leftover workloads, and then request deletion of their dynamic PVCs.
+    Show when PVC deletion begins. Omit Helm's keep message in this path and retain error diagnostics. A Helm failure other than an already absent release leaves the PVCs intact.
   escaped_stage: unknown
   coverage_gap:
     type: missing_assertion
-    description: Existing uninstall tests verified that Helm succeeds before the UID-guarded delete request, without checking the order of leftover cleanup or the user-visible Helm output.
+    description: Existing assertions expected PVC deletion requests before leftover cleanup and a combined progress message.
   feature_contract_changed: false
   affected_features:
     existing: [RUNTIME-REPLICAS]
@@ -33,8 +33,8 @@ change:
     - test/backend/deploy/test_k8s_uninstall_pvc.py::test_explicit_delete_is_scoped_and_uses_the_discovered_uid
     - test/backend/deploy/test_k8s_uninstall_pvc.py::test_replaced_pvc_prevents_namespace_deletion
     behaviors:
-    - Confirm the actual interactive Bash entry point submits UID-guarded delete requests after Helm success and before waiting for leftover workloads.
-    - Verify that the Helm keep message does not appear in the confirmed deletion path and errors remain visible.
+    - Confirm the interactive Bash entry point submits UID-guarded delete requests after Helm success and leftover workload cleanup.
+    - Verify separate progress messages, omission of Helm's keep message, and visible Helm diagnostics in the confirmed deletion path.
     - Preserve existing claims when Helm fails and preserve the existing namespace decision.
     reason: Isolated Helm and kubectl commands exercise Bash command ordering, output and failure paths without altering a cluster.
   no_case_change_reason: RUNTIME-OFFLINE-DEPLOY-D5-001 covers real default retention and explicit deletion. This fix changes Bash command ordering and output, while the existing claim selection, UID guard and Kubernetes finalizer contracts continue to apply.

@@ -422,6 +422,11 @@ cleanup_dynamic_pvcs() {
     return 0
   fi
 
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "正在删除动态 PVC..."
+  else
+    echo "Deleting dynamic PVCs..."
+  fi
   local index name uid output
   for index in "${!DYNAMIC_PVC_NAMES[@]}"; do
     name="${DYNAMIC_PVC_NAMES[index]}"
@@ -764,16 +769,10 @@ uninstall_preserve_data() {
 
 delete_all_data() {
   guard_infrastructure_uninstall || return 1
-  if [ "$DELETE_PVC" = "true" ] && [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ]; then
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "正在卸载 Helm release 并删除动态 PVC..."
-    else
-      echo "Uninstalling Helm releases and deleting their dynamic PVCs..."
-    fi
-  elif [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    echo "正在删除 Helm release..."
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "正在卸载 Helm release..."
   else
-    echo "Deleting Helm release..."
+    echo "Uninstalling Helm release..."
   fi
   if ! helm_uninstall_scoped_releases; then
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -784,10 +783,8 @@ delete_all_data() {
     cleanup_leftover_nexent_resources
     return 1
   fi
-  local pvc_status=0
-  cleanup_dynamic_pvcs || pvc_status=$?
   cleanup_leftover_nexent_resources
-  [ "$pvc_status" -eq 0 ] || return "$pvc_status"
+  cleanup_dynamic_pvcs || return 1
   maybe_delete_local_volume_data
   maybe_delete_namespace_after_uninstall
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
