@@ -368,6 +368,29 @@ deployment_run_logged() {
   fi
 }
 
+deployment_run_visible() {
+  if [ -n "${NEXENT_DEPLOY_LOG_FILE:-}" ]; then
+    (
+      # Preserve command failures and keep interactive prompts on the original stderr.
+      set -o pipefail
+      NEXENT_DEPLOY_PROMPT_FD=3 "$@" 3>&"${NEXENT_DEPLOY_PROMPT_FD:-2}" 2>&1 |
+        tee -a -- "$NEXENT_DEPLOY_LOG_FILE"
+    )
+  else
+    "$@"
+  fi
+}
+
+deployment_run_compose() {
+  local -a compose_command
+  read -r -a compose_command <<< "$docker_compose_command"
+  if [ "$docker_compose_command" = "docker compose" ]; then
+    # Keep Compose progress readable when its output is piped to tee.
+    local -x COMPOSE_PROGRESS=plain COMPOSE_ANSI=never
+  fi
+  deployment_run_visible "${compose_command[@]}" "$@"
+}
+
 deployment_log() {
   printf '%s\n' "$*"
   if [ -n "${NEXENT_DEPLOY_LOG_FILE:-}" ] && [ -z "${NEXENT_DEPLOY_PROMPT_FD:-}" ]; then
