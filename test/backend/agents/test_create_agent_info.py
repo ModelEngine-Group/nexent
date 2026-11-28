@@ -1342,6 +1342,68 @@ class TestCreateToolConfigList:
         mock_tool_config.assert_not_called()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("source", ["mcp", "local"])
+    async def test_create_tool_config_list_rejects_unavailable_tools(self, source):
+        """Tools flagged unavailable block the run with an actionable error."""
+        with patch(
+            'management.services.agent.preparation.tools.discover_langchain_tools',
+            return_value=[],
+        ), patch(
+            'management.services.agent.resource_resolver.search_tools_for_sub_agent',
+            return_value=[
+                {
+                    "tool_id": 1, "class_name": "RemoteTool", "name": "remote_tool",
+                    "description": "Tool of a disabled MCP service",
+                    "inputs": "string", "output_type": "string",
+                    "params": [{"name": "param1", "default": "value1"}],
+                    "source": source, "usage": "remote", "is_available": False,
+                },
+            ],
+        ), patch(
+            'management.services.agent.resource_resolver.skill_db.search_skills_for_agent',
+            return_value=[],
+        ), patch(
+            'management.services.agent.preparation.tools.search_agent_info_by_agent_id',
+            return_value={"name": "agent"},
+        ), patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
+            with pytest.raises(ValidationError, match="unavailable") as error:
+                await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+        assert "remote_tool" in str(error.value)
+        assert "Enable the MCP service" in str(error.value)
+        mock_tool_config.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_keeps_null_availability(self):
+        """Tools with unknown availability (None) stay compiled, matching binding reads."""
+        with patch(
+            'management.services.agent.preparation.tools.discover_langchain_tools',
+            return_value=[],
+        ), patch(
+            'management.services.agent.resource_resolver.search_tools_for_sub_agent',
+            return_value=[
+                {
+                    "tool_id": 1, "class_name": "UnscannedTool", "name": "unscanned_tool",
+                    "description": "Never scanned",
+                    "inputs": "string", "output_type": "string",
+                    "params": [{"name": "param1", "default": "value1"}],
+                    "source": "mcp", "usage": "remote", "is_available": None,
+                },
+            ],
+        ), patch(
+            'management.services.agent.resource_resolver.skill_db.search_skills_for_agent',
+            return_value=[],
+        ), patch(
+            'management.services.agent.preparation.tools.search_agent_info_by_agent_id',
+            return_value={"name": "agent"},
+        ), patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+        assert len(result) == 1
+        mock_tool_config.assert_called_once()
+        assert mock_tool_config.call_args.kwargs["name"] == "unscanned_tool"
+
+    @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool(self):
         """Test case including the knowledge base search tool"""
         with patch('management.services.agent.preparation.tools.discover_langchain_tools') as mock_discover, \

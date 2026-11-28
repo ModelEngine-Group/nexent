@@ -383,6 +383,43 @@ def update_tool_table_from_scan_tool_list(
     logger.info("Updated tool table in PG database")
 
 
+def _mcp_server_tool_predicates(tenant_id: str, mcp_server_name: str) -> tuple:
+    """WHERE predicates selecting one MCP server's catalog tools."""
+    return (
+        ToolInfo.delete_flag != "Y",
+        ToolInfo.author == tenant_id,
+        ToolInfo.source == ToolSourceEnum.MCP.value,
+        ToolInfo.usage == mcp_server_name,
+    )
+
+
+def set_mcp_tools_availability(*, tenant_id: str, mcp_server_name: str, user_id: str, available: bool) -> int:
+    """
+    Flip catalog availability for one MCP server's tools without touching bindings.
+
+    Disabling an MCP service must stay reversible, so unlike deletion this only
+    writes ``ToolInfo.is_available``: every ``ToolInstance`` binding is left in
+    place and the agent runtime simply skips unavailable tools until the
+    service is enabled again.
+
+    Args:
+        tenant_id: Tenant ID (stored as ToolInfo.author)
+        mcp_server_name: MCP server name (stored as ToolInfo.usage)
+        user_id: User ID performing the change
+        available: True to mark the server's tools available, False to mark them unavailable
+
+    Returns:
+        Number of tool records updated
+    """
+    with get_db_session() as session:
+        updated = (
+            session.query(ToolInfo)
+            .filter(*_mcp_server_tool_predicates(tenant_id, mcp_server_name))
+            .update({"is_available": available, "updated_by": user_id})
+        )
+        return updated or 0
+
+
 def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: str) -> int:
     """
     Mark a deleted MCP server's tools unavailable and unbind them from agent drafts.
@@ -399,28 +436,24 @@ def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: 
     Returns:
         Number of tool records updated
     """
+    updated = set_mcp_tools_availability(
+        tenant_id=tenant_id,
+        mcp_server_name=mcp_server_name,
+        user_id=user_id,
+        available=False,
+    )
+    if not updated:
+        return 0
+
     with get_db_session() as session:
-        tool_rows = (
-            session.query(ToolInfo.tool_id)
-            .filter(
-                ToolInfo.delete_flag != "Y",
-                ToolInfo.author == tenant_id,
-                ToolInfo.source == ToolSourceEnum.MCP.value,
-                ToolInfo.usage == mcp_server_name,
-            )
+        tool_ids = [
+            row[0]
+            for row in session.query(ToolInfo.tool_id)
+            .filter(*_mcp_server_tool_predicates(tenant_id, mcp_server_name))
             .all()
-        )
-        tool_ids = [row[0] for row in tool_rows]
+        ]
         if not tool_ids:
             return 0
-
-        updated = (
-            session.query(ToolInfo)
-            .filter(
-                ToolInfo.tool_id.in_(tool_ids),
-            )
-            .update({"is_available": False, "updated_by": user_id})
-        )
 
         session.query(ToolInstance).filter(
             ToolInstance.tenant_id == tenant_id,
@@ -434,7 +467,7 @@ def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: 
             },
             synchronize_session=False,
         )
-        return updated or 0
+        return updated
 
 
 def apply_local_tool_descriptions(tool: dict, sdk_info: dict) -> None:

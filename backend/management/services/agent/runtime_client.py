@@ -43,6 +43,7 @@ from contracts.errors.exceptions import (
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
     RuntimeUpstreamError,
+    SnapshotCompilationError,
     ValidationError,
     WorkbenchError,
 )
@@ -219,6 +220,8 @@ async def forward_conversation_run(
             raise HTTPException(status_code=status, detail=exc.to_detail()) from exc
         except WorkbenchError as exc:
             raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+        except SnapshotCompilationError as exc:
+            raise prepared_turn.snapshot_compilation_conflict(exc) from exc
         if prepared is not None:
             response = await _run_prepared_debug(client, prepared, user_id, tenant_id)
             public = present_ephemeral_stream(

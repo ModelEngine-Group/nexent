@@ -92,6 +92,25 @@ async def test_unprepared_conversation_rejects_without_dispatch(preparation, moc
 
 
 @pytest.mark.asyncio
+async def test_debug_snapshot_compilation_failure_maps_to_actionable_conflict(preparation, mocker):
+    """A compile failure from unavailable resources surfaces as 409, not a generic 500."""
+    from contracts.errors.exceptions import SnapshotCompilationError
+    from fastapi import HTTPException
+
+    preparation.compile.side_effect = SnapshotCompilationError(
+        "resource", LookupError("MCP server is not available"),
+    )
+    payload = CompatibilityConversationRun(request={"query": "hello", "agent_id": 7, "is_debug": True})
+    with pytest.raises(HTTPException) as error:
+        await runtime_client.forward_conversation_run(payload, ACTOR.user_id, ACTOR.tenant_id)
+
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "AGENT_SNAPSHOT_COMPILATION_FAILED"
+    assert "unavailable" in error.value.detail["message"]
+    preparation.client.run_ephemeral.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_correlated_debug_preserves_response_headers(preparation):
     payload = CompatibilityConversationRun(
         request={"query": "hello", "agent_id": 7, "is_debug": True, "conversation_id": 42},
