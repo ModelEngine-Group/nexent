@@ -342,7 +342,7 @@ The following local PersistentVolumes can preserve data:
 
 ### Deleted Data
 
-To remove dynamic PVCs and keep the namespace, run `bash uninstall.sh k8s --delete-pvc true --keep-namespace`. The script removes only the selected releases' dynamic PVCs. Kubernetes applies the bound PV's reclaim policy to the underlying data.
+To remove dynamic PVCs and keep the namespace, run `bash uninstall.sh k8s --delete-pvc true --keep-namespace`. After Helm successfully uninstalls the selected releases, the script immediately requests deletion of their dynamic PVCs. Kubernetes can defer removal until Pods stop using the PVCs and applies the bound PV's reclaim policy to the underlying data.
 
 Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, `/var/lib/nexent-data/project-config`, and `/var/lib/nexent-data/nexent-*`. `delete-all` requests namespace deletion and removes local PV data by default. Use `--keep-local-data` to preserve local volume contents.
 

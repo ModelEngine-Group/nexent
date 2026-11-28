@@ -468,16 +468,18 @@ clean_helm_state() {
 helm_uninstall_release() {
   local release_name="$1"
   local output
-  local status
-  if output=$(helm uninstall "$release_name" --namespace "$NAMESPACE" 2>&1); then
-    [ -z "$output" ] || printf '%s\n' "$output"
-    return 0
+  local status=0
+  if [ "$DELETE_PVC" = "true" ] && [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ]; then
+    # Helm prints the keep-policy notice before the script submits PVC deletions.
+    output=$(helm uninstall "$release_name" --namespace "$NAMESPACE" 2>&1 >/dev/null) || status=$?
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
   else
-    status=$?
+    output=$(helm uninstall "$release_name" --namespace "$NAMESPACE" 2>&1) || status=$?
+    [ -z "$output" ] || printf '%s\n' "$output"
   fi
+  [ "$status" -ne 0 ] || return 0
 
-  [ -z "$output" ] || printf '%s\n' "$output"
-  if printf '%s\n' "$output" | grep -qi 'not found'; then
+  if grep -qiF -e 'release: not found' -e "release \"$release_name\" not found" <<< "$output"; then
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "Helm release '$release_name' 已不存在；继续清理。"
     else
@@ -762,7 +764,13 @@ uninstall_preserve_data() {
 
 delete_all_data() {
   guard_infrastructure_uninstall || return 1
-  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+  if [ "$DELETE_PVC" = "true" ] && [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "正在卸载 Helm release 并删除动态 PVC..."
+    else
+      echo "Uninstalling Helm releases and deleting their dynamic PVCs..."
+    fi
+  elif [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "正在删除 Helm release..."
   else
     echo "Deleting Helm release..."
@@ -776,8 +784,10 @@ delete_all_data() {
     cleanup_leftover_nexent_resources
     return 1
   fi
+  local pvc_status=0
+  cleanup_dynamic_pvcs || pvc_status=$?
   cleanup_leftover_nexent_resources
-  cleanup_dynamic_pvcs || return 1
+  [ "$pvc_status" -eq 0 ] || return "$pvc_status"
   maybe_delete_local_volume_data
   maybe_delete_namespace_after_uninstall
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then

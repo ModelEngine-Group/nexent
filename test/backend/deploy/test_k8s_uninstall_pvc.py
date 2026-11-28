@@ -38,7 +38,19 @@ printf 'helm %s\n' "$*" >> "$FIXTURE_CALLS"
 case "$1:$2" in
   get:manifest) [ -f "$FIXTURE_MANIFESTS/$3" ] && cat "$FIXTURE_MANIFESTS/$3" || { echo 'Error: release: not found' >&2; exit 1; } ;;
   status:*) [ -f "$FIXTURE_MANIFESTS/$2" ] ;;
-  uninstall:*) [ "${FIXTURE_UNINSTALL_ERROR:-0}" = 0 ] ;;
+  uninstall:*)
+    if [ "${FIXTURE_UNINSTALL_ERROR_RELEASE:-}" = "$2" ]; then
+      printf 'Error: %s\n' "$FIXTURE_UNINSTALL_ERROR" >&2
+      exit 1
+    fi
+    if [ ! -f "$FIXTURE_MANIFESTS/$2" ]; then
+      echo 'Error: release: not found' >&2
+      exit 1
+    fi
+    echo 'Warning: Helm uninstall fixture warning' >&2
+    echo 'These resources were kept due to the resource policy:'
+    echo '[PersistentVolumeClaim] fixture-claim'
+    ;;
   *) exit 9 ;;
 esac
 ''',
@@ -119,6 +131,7 @@ def test_preserving_claims_also_preserves_the_namespace(uninstall, arguments):
     result, calls = uninstall(*arguments)
     assert result.returncode == 0, result.stderr
     assert "Preserved dynamic PVCs: nexent-workspace nexent-redis" in result.stdout
+    assert "These resources were kept due to the resource policy:" in result.stdout
     assert "helm uninstall nexent --namespace test-ns" in calls
     assert "helm uninstall nexent-infrastructure --namespace test-ns" in calls
     assert "kubectl delete --raw" not in calls
@@ -134,6 +147,16 @@ def test_prompt_only_deletes_for_literal_lowercase_y(uninstall, answer, deleted)
     assert result.returncode == 0, result.stderr
     assert ("kubectl delete --raw" in calls) == deleted
     assert ("kubectl delete namespace" in calls) == deleted
+    if deleted:
+        first_pvc_delete = calls.index("kubectl delete --raw")
+        last_pvc_delete = calls.index("persistentvolumeclaims/nexent-redis -f -")
+        leftover_cleanup = calls.index("kubectl delete deployment nexent-data-process")
+        assert calls.index("helm uninstall nexent-infrastructure --namespace test-ns") < first_pvc_delete
+        assert last_pvc_delete < leftover_cleanup
+        assert '"preconditions":{"uid":"uid-redis"}' in calls
+        assert "Uninstalling Helm releases and deleting their dynamic PVCs..." in result.stdout
+        assert "These resources were kept due to the resource policy:" not in result.stdout + result.stderr
+        assert "Warning: Helm uninstall fixture warning" in result.stderr
 
 
 @pytest.mark.parametrize("released", [False, True])
@@ -141,10 +164,13 @@ def test_explicit_delete_is_scoped_and_uses_the_discovered_uid(uninstall, releas
     result, calls = uninstall("--release-scope", "nexent", "--delete-pvc", "true", released=released)
     assert result.returncode == 0, result.stderr
     assert calls.index("helm uninstall nexent --namespace test-ns") < calls.index("kubectl delete --raw")
+    assert calls.index("kubectl delete --raw") < calls.index("kubectl delete deployment nexent-data-process")
     deletions = [call for call in calls.splitlines() if call.startswith("kubectl delete --raw")]
     assert deletions == ["kubectl delete --raw /api/v1/namespaces/test-ns/persistentvolumeclaims/nexent-workspace -f -"]
     assert '"preconditions":{"uid":"uid-workspace"}' in calls
     assert "helm uninstall nexent-infrastructure" not in calls
+    if released:
+        assert "Helm release 'nexent' is already absent" in result.stdout
 
 
 @pytest.mark.parametrize("delete", ["false", "true"])
@@ -175,10 +201,18 @@ def test_explicit_legacy_removal_accepts_claims_already_deleted_by_helm(uninstal
     assert "persistentvolumeclaims/nexent-workspace" in calls
 
 
-def test_failed_helm_uninstall_leaves_pvcs_and_namespace_alone(uninstall, monkeypatch):
-    monkeypatch.setenv("FIXTURE_UNINSTALL_ERROR", "1")
+@pytest.mark.parametrize("release,error", [
+    ("nexent", "unable to uninstall release nexent"),
+    ("nexent-infrastructure", "unable to uninstall release nexent-infrastructure"),
+    ("nexent", "a service not found"),
+    ("nexent", 'release "another-release" not found'),
+])
+def test_failed_helm_uninstall_leaves_pvcs_and_namespace_alone(uninstall, monkeypatch, release, error):
+    monkeypatch.setenv("FIXTURE_UNINSTALL_ERROR_RELEASE", release)
+    monkeypatch.setenv("FIXTURE_UNINSTALL_ERROR", error)
     result, calls = uninstall("--delete-pvc", "true", "--remove-namespace")
     assert result.returncode != 0
+    assert f"Error: {error}" in result.stderr
     assert "kubectl delete --raw" not in calls
     assert "kubectl delete namespace" not in calls
 
@@ -188,4 +222,5 @@ def test_replaced_pvc_prevents_namespace_deletion(uninstall, monkeypatch):
     result, calls = uninstall("--delete-pvc", "true", "--remove-namespace")
     assert result.returncode != 0
     assert "the UID was replaced" in result.stderr
+    assert calls.index("kubectl delete --raw") < calls.index("kubectl delete deployment nexent-data-process")
     assert "kubectl delete namespace" not in calls
