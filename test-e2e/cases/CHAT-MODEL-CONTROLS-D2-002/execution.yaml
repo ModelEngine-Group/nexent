@@ -3,9 +3,10 @@ case_id: CHAT-MODEL-CONTROLS-D2-002
 implementations:
   - framework: pytest
     file: test_api.py
-    selector: test_model_permission_and_tenant_preflight
+    selector: ''
 acceptance_bindings:
   AC-01: [test_model_permission_and_tenant_preflight]
+  AC-02: [test_configured_model_failure_names_pinned_agent]
 timeout_seconds: 120
 preparation:
   families: []

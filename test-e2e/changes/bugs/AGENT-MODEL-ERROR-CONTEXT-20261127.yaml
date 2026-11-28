@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-MODEL-ERROR-CONTEXT-20261127
+  change_type: bugfix
+  bug_id: BUG-AGENT-MODEL-ERROR-CONTEXT
+  title: Identify the Agent with no usable configured model
+  description: Preserve failing Agent context through preparation errors and localized conversation feedback.
+  observed_behavior: A pinned child referencing a deleted model returns only model_not_available.
+  expected_behavior: Name the failing Agent while preserving the existing status/code and independent root selection.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing compiler/API tests assert the code but not the failing child identity or localized message.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-MODEL-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-MODEL-CONTROLS-D2-002]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Preserve failing root or pinned child identity and safe display-name fallback.
+      - Preserve public status/code and legacy generic error shape.
+      - Parse both error envelopes and localize named errors without rejecting a healthy root selection.
+      - Exercise real fetchWithAuth and fetchWithErrorHandling so an intercepted 404 reaches the composer as a localized model error; retain unrelated errors and successful streams.
+    test_selectors:
+      - test/backend/agents/test_agent_outlet_run_snapshot.py
+      - test/backend/app/test_agentos_raw_handoff.py
+      - test/backend/services/test_prepared_turn_admission_errors.py
+      - frontend/tests/workbench/AgentModelError.test.ts
+      - frontend/tests/workbench/AgentDebugModelControls.test.ts
+    reason: Strengthen compiler and public route regressions; add frontend parsing/localization checks. No duplicated D1.
+  notes: >-
+    Design ../nexent-doc/docs/Developing/chat-agent-model-errors/design.md.
+    Owning historical SPEC path is unavailable; existing formal inputs were inspected.
+    D2 responsibility inherits model. Self-contained in-process HTTP/compiler fixtures use no
+    shared asset families, persistent writes or provider calls; close TestClient and restore patches.
+    D3/D5 contracts are unchanged; frontend parser/rejection checks cover presentation logic separately.
+    Follow-up reproduction found the shared interceptor throws before runAgent response parsing.
+    Strengthen the frontend UT through the real interceptor and composer error formatter; retain
+    the existing D2 API contract unchanged because backend payloads do not change in this follow-up.

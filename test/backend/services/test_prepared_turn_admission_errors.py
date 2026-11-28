@@ -87,6 +87,8 @@ async def test_affirmation_stages_the_server_selected_proposal_for_callback(flow
     (WorkbenchConfigVersionConflict(7, {}), 409, "WORKBENCH_CONFIG_VERSION_CONFLICT"),
     (WorkbenchError("WORKBENCH_DISABLED", status_code=404), 404, "WORKBENCH_DISABLED"),
     (RunModelControlsError("model_not_available"), 404, "model_not_available"),
+    (RunModelControlsError("model_not_available", agent_id=48, agent_name="Chef", version_no=1),
+     404, "model_not_available"),
     (RunModelControlsError("model_unavailable"), 409, "model_unavailable"),
     (RunModelControlsError("model_type_invalid"), 400, "model_type_invalid"),
     (RunModelControlsError("model_controls_invalid"), 422, "model_controls_invalid"),
@@ -102,6 +104,8 @@ async def test_preparation_rejects_claim_before_runtime_admission(flow, mocker, 
         await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, runtime)
 
     assert exc.value.status_code == status
+    if isinstance(error, RunModelControlsError):
+        assert exc.value.detail == error.to_detail()
     if code is not None:
         assert exc.value.detail["code"] == code
     else:
