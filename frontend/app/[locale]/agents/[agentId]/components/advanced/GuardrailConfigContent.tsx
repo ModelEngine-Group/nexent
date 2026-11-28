@@ -5,7 +5,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useState, useMemo, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { theme, App } from "antd";
+import { theme } from "antd";
 import {
   Button,
   Input,
@@ -16,8 +16,6 @@ import {
   Tag,
   Tooltip,
   Empty,
-  Checkbox,
-  Spin,
   Table,
   Switch,
 } from "antd";
@@ -30,7 +28,6 @@ import {
   ShieldAlert,
   Info,
   AlertTriangle,
-  Sparkles,
   X,
 } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
@@ -41,10 +38,7 @@ import {
   type GuardrailRule,
   type GuardrailSeverity,
 } from "@/types/agentConfig";
-import type { ModelOption } from "@/types/modelConfig";
-import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentStore } from "@/stores/agentStore";
-import { generateGuardrailRules } from "@/services/promptService";
 
 const { Text } = Typography;
 
@@ -75,22 +69,6 @@ const SEVERITY_META: Record<
   mask: { color: "warning", icon: <ShieldAlert /> },
   pass: { color: "success", icon: <ShieldCheck /> },
 };
-
-interface AiCandidate {
-  pattern: string;
-  desc: string;
-}
-
-interface AiRuleSuggestion {
-  name: string;
-  pattern: string;
-  severity: GuardrailSeverity;
-  desc: string;
-}
-
-type AiResult =
-  | { type: "single"; candidates: AiCandidate[] }
-  | { type: "multi"; rules: AiRuleSuggestion[] };
 
 interface TestMatch {
   ruleIndex: number;
@@ -135,8 +113,6 @@ export interface GuardrailConfigContentRef {
 
 interface GuardrailConfigContentProps {
   config?: GuardrailConfig;
-  llmModels?: ModelOption[];
-  defaultModelId?: number;
   /** Called when draft changes — parent may use this for live preview */
   onDraftChange?: (config: GuardrailConfig) => void;
 }
@@ -144,11 +120,9 @@ interface GuardrailConfigContentProps {
 function useGuardrailConfigState() {
   const editedAgent = useAgentStore((state) => state.editedAgent);
   const updateAgentConfig = useAgentStore((state) => state.updateAgentConfig);
-  const { availableLlmModels } = useModelList();
   const config =
     editedAgent?.verification_config?.guardrail_config ||
     DEFAULT_AGENT_VERIFICATION_CONFIG.guardrail_config!;
-  const defaultModelId = editedAgent?.model_ids?.[0];
 
   const updateConfig = useCallback(
     (guardrailConfig: GuardrailConfig) => {
@@ -168,7 +142,7 @@ function useGuardrailConfigState() {
     [updateAgentConfig]
   );
 
-  return { config, llmModels: availableLlmModels, defaultModelId, updateConfig };
+  return { config, updateConfig };
 }
 
 export function GuardrailConfigActions() {
@@ -196,113 +170,18 @@ export function GuardrailConfigActions() {
   );
 }
 
-function AiMultiResult({
-  rules,
-  onImport,
-  onDiscard,
-}: {
-  rules: AiRuleSuggestion[];
-  onImport: (selected: AiRuleSuggestion[]) => void;
-  onDiscard: () => void;
-}) {
-  const { token } = theme.useToken();
-  const { t } = useTranslation("common");
-  const [checkedIndices, setCheckedIndices] = useState<Set<number>>(
-    () => new Set(rules.map((_, i) => i))
-  );
-
-  const severityLabel = (sev: GuardrailSeverity) =>
-    t(`agent.guardrail.severity.${sev}`) || sev;
-
-  const toggle = (i: number, checked: boolean) => {
-    setCheckedIndices((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(i);
-      else next.delete(i);
-      return next;
-    });
-  };
-
-  return (
-    <div>
-      <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8, fontWeight: 500 }}>
-        {t("agent.guardrail.ai.multiHint") || "AI detected multiple rules. Select ones to import:"}
-      </Text>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-        {rules.map((rule, i) => (
-          <div
-            key={i}
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "flex-start",
-              padding: "10px 12px",
-              border: `0.5px solid ${token.colorBorderSecondary}`,
-              borderRadius: "var(--radius-control)",
-              background: token.colorBgContainer,
-            }}
-          >
-            <Checkbox
-              checked={checkedIndices.has(i)}
-              onChange={(e) => toggle(i, e.target.checked)}
-              style={{ marginTop: 4 }}
-            />
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                <Text style={{ fontSize: 12, fontWeight: 500 }}>{rule.name}</Text>
-                <Tag color={SEVERITY_META[rule.severity].color} style={{ margin: 0 }}>
-                  {severityLabel(rule.severity)}
-                </Tag>
-              </div>
-              <code style={{ fontSize: 11, color: "#042C53", wordBreak: "break-all" }}>
-                {rule.pattern}
-              </code>
-              {rule.desc && (
-                <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 2 }}>
-                  {rule.desc}
-                </Text>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <Button size="small" onClick={onDiscard}>
-          {t("agent.guardrail.ai.discard") || "Discard"}
-        </Button>
-        <Button
-          size="small"
-          type="primary"
-          disabled={checkedIndices.size === 0}
-          onClick={() => {
-            const selected = rules.filter((_, i) => checkedIndices.has(i));
-            onImport(selected);
-          }}
-        >
-          {t("agent.guardrail.ai.import") || "Import"} ({checkedIndices.size})
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 const GuardrailConfigContent = forwardRef<
   GuardrailConfigContentRef,
   GuardrailConfigContentProps
 >(function GuardrailConfigContent({
   config: configProp,
-  llmModels: llmModelsProp,
-  defaultModelId: defaultModelIdProp,
   onDraftChange,
 }, ref) {
   const storeState = useGuardrailConfigState();
   const config = configProp ?? storeState.config;
-  const llmModels = llmModelsProp ?? storeState.llmModels;
-  const defaultModelId = defaultModelIdProp ?? storeState.defaultModelId;
   const onConfigChange = onDraftChange ?? (!configProp ? storeState.updateConfig : undefined);
   const { token } = theme.useToken();
   const { t } = useTranslation("common");
-  const { message } = App.useApp();
 
   const [draft, setDraft] = useState<GuardrailConfig>(config);
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
@@ -342,12 +221,6 @@ const GuardrailConfigContent = forwardRef<
     return result;
   }, [draft.rules, config.rules]);
 
-  const [aiInput, setAiInput] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<AiResult | null>(null);
-  const [aiModelId, setAiModelId] = useState<number | undefined>(defaultModelId);
-  const [focusedPatternIndex, setFocusedPatternIndex] = useState<number | null>(null);
-
   // Expose draft to parent for save
   useImperativeHandle(ref, () => ({
     getDraft: () => draft,
@@ -361,13 +234,6 @@ const GuardrailConfigContent = forwardRef<
     }
     onConfigChange?.(draft);
   }, [draft, onConfigChange]);
-
-  // Sync aiModelId with defaultModelId
-  useEffect(() => {
-    if (defaultModelId !== undefined && aiModelId === undefined) {
-      setAiModelId(defaultModelId);
-    }
-  }, [defaultModelId, aiModelId]);
 
   // Auto-clear highlighted rules after 6 seconds (extended to survive page switches)
   useEffect(() => {
@@ -577,112 +443,6 @@ const GuardrailConfigContent = forwardRef<
     );
   };
 
-  const handleAiGenerate = useCallback(async () => {
-    const desc = aiInput.trim();
-    if (!desc) {
-      message.warning(t("agent.guardrail.ai.descRequired") || "Please describe what you want to match");
-      return;
-    }
-    if (aiModelId === undefined) {
-      message.error(t("agent.guardrail.ai.modelRequired") || "Please select a model for AI generation");
-      return;
-    }
-
-    setAiLoading(true);
-    setAiResult(null);
-
-    try {
-      const data = await generateGuardrailRules({
-        description: desc,
-        model_id: aiModelId,
-      });
-
-      if (data?.type === "multi" && Array.isArray(data.rules)) {
-        setAiResult({
-          type: "multi",
-          rules: data.rules.map((r) => ({
-            name: r.name || `rule_${Date.now()}`,
-            pattern: r.pattern || "",
-            severity: ["block", "mask", "pass"].includes(r.severity as string)
-              ? (r.severity as GuardrailSeverity)
-              : "block",
-            desc: r.desc || "",
-          })),
-        });
-      } else if (data?.type === "single" && Array.isArray(data.candidates)) {
-        setAiResult({
-          type: "single",
-          candidates: data.candidates.map((c) => ({
-            pattern: c.pattern || "",
-            desc: c.desc || "",
-          })),
-        });
-      } else {
-        message.error(t("agent.guardrail.ai.error") || "AI generation failed");
-      }
-    } catch (error: any) {
-      message.error(error?.message || t("agent.guardrail.ai.error") || "AI generation failed");
-    } finally {
-      setAiLoading(false);
-    }
-  }, [aiInput, aiModelId, message, t]);
-
-  const handleApplySingleCandidate = useCallback((pattern: string) => {
-    let addedIndex: number | null = null;
-    updateDraft((prev) => {
-      const newRules = [...prev.rules];
-      let targetIndex = focusedPatternIndex;
-
-      if (targetIndex === null || targetIndex === undefined) {
-        targetIndex = newRules.findIndex((r) => !r.pattern.trim());
-      }
-
-      if (targetIndex === -1 || targetIndex === null) {
-        newRules.unshift({
-          name: `rule_${Date.now()}`,
-          pattern,
-          severity: "block",
-          description: "",
-        });
-        addedIndex = 0;
-      } else if (targetIndex < newRules.length) {
-        newRules[targetIndex] = { ...newRules[targetIndex], pattern };
-        addedIndex = targetIndex;
-      }
-
-      return { ...prev, rules: newRules };
-    });
-    if (addedIndex !== null) {
-      setHighlightedRuleKeys((prev) => new Set([...prev, addedIndex as number]));
-      const targetPage = Math.ceil(((addedIndex as number) + 1) / PAGE_SIZE);
-      setCurrentPage(targetPage);
-    }
-    setAiInput("");
-    setAiResult(null);
-    setFocusedPatternIndex(null);
-  }, [focusedPatternIndex, updateDraft]);
-
-  const handleImportMultiRules = useCallback((selectedRules: AiRuleSuggestion[]) => {
-    const count = selectedRules.length;
-    updateDraft((prev) => ({
-      ...prev,
-      rules: [
-        ...selectedRules.map((r) => ({
-          name: r.name,
-          pattern: r.pattern,
-          severity: r.severity,
-          description: r.desc,
-        })),
-        ...prev.rules,
-      ],
-    }));
-    const newIndices = Array.from({ length: count }, (_, i) => i);
-    setHighlightedRuleKeys((prev) => new Set([...prev, ...newIndices]));
-    setCurrentPage(1);
-    setAiInput("");
-    setAiResult(null);
-  }, [updateDraft]);
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const columns: ColumnsType<GuardrailRule & { key: number }> = [
     {
@@ -731,7 +491,6 @@ const GuardrailConfigContent = forwardRef<
               size="small"
               status={error ? "error" : ""}
               placeholder={t("agent.guardrail.patternPlaceholder") || "e.g. \\d{17}[\\dXx]"}
-              onFocus={() => setFocusedPatternIndex(index)}
               onChange={(e) => handleUpdateRule(index, "pattern", e.target.value)}
             />
             {error && (
@@ -811,107 +570,6 @@ const GuardrailConfigContent = forwardRef<
     },
   ];
 
-  const renderAiResult = () => {
-    if (aiLoading) {
-      return (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 0" }}>
-          <Spin size="small" />
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {t("agent.guardrail.ai.analyzing") || "AI is analyzing your description..."}
-          </Text>
-        </div>
-      );
-    }
-
-    if (!aiResult) return null;
-
-    if (aiResult.type === "single") {
-      return (
-        <div>
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8, fontWeight: 500 }}>
-            {t("agent.guardrail.ai.singleHint") || "AI detected a single match. Choose a candidate:"}
-          </Text>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {aiResult.candidates.map((cand, i) => (
-              <div
-                key={i}
-                role="button"
-                tabIndex={0}
-                onClick={() => handleApplySingleCandidate(cand.pattern)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handleApplySingleCandidate(cand.pattern);
-                  }
-                }}
-                style={{
-                  padding: "10px 12px",
-                  border: `0.5px solid ${token.colorBorderSecondary}`,
-                  borderRadius: "var(--radius-control)",
-                  background: token.colorBgContainer,
-                  cursor: "pointer",
-                  transition: "border-color 0.15s, box-shadow 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.borderColor = token.colorPrimary;
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 8px rgba(24, 95, 165, 0.15)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.borderColor = token.colorBorderSecondary;
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
-                }}
-              >
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {t("agent.guardrail.ai.candidate") || "Candidate"} {i + 1} · {cand.desc}
-                </Text>
-                <code style={{ display: "block", marginTop: 3, fontSize: 12, wordBreak: "break-all", color: "#042C53" }}>
-                  {cand.pattern}
-                </code>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <AiMultiResult
-        rules={aiResult.rules}
-        onImport={(selected) => handleImportMultiRules(selected)}
-        onDiscard={() => {
-          setAiInput("");
-          setAiResult(null);
-        }}
-      />
-    );
-  };
-
-  const modelOptions = llmModels.map((m) => ({
-    value: m.id,
-    label: m.displayName,
-  }));
-
-  const aiModeText =
-    aiResult?.type === "single"
-      ? (t("agent.guardrail.ai.singleMode") || "Single candidate")
-      : aiResult?.type === "multi"
-      ? (t("agent.guardrail.ai.multiMode") || "Multiple rules")
-      : (t("agent.guardrail.ai.smartMode") || "Smart mode");
-
-  const aiModeColor =
-    aiResult?.type === "single"
-      ? token.colorSuccess
-      : aiResult?.type === "multi"
-      ? token.colorWarning
-      : token.colorSuccess;
-
-  const aiModeBg =
-    aiResult?.type === "single"
-      ? token.colorSuccessBg
-      : aiResult?.type === "multi"
-      ? token.colorWarningBg
-      : token.colorSuccessBg;
-
   const renderSeveritySummary = () => {
     if (draft.rules.length === 0) return null;
     return (
@@ -988,135 +646,6 @@ const GuardrailConfigContent = forwardRef<
 
   return (
     <div style={{ paddingBottom: 8 }}>
-      {/* --- Section: AI generation (hidden when guardrail disabled) --- */}
-      {draft.enabled && (
-      <div style={{ marginBottom: 24 }}>
-        {/* Section header */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          marginBottom: 12,
-        }}>
-          <div
-            style={{
-              width: 3,
-              height: 14,
-              background: token.colorPrimary,
-              borderRadius: 2,
-            }}
-          />
-          <Text strong style={{ fontSize: 13, color: token.colorText }}>
-            {t("agent.guardrail.ai.title") || "Smart Generation"}
-          </Text>
-          <Tag
-            style={{
-              fontSize: 10,
-              margin: 0,
-              padding: "1px 8px",
-              borderRadius: "var(--radius-control)",
-              background: aiModeBg,
-              color: aiModeColor,
-              border: "none",
-            }}
-          >
-            {aiModeText}
-          </Tag>
-        </div>
-
-        {/* Model selector row */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 12,
-        }}>
-          <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-            {t("agent.guardrail.ai.modelForGen") || "Model"}:
-          </Text>
-          <Select
-            size="small"
-            style={{ flex: 1, maxWidth: 220 }}
-            value={aiModelId}
-            options={modelOptions}
-            onChange={(v) => setAiModelId(v)}
-            placeholder={t("agent.guardrail.ai.selectModel") || "Select model"}
-          />
-        </div>
-
-        {/* AI input + examples */}
-        <div
-          style={{
-            padding: 16,
-            background: "#F8FBFE",
-            border: `0.5px solid #E6F1FB`,
-            borderRadius: "var(--radius-control)",
-          }}
-        >
-          <Input.TextArea
-            value={aiInput}
-            onChange={(e) => setAiInput(e.target.value)}
-            placeholder={t("agent.guardrail.ai.placeholder") || "Describe what you want to match or block. AI will determine single or multi."}
-            autoSize={{ minRows: 2, maxRows: 4 }}
-            style={{ fontSize: 13, borderRadius: "var(--radius-control)", marginBottom: 12 }}
-          />
-
-          {/* Example chips + Generate button */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap", minHeight: 24 }}>
-            <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-              {t("agent.guardrail.ai.try") || "Try:"}
-            </Text>
-            {[
-              { label: t("agent.guardrail.ai.exSensitive") || "Sensitive·phone", value: t("agent.guardrail.ai.exSensitiveValue") },
-              { label: t("agent.guardrail.ai.exDanger") || "Danger·rm-rf", value: t("agent.guardrail.ai.exDangerValue") },
-            ].map((ex, i) => (
-              <span
-                key={i}
-                role="button"
-                tabIndex={0}
-                onClick={() => setAiInput(ex.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setAiInput(ex.value);
-                  }
-                }}
-                style={{
-                  fontSize: 11,
-                  padding: "2px 8px",
-                  border: `0.5px solid #B5D4F4`,
-                  borderRadius: "var(--radius-control)",
-                  cursor: "pointer",
-                  color: "#185FA5",
-                  background: "#fff",
-                  transition: "all 0.15s",
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLSpanElement).style.borderColor = "#185FA5";
-                  (e.currentTarget as HTMLSpanElement).style.background = "#E6F1FB";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLSpanElement).style.borderColor = "#B5D4F4";
-                  (e.currentTarget as HTMLSpanElement).style.background = "#fff";
-                }}
-              >
-                {ex.label}
-              </span>
-            ))}
-            <div style={{ flex: 1 }} />
-            <Button type="primary" size="small" icon={<Sparkles size={13} />} onClick={handleAiGenerate} loading={aiLoading}>
-              {t("agent.guardrail.ai.generate") || "Generate"}
-            </Button>
-          </div>
-
-          {/* AI result */}
-          {renderAiResult()}
-        </div>
-      </div>
-      )}
-
       {/* --- Section: Rule list --- */}
       <div>
         <style>{`

@@ -215,7 +215,7 @@ Knowledge bases and collaborative agents must be accessible to the current accou
 
 Safety guardrails use sequential regular-expression rules to inspect content sent to the model and data involved in tool calls. Guardrails are disabled by default and operate independently of **Self-Verification**. To enable them, turn on the switch beside the rule list and configure at least one valid rule. Rules are evaluated in list order, and the first matching rule applies to a given piece of content.
 
-![Safety guardrails](./../assets/agent-development/safety-fence.png)
+<!-- Screenshot placeholder for the safety guardrail rule list and regex test preview. -->
 
 Each rule contains the following settings:
 
@@ -236,7 +236,7 @@ The severity levels behave as follows at each inspection point:
 
 Safety guardrails also provide the following supporting capabilities:
 
-- **AI Generate:** Select a model and describe in natural language what should be matched or intercepted. The system determines whether to generate one candidate expression or multiple rules; confirm the candidate or select the rules before importing them into the list.
+- **NL2Agent:** Describe what to match and what action to take in the NL2Agent chat to configure guardrails in natural language.
 - **Rule Management:** Add, edit, copy, delete, or batch-delete rules manually, and view the distribution of Block, Redact, and Allow rules.
 - **Regex Test Preview:** Paste sample text to preview matched text, rule names, and match counts in real time. The preview validates matching only; it does not perform blocking or redaction actions.
 
