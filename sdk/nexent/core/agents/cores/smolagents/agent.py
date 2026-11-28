@@ -295,6 +295,7 @@ class NexentAgent(AgentResources):
                 message_format="codeagent",
             )
             from nexent.core.agents.prompt.policies import with_common_behavior
+            from nexent.core.agents.cores.nl2agent_prompt import nl2agent_protocol
 
             context_items = apply_model_visible_tool_schemas_to_context_items(
                 list(context_items_override)
@@ -302,6 +303,9 @@ class NexentAgent(AgentResources):
                 else list(getattr(agent_config, "context_items", None) or []),
                 tool_list,
             )
+            creator_protocol = nl2agent_protocol(context_items, self.observer.lang, "smolagents")
+            if creator_protocol is not None:
+                context_items.append(creator_protocol)
             resolved_external = {agent.agent_id: agent for agent in external_a2a_agents}
             for index, item in enumerate(context_items):
                 item_type = getattr(item, "type", None)

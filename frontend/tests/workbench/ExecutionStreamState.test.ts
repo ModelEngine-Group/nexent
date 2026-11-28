@@ -34,7 +34,7 @@ function options(
   } as unknown as ChatModelRunOptions;
 }
 
-async function run(events: object[], runOptions = options()) {
+async function snapshots(events: object[], runOptions = options()) {
   api.runAgent.mockResolvedValueOnce(
     new ReadableStream<Uint8Array>({
       start(c) {
@@ -51,8 +51,70 @@ async function run(events: object[], runOptions = options()) {
   const results = [];
   if (Symbol.asyncIterator in generator)
     for await (const result of generator) results.push(result);
-  return results.at(-1)!;
+  return results;
 }
+
+async function run(events: object[], runOptions = options()) {
+  return (await snapshots(events, runOptions)).at(-1)!;
+}
+
+const failedToolEvents = [
+  {
+    type: "tool",
+    content: "{}",
+    tool_name: "verify",
+    tool_call_id: "verify-1",
+  },
+  {
+    type: "execution_logs",
+    content: "candidate assessments incomplete",
+    tool_call_id: "verify-1",
+    is_error: true,
+  },
+];
+
+it("keeps the run active after a failed tool and completes when the run recovers", async () => {
+  const results = await snapshots([
+    ...failedToolEvents,
+    { type: "warning", content: "Retrying the step" },
+    { type: "final_answer", content: "done" },
+    { status: "completed" },
+  ]);
+  expect(
+    results.slice(0, -1).every((result) => result.status?.type === "running")
+  ).toBe(true);
+  expect(results.at(-1)?.status).toMatchObject({ type: "complete" });
+  expect(
+    results.at(-1)?.content?.find((part) => part.type === "tool-call")
+  ).toMatchObject({ isError: true });
+});
+
+it("does not infer a run failure from a tool result in a legacy stream or history", async () => {
+  expect((await run(failedToolEvents)).status).toMatchObject({
+    type: "complete",
+  });
+  const adapter = new RemoteConversationHistoryAdapter(
+    () => "12",
+    async () => ({ remoteId: "12" }),
+    async () =>
+      ({
+        conversation_id: 12,
+        message: [
+          {
+            role: "assistant",
+            message_id: 2,
+            message: failedToolEvents,
+          },
+        ],
+      }) as any
+  );
+  const repository = await adapter.load();
+  const message = repository.messages.at(-1)?.message;
+  expect(message?.status).toMatchObject({ type: "complete" });
+  expect(
+    message?.content.find((part) => part.type === "tool-call")
+  ).toMatchObject({ isError: true });
+});
 
 it("acknowledges only admitted sends, never resume or HTTP rejection", async () => {
   const accepted = vi.fn();

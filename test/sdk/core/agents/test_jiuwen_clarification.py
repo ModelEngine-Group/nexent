@@ -24,6 +24,8 @@ from test_jiuwen_model_service import saved_profile as _saved_profile
 saved_profile = _saved_profile
 
 FORM = {"questions": [{"id": "birth", "type": "text", "title": "Please provide your birth date", "required": True}]}
+CREATION_QUESTION = {"id": "workbench_creation_mode", "type": "single_choice", "title": "Create an Agent?",
+    "options": [{"id": "agent_create", "label": "Create"}, {"id": "continue_chat", "label": "Continue chat"}]}
 
 
 def test_ordinary_human_interaction_is_an_advertised_core_capability():
@@ -165,6 +167,47 @@ async def test_model_finishes_observation_then_pauses_before_native_dispatch(sav
     assert observed == ["message_completed"]
     assert service.ainvoke.await_count == 1
     assert not model.scope.cancelled
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repaired", [True, False])
+async def test_workbench_text_form_requires_a_native_confirmation(saved_profile, repaired):
+    from nexent.core.agents.cores.jiuwen.clarification import (
+        WORKBENCH_CONFIRMATION_REQUIRED, ClarificationRequested, JiuwenClarification,
+    )
+    from nexent.core.model_service.service import ModelServiceError
+
+    control = JiuwenClarification(set(), workbench=True)
+    leaked = "Choose a mode.\n" + json.dumps({"questions": [CREATION_QUESTION]})
+    args = {"questions": [{**CREATION_QUESTION, "creation_request": "Summarize research reports."}]}
+    native = message("", tool_calls=[ToolCall(name=control.name, provider_call_id="ask-1", index=0,
+        raw_arguments=json.dumps(args), parsed_arguments=args)]).model_copy(update={"finish_reason": "tool_calls"})
+    service = SimpleNamespace(ainvoke=AsyncMock(side_effect=[message(leaked), native if repaired else message("Done")]))
+    bridge = JiuwenServiceModel(service, saved_profile, RunCancellationScope(), clarification=control)
+    tools = [{"name": control.name, "description": "Clarify", "parameters": control.schema}]
+    if repaired:
+        with pytest.raises(ClarificationRequested) as outcome:
+            await bridge.invoke("Create a research assistant.", tools=tools)
+        assert outcome.value.form.questions[0].creation_request == "Summarize research reports."
+    else:
+        with pytest.raises(ModelServiceError) as outcome:
+            await bridge.invoke("Create a research assistant.", tools=tools)
+        assert outcome.value.error.category == WORKBENCH_CONFIRMATION_REQUIRED
+    assert service.ainvoke.await_count == 2
+    repair = service.ainvoke.await_args.args[0].messages[0].content_parts[0]["text"]
+    assert "ask_user" in repair and "creation_request" in repair
+    assert leaked not in repair
+
+
+def test_only_bare_workbench_form_is_repaired():
+    from nexent.core.agents.cores.jiuwen.clarification import JiuwenClarification
+
+    c = JiuwenClarification(set(), workbench=True)
+    body = json.dumps({"questions": [CREATION_QUESTION]})
+    assert c.has_workbench_form_text(body)
+    assert not c.has_workbench_form_text(f"Example:\n\x60\x60\x60json\n{body}\n\x60\x60\x60")
+    assert not c.has_workbench_form_text(json.dumps(FORM))
+    assert not control().has_workbench_form_text(body)
 
 
 @pytest.fixture

@@ -63,7 +63,7 @@ async def begin_run(scope):
 
 
 async def refresh_basis(scope, state, *, complete_generation=False):
-    """An explicit context read establishes the latest facts used for generation."""
+    """Record the verified context supplied to the model as its generation basis."""
     basis = {"prompt": state["draft_fields"].get("prompt"), "bindings": state["binding_revision"]}
     pending = await read_resource_state(_key(scope))
     if (pending and pending.get("conversation_id") == scope.conversation_id

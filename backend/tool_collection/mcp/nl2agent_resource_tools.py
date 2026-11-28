@@ -63,6 +63,8 @@ async def _run(operation, *args):
     try:
         scope = _scope()
         return scope, await operation(scope, *args)
+    except flow.VerificationBatchRetry as exc:
+        return None, {**exc.result, **_error(exc.code, exc.retryable), "next_step": "verify_resources"}
     except (ResourceStateError, Nl2AgentResourceError) as exc:
         return None, _error(exc.code, exc.retryable)
     except AgentDraftEditError as exc:
@@ -117,7 +119,7 @@ async def verify_requirements(verification_batch_id: str, checks: list[dict]) ->
 
 
 async def show_resource_card() -> ToolResult:
-    """Publish only the card selected from the current verified state."""
+    """Publish the verified card or return the pending batch to verify first."""
     scope, result = await _run(flow.show_card)
     if scope is None:
         return ToolResult(content=json.dumps(result))

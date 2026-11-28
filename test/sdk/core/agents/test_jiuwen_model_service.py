@@ -479,6 +479,56 @@ async def test_argument_step_and_turn_budget_are_independent(saved_profile):
     assert service.ainvoke.await_count == 2 and model.argument_corrections == 1
 
 
+@pytest.mark.parametrize("continues", [True, False])
+async def test_nl2agent_plain_answer_waits_for_pending_verification(saved_profile, continues):
+    verify = AssistantMessage(finish_reason="tool_calls", tool_calls=[ToolCall(
+        provider_call_id="retry", index=0, name="add",
+        raw_arguments='{"a":1,"b":2}', parsed_arguments={"a": 1, "b": 2},
+    )])
+    responses = [message("Please confirm the resources"), verify if continues else message("Still done")]
+    service = SimpleNamespace(ainvoke=AsyncMock(side_effect=responses))
+    pending = Mock(return_value=True)
+    model = JiuwenServiceModel(service, saved_profile, RunCancellationScope(),
+                               verification_pending=pending)
+    if continues:
+        result = await model.invoke(MESSAGES, tools=TOOLS)
+        assert result.tool_calls[0].id == "retry"
+    else:
+        with pytest.raises(ModelServiceError, match="NL2AGENT_VERIFICATION_PENDING"):
+            await model.invoke(MESSAGES, tools=TOOLS)
+    assert service.ainvoke.await_count == 2
+    retry_request = service.ainvoke.await_args.args[0]
+    assert "nl2a_verify_requirements" in retry_request.model_dump_json()
+    assert model.response_corrections == 0
+
+
+async def test_full_creation_recovers_a_premature_answer_once_per_pending_action(saved_profile):
+    tool_call = AssistantMessage(finish_reason="tool_calls", tool_calls=[ToolCall(
+        provider_call_id="next", index=0, name="add",
+        raw_arguments='{"a":1,"b":2}', parsed_arguments={"a": 1, "b": 2},
+    )])
+    service = SimpleNamespace(ainvoke=AsyncMock(side_effect=[
+        message("The name was saved."), tool_call,
+        message("The description was saved."), tool_call,
+        message("Still missing resources."),
+        message("Creation is complete."),
+    ]))
+    pending = Mock(return_value="save_description")
+    model = JiuwenServiceModel(service, saved_profile, RunCancellationScope(),
+                               full_generation_pending=pending)
+
+    assert (await model.invoke(MESSAGES, tools=TOOLS)).tool_calls[0].id == "next"
+    assert "with only the description next" in service.ainvoke.await_args.args[0].model_dump_json()
+    pending.return_value = "discover_resources"
+    assert (await model.invoke(MESSAGES, tools=TOOLS)).tool_calls[0].id == "next"
+    assert "Call nl2a_discover_requirements" in service.ainvoke.await_args.args[0].model_dump_json()
+    with pytest.raises(ModelServiceError, match="NL2AGENT_GENERATION_PENDING"):
+        await model.invoke(MESSAGES, tools=TOOLS)
+    pending.return_value = None
+    assert (await model.invoke(MESSAGES, tools=TOOLS)).content == "Creation is complete."
+    assert service.ainvoke.await_count == 6
+
+
 @pytest.mark.parametrize("stop", ["cancel", "deadline"])
 async def test_no_followup_after_correction_cancel_or_deadline(saved_profile, stop):
     import time

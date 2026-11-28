@@ -4,8 +4,11 @@
 
 import i18next from "i18next";
 import { recordNl2AgentState } from "./nl2agent-state-history";
-import { messageExecutionStatus } from "@/lib/messageExecutionState";
 import { describeConversationRunError } from "@/lib/conversationRunError";
+import {
+  hasRootExecutionError,
+  messageExecutionStatus,
+} from "@/lib/messageExecutionState";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 import {
   persistModelDrafts,
@@ -2681,31 +2684,32 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     let streamFinished = false;
-    const buildStreamResult = (content: any[]): ChatModelRunResult => ({
-      status: userAborted
-        ? { type: "incomplete", reason: "cancelled" }
-        : content.some((part) => part.isError)
-          ? { type: "incomplete", reason: "error" }
-          : streamFinished
-            ? { type: "complete", reason: "stop" }
-            : { type: "running" },
-      content: collapseSubAgentParts(
-        content.map((part) =>
-          part.type === "data" &&
-          part.name === "clarification" &&
-          (userAborted || content.some((item) => item.isError))
-            ? { ...part, data: { ...part.data, completed: false } }
-            : part
-        )
-      ),
-      metadata: {
-        custom: {
-          ...(nl2a ? { nl2a } : {}),
-          ...(workflowStates.length ? { nl2agentStates: workflowStates } : {}),
-          stepTokenCounts: [...streamTokenCounts.values()],
+    const buildStreamResult = (content: any[]): ChatModelRunResult => {
+      let outcome = userAborted ? "stopped" : terminalOutcome;
+      if (!outcome && streamFinished) {
+        outcome = hasRootExecutionError(content) ? "failed" : "completed";
+      }
+      const status = messageExecutionStatus(outcome ?? "streaming");
+      return {
+        status,
+        content: collapseSubAgentParts(
+          content.map((part) =>
+            part.type === "data" &&
+            part.name === "clarification" &&
+            status.type === "incomplete"
+              ? { ...part, data: { ...part.data, completed: false } }
+              : part
+          )
+        ),
+        metadata: {
+          custom: {
+            ...(nl2a ? { nl2a } : {}),
+            ...(workflowStates.length ? { nl2agentStates: workflowStates } : {}),
+            stepTokenCounts: [...streamTokenCounts.values()],
+          },
         },
-      },
-    });
+      };
+    };
 
     const streamStartTime = Date.now();
     let firstTokenTime: number | undefined;
@@ -3182,7 +3186,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               text: error?.text ?? chunk.content,
               ...(error?.reference && { errorReference: error.reference }),
               ...(chunk.type === "warning" && { isWarning: true }),
-              ...(chunk.type === "error" && { isError: true }),
+              ...(chunk.type === "error" && {
+                isError: true,
+                invocation_id: chunk.invocation_id,
+              }),
             };
             if (textMeta) {
               textPart.metadata = subAgentMetadataFor(textMeta);
@@ -3522,7 +3529,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 text: error?.text ?? chunk.content,
                 ...(error?.reference && { errorReference: error.reference }),
                 ...(chunk.type === "warning" && { isWarning: true }),
-                ...(chunk.type === "error" && { isError: true }),
+                ...(chunk.type === "error" && {
+                  isError: true,
+                  invocation_id: chunk.invocation_id,
+                }),
               };
               const textMeta = resolveSubAgent(chunk.invocation_id);
               if (textMeta)
@@ -3767,18 +3777,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           return;
         }
       }
-      const finalResult = buildStreamResult(
-        collapseSubAgentParts(contentParts)
-      );
+      const finalResult = buildStreamResult(contentParts);
       const timingResult =
         storedTiming ??
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
       yield {
         ...finalResult,
-        status: messageExecutionStatus(
-          terminalOutcome ??
-            (contentParts.some((part) => part.isError) ? "failed" : "completed")
-        ),
         messageId,
         metadata: {
           ...finalResult.metadata,

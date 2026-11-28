@@ -8,6 +8,7 @@ from contracts.constants.environment import NEXENT_AGENT_CORE
 from infrastructure.agent_core_policy import apply_agent_core_policy
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
+from nexent.core.agents.cores.nl2agent_prompt import NL2AGENT_PROMPT_ID
 from nexent.core.agents.prompt.meta import compose_nl2agent_system
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from infrastructure.nl2agent_tool_config import (
@@ -22,6 +23,7 @@ from infrastructure.nl2agent_tool_config import (
 )
 
 NL2AGENT_NAME = "nl2agent_main"
+NL2AGENT_MIN_STEPS = 15
 
 
 def build_nl2agent_system_prompt(
@@ -46,7 +48,6 @@ def build_nl2agent_system_prompt(
             "save_tool_name": save_tool_name,
             "validate_completion_tool_name": VALIDATE_AGENT_GENERATION_COMPLETE_NAME,
             "max_results": max_results,
-            "target_core": NEXENT_AGENT_CORE,
         },
     )
 
@@ -55,6 +56,7 @@ def create_nl2agent_agent_config(language: str, tools: list[ToolConfig], snapsho
     """Create the in-memory AgentConfig for one NL2Agent request."""
 
     system_prompt = build_nl2agent_system_prompt(language)
+    max_steps = max(NL2AGENT_MIN_STEPS, int(snapshot["max_steps"])) if snapshot is not None else NL2AGENT_MIN_STEPS
     tools = list(tools)
     tools.append(
         ToolConfig(
@@ -82,19 +84,22 @@ def create_nl2agent_agent_config(language: str, tools: list[ToolConfig], snapsho
         ),
         prompt_templates=None,
         tools=tools,
-        max_steps=int(snapshot["max_steps"]) if snapshot is not None else 8,
+        max_steps=max_steps,
         model_name="main_model",
         provide_run_summary=False,
         automatic_memory_enabled=False,
         enable_protocol_repair_retry=snapshot.get("enable_protocol_repair_retry", True) if snapshot is not None else True,
         context_items=[
             ContextItemInput(
-                id="system:nl2agent_prompt",
+                id=NL2AGENT_PROMPT_ID,
                 type=ContextItemType.SYSTEM,
                 content={"text": system_prompt},
                 source=("prompt:nl2agent",),
                 priority=100,
-                metadata={"authority": "platform", "layout_order": -1},
+                metadata={
+                    "authority": "platform", "layout_order": -1,
+                    "creator_tools": {"save_tool_name": SAVE_AGENT_DRAFT_FIELDS_NAME, "wrapper_name": NL2A_WRAPPER_NAME},
+                },
             )
         ],
         enable_planning=False,

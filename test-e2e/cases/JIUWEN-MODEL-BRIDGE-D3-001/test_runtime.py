@@ -24,7 +24,8 @@ def cleanup():
 
 
 @pytest.mark.parametrize("protocol,scenario", [
-    ("native", "normal"), ("native", "empty_call_id"), ("text", "normal"), ("unknown", "normal")
+    ("native", "normal"), ("native", "empty_call_id"), ("native", "null_call_type"),
+    ("text", "normal"), ("unknown", "normal"),
 ])
 def test_factory_service_protocol_loop(monkeypatch, protocol, scenario):
     info, state, output = asyncio.run(run_worker(monkeypatch, protocol, scenario))
@@ -89,3 +90,21 @@ def test_terminal_clarification_runtime(monkeypatch, protocol, scenario):
         assert info.attempt_outcome == "failed", output[-1:]
         assert not cards
         assert len(state["requests"]) <= 4
+
+
+def test_workbench_confirmation_as_text_recovers_to_one_card(monkeypatch):
+    def workbench(info):
+        info.agent_config.name = "workbench_main"
+        info.agent_config.origin = "SYSTEM"
+        info.query = "Create a research assistant that summarizes reports."
+
+    info, state, output = asyncio.run(run_worker(monkeypatch, "native", "clarify_workbench_text", configure_run=workbench))
+    assert len(state["requests"]) == 2 and not state["tool_calls"]
+    assert info.attempt_outcome == "completed" and info.run_result.end_reason == "awaiting_input"
+    cards = [event for event in output if event.get("type") == "human_interaction"]
+    assert len(cards) == 1 and not any(event.get("type") == "final_answer" for event in output)
+    payload = json.loads(cards[0]["content"]) if isinstance(cards[0]["content"], str) else cards[0]["content"]
+    [question] = payload["questions"]
+    assert question["id"] == "workbench_creation_mode"
+    assert question["creation_request"] == "Summarize the supplied research reports."
+    assert [option["id"] for option in question["options"]] == ["agent_create", "continue_chat"]

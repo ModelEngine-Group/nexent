@@ -39,19 +39,21 @@ class Provider:
                     owner.release.wait(30)
                 answer = owner.responder(body) if owner.responder else owner.answer
                 streaming = body.get("stream", False)
+                message = {"role": "assistant", **(answer if isinstance(answer, dict) else {"content": answer})}
+                finish_reason = "tool_calls" if message.get("tool_calls") else "stop"
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream" if streaming else "application/json")
                 self.end_headers()
                 try:
                     if streaming:
-                        for delta, finish in [({"role": "assistant", "content": answer}, None), ({}, "stop")]:
+                        for delta, finish in [(message, None), ({}, finish_reason)]:
                             chunk = {"id": "fixture", "object": "chat.completion.chunk", "created": 0,
                                      "model": body["model"], "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
                             self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
                         self.wfile.write(b"data: [DONE]\n\n")
                     else:
                         response = {"id": "fixture", "object": "chat.completion", "created": 0, "model": body["model"],
-                                    "choices": [{"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}],
+                                    "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
                                     "usage": {"prompt_tokens": 12, "completion_tokens": 15, "total_tokens": 27}}
                         self.wfile.write(json.dumps(response).encode())
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):

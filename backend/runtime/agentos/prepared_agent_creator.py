@@ -103,10 +103,14 @@ def _callback_tools(payload, actor, observer=None):
             if agent_id != payload.agent_id:
                 return {"status": "error", "code": "agent_context_mismatch", "retryable": False}
             output = _invoke_tool(payload.run_id, actor, _operation, agent_id, **arguments)
+            meta = None
             if isinstance(output, dict) and output.get("agentos_tool_result") is True:
-                if observer is not None:
-                    observer.on_mcp_tool_result("nl2a_" + _operation, output.get("meta"))
-                return "\n".join(item.get("text", "") for item in output["content"])
+                meta = output.get("meta")
+                output = "\n".join(item.get("text", "") for item in output["content"])
+            if observer is not None:
+                observer.record_verification_result(_operation, output)
+                if meta is not None:
+                    observer.on_mcp_tool_result("nl2a_" + _operation, meta)
             return output
 
         tool = StructuredTool.from_function(
@@ -123,11 +127,14 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
     _STOP_ERROR = "Agent execution interrupted by external stop signal"
 
     def __init__(self, *, lang: str, stop_event: threading.Event, agent_id: int, run_id: str,
-                 conversation_id: str):
+                 conversation_id: str, generation_stage: str | None = None):
         super().__init__(lang=lang)
         self._boundary_stop_event = stop_event
         self._boundary_reached = False
         self._boundary_lock = threading.Lock()
+        self._verification_pending = False
+        self._generation_stage = generation_stage
+        self._saved_generation_fields: set[str] = set()
         self._target_agent_id = agent_id
         self._run_id = run_id
         self._conversation_id = conversation_id
@@ -144,6 +151,53 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
     @property
     def turn_complete(self) -> bool:
         return self.boundary_reached
+
+    def has_pending_nl2agent_verification(self) -> bool:
+        with self._boundary_lock:
+            return self._verification_pending and not self._boundary_reached
+
+    def pending_full_generation_action(self) -> str | None:
+        with self._boundary_lock:
+            if self._boundary_reached or self._generation_stage is None:
+                return None
+            if self._generation_stage == "prepare":
+                if "description" in self._saved_generation_fields:
+                    return "discover_resources"
+                if "name" in self._saved_generation_fields:
+                    return "save_description"
+            if self._generation_stage == "finalize" and {
+                "greeting_message", "example_questions",
+            } <= self._saved_generation_fields:
+                return "validate"
+            return self._generation_stage
+
+    def record_verification_result(self, operation: str, result: dict | str) -> None:
+        if operation not in {"discover_requirements", "verify_requirements", "show_resource_card"}:
+            return
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except ValueError:
+                return
+        if not isinstance(result, dict):
+            return
+        with self._boundary_lock:
+            if result.get("status") == "success" and (
+                "verification_batch_id" in result or "card_required" in result
+            ):
+                self._verification_pending = bool(result.get("verification_batch_id"))
+            elif result.get("code") == "verification_incomplete":
+                self._verification_pending = True
+            if self._generation_stage is None or result.get("status") != "success":
+                return
+            if self._verification_pending:
+                self._generation_stage = "verify_resources"
+            elif result.get("next_step") == "prepare_search_queries":
+                self._generation_stage = "prepare_search_queries"
+            elif result.get("card_required") is False:
+                self._generation_stage = "generate_prompt"
+            elif "verification_batch_id" in result:
+                self._generation_stage = "show_resource_card"
 
     def add_message(self, agent_name, process_type, content, **kwargs):
         if self.boundary_reached and (
@@ -205,6 +259,17 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
         with self._boundary_lock:
             if self._boundary_stop_event.is_set() or event_id in self._seen_receipt_ids:
                 return
+            if self._generation_stage is not None:
+                if is_completion:
+                    if self._generation_stage != "finalize":
+                        return
+                    self._generation_stage = None
+                elif is_save and payload.get("event") == "agent_draft_fields_saved":
+                    fields = payload.get("updated_fields")
+                    if isinstance(fields, list):
+                        self._saved_generation_fields.update(field for field in fields if isinstance(field, str))
+                    if self._generation_stage == "generate_prompt" and "prompt" in self._saved_generation_fields:
+                        self._generation_stage = "finalize"
             self._seen_receipt_ids.add(event_id)
             super().add_message(
                 "",
@@ -229,6 +294,7 @@ def prepare_agent_creator_run(payload: PreparedAgentCreatorRun, actor: ServicePr
     observer = _Nl2AgentBoundaryObserver(
         lang=payload.language, stop_event=stop_event, agent_id=payload.agent_id,
         run_id=payload.run_id, conversation_id=str(payload.conversation_id or ""),
+        generation_stage=payload.generation_stage,
     )
     agent = create_nl2agent_agent_config(payload.language, list(_callback_tools(payload, actor, observer)),
                                        snapshot=load_creator_definition(payload))

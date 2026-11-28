@@ -3,7 +3,7 @@ case_id: JIUWEN-MODEL-BRIDGE-D3-001
 implementations:
 - framework: pytest
   file: test_runtime.py
-  selector: test_factory_service_protocol_loop
+  selector: test_
   profiles:
   - mock
 acceptance_bindings:
@@ -11,6 +11,7 @@ acceptance_bindings:
   - test_factory_service_protocol_loop
   AC-02:
   - test_terminal_clarification_runtime
+  - test_workbench_confirmation_as_text_recovers_to_one_card
 preparation:
   families: []
   anchors: false

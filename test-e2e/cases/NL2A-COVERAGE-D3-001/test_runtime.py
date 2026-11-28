@@ -23,6 +23,7 @@ from management.services.mcp import service as mcp_service
 from model_controls.runtime import runtime_fixture
 from management.services.agent import nl2agent as nl2agent_service
 from services import nl2agent_state_service
+from services.nl2agent_prompt_service import PromptScope
 from services.nl2agent_state_service import ResourceScope
 from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from management.services.conversation import nl2agent_resource_index as storage
@@ -500,12 +501,14 @@ def owned_runtime(monkeypatch):
                 yield runtime, redis
         finally:
             if runtime is not None:
-                scope = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
-                owner = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
-                keys = list(redis.scan_iter(owner.legacy_key + "*"))
-                if keys:
-                    redis.delete(*keys)
-                assert not list(redis.scan_iter(owner.legacy_key + "*"))
+                owner = (runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
+                prompt_prefix = PromptScope(*owner).key.rsplit(":", 2)[0]
+                prefixes = (ResourceScope(*owner).legacy_key, prompt_prefix)
+                for prefix in prefixes:
+                    keys = list(redis.scan_iter(prefix + "*"))
+                    if keys:
+                        redis.delete(*keys)
+                    assert not list(redis.scan_iter(prefix + "*"))
                 assert not inspect(runtime.storage["engine"]).has_schema(runtime.storage["schema"])
                 assert not runtime.provider.thread.is_alive()
                 for run in runtime.runs:
@@ -654,8 +657,8 @@ def test_coverage_return_and_generation(monkeypatch):
             ))
 
         _, events = post(runtime, action(latest, "continue", selected_resource_refs=["tool:9"]), [
-            "<code>context = nl2a_read_generation_context(goal='complete')\n"
-            f"print(nl2a_save_agent_draft_fields(agent_id={runtime.agent_id}, fields={{'prompt':'Call weather.'}}))</code>",
+            f"<code>print(nl2a_save_agent_draft_fields(agent_id={runtime.agent_id}, "
+            "fields={'prompt': 'Call weather.'}))</code>",
             f"<code>print(nl2a_save_agent_draft_fields(agent_id={runtime.agent_id}, "
             "fields={'greeting_message':'Hello','example_questions':['What is the weather?']}))</code>",
             "<code>print(nl2a_validate_agent_generation_complete())</code>",

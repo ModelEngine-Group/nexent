@@ -6,12 +6,14 @@ import json
 import os
 import socket
 from contextlib import contextmanager
+from unittest.mock import AsyncMock
 from urllib.parse import urlparse
 
 import pytest
 from redis import Redis
 from sqlalchemy import inspect, select
 
+from infrastructure.system_configuration import runtime as configuration
 from management.db.models import AgentInfo
 from model_controls.runtime import runtime_fixture
 from services import nl2agent_state_service, nl2agent_retrieval_progress
@@ -27,18 +29,27 @@ CONVERSATION_SETTINGS = {
 
 
 @contextmanager
-def owned_runtime(monkeypatch):
+def owned_runtime(monkeypatch, *, native=False):
+    config = configuration.SystemConfigurationRuntime(loader=AsyncMock(return_value={}))
+    config.store_snapshot(configuration.DEFAULT_CATALOG.defaults)
+    monkeypatch.setattr(configuration, "_process_runtime", config)
     runtime = None
     redis = Redis.from_url(os.environ["NEXENT_TEST_NL2AGENT_REDIS_URL"], decode_responses=True)
     redis.ping()
     monkeypatch.setattr(nl2agent_state_service, "get_redis_client", lambda: redis)
     monkeypatch.setattr(nl2agent_retrieval_progress, "get_redis_client", lambda: redis)
     try:
-        with runtime_fixture(monkeypatch) as runtime:
+        with runtime_fixture(monkeypatch, creator_only=True) as runtime:
             from management.db.model.models import ModelRecord
+            if native:
+                from runtime.agentos import agent_creator_config
+
+                monkeypatch.setattr(agent_creator_config, "NEXENT_AGENT_CORE", "jiuwen")
             with runtime.storage["sessions"]() as session:
                 for model in session.scalars(select(ModelRecord).where(ModelRecord.model_type == "llm")):
                     model.context_window_tokens, model.max_input_tokens = 128000, 120000
+                    if native:
+                        model.native_tool_call_supported = True
                 for agent in session.scalars(select(AgentInfo).where(AgentInfo.system_key == "nl2agent_main")):
                     agent.max_steps = 6
             yield runtime
@@ -53,10 +64,11 @@ def owned_runtime(monkeypatch):
             assert not runtime.provider.thread.is_alive()
             for run in runtime.runs:
                 assert run.thread_future.done()
-                mcp = urlparse(run.mcp_host[0]["url"])
-                with socket.socket() as client:
-                    client.settimeout(1)
-                    assert client.connect_ex((mcp.hostname, mcp.port)) != 0
+                for host in run.mcp_host or []:
+                    mcp = urlparse(host["url"])
+                    with socket.socket() as client:
+                        client.settimeout(1)
+                        assert client.connect_ex((mcp.hostname, mcp.port)) != 0
         redis.close()
 
 
@@ -88,7 +100,7 @@ def turn(runtime, query, fields, *, validate=False):
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     assert events[-1]["type"] == "final_answer", events
     assert all(event["type"] != "error" for event in events), events
-    assert runtime.runs[-1].stop_event.is_set()
+    assert runtime.runs[-1].attempt_outcome == "completed"
     assert next(pending, None) is None
     states = [json.loads(event["content"]) for event in events if event["type"] == "nl2a_state"]
     receipts = []
@@ -259,6 +271,44 @@ def test_explicit_success_emits_completion_after_save(monkeypatch):
         ]
         assert len(receipts) == 2 and receipts[0]["updated_fields"] == list(fields)
         assert receipts[1] == {"status": "success", "agent_id": runtime.agent_id}
+        prompt = json.dumps(runtime.provider.wire[0]["messages"])
+        assert "<code>" in prompt and "print(saved)" in prompt and "<final_answer>" in prompt
+        assert draft(runtime) == {**before, **fields}
+
+
+def test_native_creator_saves_and_validates_with_business_tools(monkeypatch):
+    with owned_runtime(monkeypatch, native=True) as runtime:
+        before = draft(runtime, description="", **CONVERSATION_SETTINGS)
+        fields = {"description": "A complete fixture draft."}
+        save = "nl2a_save_agent_draft_fields"
+        validate = "nl2a_validate_agent_generation_complete"
+        responses = iter([
+            f"<code>print({save}(agent_id={runtime.agent_id}, fields={{'description': 'Unexpected write'}}))</code>",
+            {"tool_calls": [{"index": 0, "id": "save", "type": "function", "function": {
+                "name": save, "arguments": json.dumps({"agent_id": runtime.agent_id, "fields": fields}),
+            }}]},
+            {"tool_calls": [{"index": 0, "id": "validate", "type": "function", "function": {
+                "name": validate, "arguments": "{}",
+            }}]},
+            "Fixture turn finished.",
+        ])
+        runtime.provider.responder = lambda body: next(responses) if body.get("stream") else "Fixture turn"
+        response = runtime.post(PATH, query="Save the description and check the draft.")
+        assert response.status_code == 200
+        events = sse(response)
+        assert not any(event["type"] == "error" for event in events), events
+        assert [json.loads(event["content"]) for event in events if event["type"] == "nl2a_state"] == [
+            saved(runtime, fields), {"event": "agent_generation_completed", "agent_id": runtime.agent_id},
+        ]
+        assert events[-1]["type"] == "final_answer"
+        assert next(responses, None) is None
+        first = runtime.provider.wire[0]
+        tools = {item["function"]["name"] for item in first["tools"]}
+        assert {save, validate, "nl2a_wrapper"} <= tools
+        assert not {"nexent_execute_python", "parallel_executor"} & tools
+        prompt = "\n".join(item["content"] for item in first["messages"] if item["role"] == "system")
+        assert '"fields": {"name": "research_assistant"}' in prompt
+        assert all(marker not in prompt for marker in ("<code>", "<final_answer>", "print("))
         assert draft(runtime) == {**before, **fields}
 
 
@@ -290,5 +340,5 @@ def test_stdout_cannot_publish_or_stop_before_real_clarification(monkeypatch):
         assert cards[0]["questions"] == questions
         assert events[-1]["type"] == "nl2a"
         assert next(actions, None) is None
-        assert runtime.runs[-1].stop_event.is_set()
+        assert runtime.runs[-1].observer.boundary_reached
         assert draft(runtime) == before

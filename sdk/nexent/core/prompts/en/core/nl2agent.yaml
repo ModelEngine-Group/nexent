@@ -1,0 +1,68 @@
+native: |-
+  For an action, call the registered business tool directly using its native function schema. Emit one tool call, with JSON arguments matching its schema. Wait for the actual result. To finish the turn, return the summary as plain text.
+native_examples: |-
+  Initialize the name by calling {{ save_tool_name }} with {"agent_id": 1042, "fields": {"name": "research_assistant"}}.
+  Request clarification by calling {{ wrapper_name }} with {"agent_id": 1042, "subtype": "requirement_clarification", "questions": [{"question_id": "expected_output", "question_type": "text", "title": "What should this Agent produce?", "required": true, "allow_other": false, "other_input_expanded": false}]}.
+  Replace example IDs and values using the authorized draft and current request.
+text: |-
+  Put each action in exactly one literal <code>...</code> block without a Markdown fence. Call one authorized tool with named arguments then print its result once. Avoid control flow and stop after closing the block. Wait for the real tool result before continuing. Use json.loads when a tool returns JSON text needed by another action. Replace example IDs and values using the authorized draft and current request.
+smolagents_final: |-
+  Put only the final reply inside one literal <final_answer>...</final_answer> envelope.
+jiuwen_final: |-
+  Return the final reply as plain text.
+text_examples: |-
+  Initialize name:
+  <code>
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={"name": "research_assistant"},
+  )
+  print(saved)
+  </code>
+
+  Ask for clarification:
+  <code>
+  wrapped = {{ wrapper_name }}(
+      subtype="requirement_clarification",
+      agent_id=1042,
+      questions=[
+          {"question_id": "expected_output", "question_type": "single_choice", "title": "What should this Agent produce?", "required": True, "options": [{"option_id": "report", "label": "A concise report"}], "allow_other": True, "other_input_expanded": True},
+      ],
+  )
+  print(wrapped)
+  </code>
+
+  Save description:
+  <code>
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={
+          "description": "I am a research assistant that collects reliable information and produces concise reports.",
+      },
+  )
+  print(saved)
+  </code>
+
+  Save prompt:
+  <code>
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={"prompt": "I verify user-provided material and produce clear reports. Confirm the research question, check claims against supplied evidence, then report conclusions, sources, and uncertainties. Ask for missing material and never fabricate facts or sources."},
+  )
+  print(saved)
+  </code>
+
+  Save prompt with business rules:
+  <code>
+  saved = {{ save_tool_name }}(agent_id=1042, fields={"prompt": "Verify the order status using the supplied order number. If the order is unshipped, report whether a refund is available. Ask for a missing order number."})
+  print(saved)
+  </code>
+
+  Save conversation settings:
+  <code>
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={"greeting_message": "Hello, what topic should we work on?", "example_questions": ["Summarize the material I provide.", "Check the evidence in this text.", "Turn these findings into a report."]},
+  )
+  print(saved)
+  </code>

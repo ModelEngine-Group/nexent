@@ -4,6 +4,7 @@
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from uuid import uuid4
@@ -28,6 +29,23 @@ from management.services.model.creator_snapshot import prepare_creator_model
 from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger(__name__)
+
+_EXPLICIT_AGENT_CREATION = re.compile(
+    r"^\s*(?:(?:请(?:帮我)?|帮我|我想(?:要)?|我希望)\s*)?(?:(?:从头|从零)\s*)?(?:"
+    r"(?:创建|新建|搭建|生成)\s*(?:一个|一名)?\s*"
+    r"(?:[「“][^」”\n]{0,70}(?:智能体|助手)[」”]|[^，。！？：:\n]{0,30}(?:智能体|助手))(?=\s*[,，。！？：:\n]|$)"
+    r"|重新生成(?:当前|这个|该)?智能体(?:的)?全部配置)",
+)
+_EXPLICIT_AGENT_CREATION_EN = re.compile(
+    r"^\s*(?:please\s+|help me\s+)?(?:create|build|set up)\s+(?:a|an|the)\s+"
+    r"(?:[\w-]+\s+){0,5}(?:agent|assistant)\b(?!\s+(?:prompt|description|field|name)\b)"
+    r"|^\s*(?:please\s+)?regenerate\s+(?:all|the entire)\s+(?:agent|assistant)\s+configuration\b",
+    re.IGNORECASE,
+)
+
+
+def _requests_full_generation(query: str) -> bool:
+    return bool(_EXPLICIT_AGENT_CREATION.match(query) or _EXPLICIT_AGENT_CREATION_EN.match(query))
 
 
 async def _creator_frames(response, payload, actor):
@@ -80,6 +98,14 @@ async def prepare_nl2agent_snapshot(
     action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
     if action_agent_id is not None and request.agent_id != action_agent_id:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
+    full_generation = _requests_full_generation(request.query)
+    if action_agent_id is not None and json.loads(request.query).get("subtype") == "requirement_clarification":
+        previous_request = next(
+            (item.content for item in reversed(request.history or [])
+             if item.role == "user" and _parse_nl2agent_card_action_agent_id(item.content) is None),
+            "",
+        )
+        full_generation = _requests_full_generation(previous_request)
     model_scope = await run_blocking(
         "nl2agent-model", prepare_creator_model, request, actor.tenant_id, lane="control-io", owner="management",
     )
@@ -94,6 +120,7 @@ async def prepare_nl2agent_snapshot(
     return PreparedAgentCreatorRun(
         mode="nl2agent", run_id=getattr(request, "_creator_run_id", None) or uuid4().hex,
         agent_id=request.agent_id, input=run_input,
+        generation_stage="prepare" if full_generation else None,
         bound_resources=context.content["text"], language="en" if language == "en" else "zh", **model_scope,
     )
 
@@ -113,6 +140,7 @@ async def _apply_card_action(payload, actor, request, *, validate_only=False):
     require_agent_draft_edit(agent_id=payload.agent_id, tenant_id=actor.tenant_id, user_id=actor.user_id)
     frames = []
     resume = getattr(request, "_resume_confirmed_requirements", False)
+    prompt_scope = None
     if action.get("subtype") == "prompt_generation":
         from services.nl2agent_prompt_service import apply_action
         if not scope.conversation_id:
@@ -125,6 +153,7 @@ async def _apply_card_action(payload, actor, request, *, validate_only=False):
         frames.append({"type": "nl2a", "content": json.dumps(result["card"], ensure_ascii=False)})
         if not result["resume"]:
             return None, frames
+        payload = payload.model_copy(update={"generation_stage": "finalize"})
         query = ("The runtime has applied the exact prompt approved by the user. Do not regenerate or save prompt. "
                  "Continue the original full-generation task: save greeting_message and example_questions, "
                  "then call nl2a_validate_agent_generation_complete and report its actual result.")
@@ -145,14 +174,20 @@ async def _apply_card_action(payload, actor, request, *, validate_only=False):
         if result.get("card") is not None:
             frames.append({"type": "nl2a", "content": json.dumps(result["card"], ensure_ascii=False)})
             return None, frames
-        payload = payload.model_copy(update={"resource_pending": (
-            result.get("next_step") == "verify_resources" and result.get("purpose") == "generate"
-        )})
+        if result.get("purpose") == "generate":
+            verification_pending = result.get("next_step") == "verify_resources"
+            payload = payload.model_copy(update={
+                "resource_pending": verification_pending,
+                "generation_stage": "verify_resources" if verification_pending else "generate_prompt",
+            })
+            if not verification_pending:
+                prompt_scope = scope
         query = "Continue from the resource action accepted by the runtime. Accepted resource action: " + json.dumps(result)
     else:
         return payload, frames
     context = await _build_verified_bound_resources_context(
         agent_id=payload.agent_id, user_id=actor.user_id, tenant_id=actor.tenant_id,
+        prompt_scope=prompt_scope,
     )
     return payload.model_copy(update={
         "input": payload.input.model_copy(update={"query": query}), "bound_resources": context.content["text"],

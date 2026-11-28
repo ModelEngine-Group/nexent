@@ -43,6 +43,14 @@ from management.services.agent.nl2agent_tools import ResourceCandidate, Resource
 logger = logging.getLogger(__name__)
 
 
+class VerificationBatchRetry(ResourceStateError):
+    """Carry authorized feedback for retrying the current verification batch."""
+
+    def __init__(self, code: str, result: dict):
+        super().__init__(code, retryable=True)
+        self.result = result
+
+
 async def _progress(publisher, stage):
     await run_blocking("nl2agent-retrieval-progress", publisher.publish, stage,
                        lane="control-io", owner=__name__)
@@ -192,6 +200,7 @@ def _batch_result(state: ResourceState) -> dict:
         return {"status": "success", "requirements": coverage_rows(state), "verification_batch_id": None}
     return {
         "status": "success",
+        "next_step": "verify_resources",
         "verification_batch_id": batch["id"],
         "requirements": [
             {
@@ -483,6 +492,36 @@ def _verification_signature(checks: list[VerificationCheck], offered_refs: dict[
     return sorted(signature)
 
 
+async def _verification_retry_feedback(
+    scope: ResourceScope, state: ResourceState, checks: list[VerificationCheck],
+) -> dict:
+    result = await _authorized_batch_result(scope, state)
+    submitted = {
+        check.requirement_id: {assessment.candidate_ref for assessment in check.assessments or []}
+        for check in checks
+    }
+    missing = []
+    for row in result["requirements"]:
+        requirement_id = row["requirement_id"]
+        expected = {
+            candidate["candidate_ref"]
+            for candidate in row["installed_candidates"] + row["installable_candidates"]
+        }
+        omitted = sorted(expected - submitted.get(requirement_id, set()))
+        if omitted or requirement_id not in submitted:
+            missing.append({"requirement_id": requirement_id, "missing_candidate_refs": omitted})
+    return {
+        **result,
+        "missing_assessments": missing,
+        "retry_instruction": (
+            "Call nl2a_verify_requirements again with this verification_batch_id. Resubmit all requirements in "
+            "this batch, keep valid assessments, and add one assessment for each missing candidate under its "
+            "requirement_id, including uninstalled and non-matching candidates. Use each current candidate_ref "
+            "exactly once and set accepted to exactly the refs whose satisfies value is true."
+        ),
+    }
+
+
 async def verify(scope: ResourceScope, batch_id: str, checks: list[VerificationCheck]) -> dict:
     snapshot = require_current_run(await read_resource_state(scope), scope)
     previous = snapshot.get("submitted_batches", {}).get(batch_id)
@@ -490,7 +529,16 @@ async def verify(scope: ResourceScope, batch_id: str, checks: list[VerificationC
         if previous != _verification_signature(checks, {entry[0]: entry[1] for entry in previous}):
             raise ResourceStateError("verification_batch_conflict")
         return await _authorized_batch_result(scope, snapshot)
-    accepted = validate_checks(snapshot, batch_id, checks)
+    try:
+        accepted = validate_checks(snapshot, batch_id, checks)
+    except ResourceStateError as error:
+        if error.code not in {
+            "verification_requirements_incomplete", "verification_assessments_required",
+            "verification_assessments_incomplete", "invalid_verified_candidate",
+        }:
+            raise
+        feedback = await _verification_retry_feedback(scope, snapshot, checks)
+        raise VerificationBatchRetry(error.code, feedback) from error
     signature = _verification_signature(checks, {
         key: [item["candidate_ref"] for item in _candidates_in_batch(snapshot["requirements"][key])]
         for key in accepted
@@ -633,7 +681,9 @@ def card_payload(scope: ResourceScope, state: ResourceState, rows: list[dict] | 
 
 async def show_card(scope: ResourceScope) -> dict | None:
     state = require_current_run(await read_resource_state(scope), scope)
-    if state["batch"] or any("accepted" not in row for row in state["requirements"].values()):
+    if state["batch"]:
+        raise VerificationBatchRetry("verification_incomplete", await _authorized_batch_result(scope, state))
+    if any("accepted" not in row for row in state["requirements"].values()):
         raise ResourceStateError("verification_incomplete")
     catalogs = {}
     await _authorized_batch_result(scope, state, catalogs=catalogs)

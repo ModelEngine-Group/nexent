@@ -1,8 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import ast
 import json
-import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -83,10 +81,10 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert VERIFY_REQUIREMENTS_NAME in prompt
     assert "runtime_wrapper" in prompt
     assert "runtime_save" in prompt
-    assert "json.loads" in prompt
+    assert "JSON" in prompt
     assert "bound_resources" in prompt
     assert "business_description" not in prompt
-    assert 'subtype="requirement_clarification"' in prompt
+    assert "requirement_clarification" in prompt
     assert SHOW_RESOURCE_CARD_NAME in prompt
     assert 'subtype="final_confirmation"' not in prompt
     assert "agent_generation_completed" in prompt
@@ -110,12 +108,11 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "### Completion Summary" in prompt
         assert "New Agent summary:" in prompt
         assert "### Atomic Action Contract" in prompt
-        assert "once the action is known, emit executable code immediately" in prompt
+        assert "once the action is known, submit it immediately" in prompt
         assert 'equal to `["prompt"]`' in prompt
-        assert "exactly one concise Think-Code example" in prompt
+        assert "Core-neutral example" in prompt
         assert "Weather Assistant" not in prompt
         assert "Describe the tasks this Agent must perform" not in prompt
-        assert '"question_id": "expected_output"' in prompt
     else:
         assert "资源依赖 Prompt 生成" in prompt
         assert "修订总结" in prompt
@@ -129,40 +126,13 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "### 完成总结" in prompt
         assert "新智能体已完成生成" in prompt
         assert "### 原子动作输出契约" in prompt
-        assert "确定动作后必须立即输出可执行代码" in prompt
+        assert "确定动作后必须立即提交该动作" in prompt
         assert '`updated_fields` 是 `["prompt"]`' in prompt
-        assert "只编写一个紧凑的“思考-代码”示例" in prompt
+        assert "写一个 Core 中立的使用示例" in prompt
         assert "天气助手" not in prompt
         assert "请详细说明这个智能体需要完成的任务" not in prompt
-        assert '"question_id": "expected_output"' in prompt
 
-    code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert code_blocks
-    for code_block in code_blocks:
-        ast.parse(code_block)
-
-    few_shots_save = next(
-        code_block
-        for code_block in code_blocks
-        if 'fields={"prompt": prompt}' in code_block
-    )
-    assert r"\x3ccode>" in few_shots_save
-    assert r"\x3c/code>" in few_shots_save
-    assert r"Observation\x3a" not in few_shots_save
-    assert "<code>" not in few_shots_save
-    assert "</code>" not in few_shots_save
-    assert "Observation:" not in few_shots_save
-
-    few_shots_assignment = ast.parse(few_shots_save).body[0]
-    assert isinstance(few_shots_assignment, ast.Assign)
-    stored_few_shots = ast.literal_eval(few_shots_assignment.value)
-    assert "<code>" in stored_few_shots
-    assert "</code>" in stored_few_shots
-    assert "Observation:" not in stored_few_shots
-    if language == "en":
-        assert "The system supplies the tool result in subsequent context" in stored_few_shots
-    else:
-        assert "系统在后续上下文中提供工具结果" in stored_few_shots
+    assert not any(marker in prompt for marker in ("<code>", "<final_answer>", "print(", "nexent_execute_python"))
 
 
 def test_build_nl2agent_system_prompt_falls_back_to_chinese():
@@ -186,7 +156,7 @@ def test_build_nl2agent_system_prompt_handles_creation_without_resources(
     prompt = build_nl2agent_system_prompt(language)
 
     assert skip_all_rule in prompt
-    assert "nl2a_read_generation_context()" in prompt
+    assert "nl2a_read_generation_context" in prompt
 
 
 @pytest.mark.parametrize(
@@ -327,15 +297,15 @@ def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
 def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
     prompt = build_nl2agent_system_prompt(language)
 
-    assert f"{DISCOVER_REQUIREMENTS_NAME}(" in prompt
-    assert f"{VERIFY_REQUIREMENTS_NAME}(" in prompt
+    assert DISCOVER_REQUIREMENTS_NAME in prompt
+    assert VERIFY_REQUIREMENTS_NAME in prompt
     assert "requirements_limit_exceeded" in prompt
     assert "max_requirements" in prompt
     assert ("split the request" if language == "en" else "分批或缩小范围") in prompt
-    assert f"{SHOW_RESOURCE_CARD_NAME}()" in prompt
-    assert f"saved = {SAVE_AGENT_DRAFT_FIELDS_NAME}(" in prompt
-    assert f"{VALIDATE_AGENT_GENERATION_COMPLETE_NAME}()" in prompt
-    assert f"wrapped = {NL2A_WRAPPER_NAME}(" in prompt
+    assert SHOW_RESOURCE_CARD_NAME in prompt
+    assert SAVE_AGENT_DRAFT_FIELDS_NAME in prompt
+    assert VALIDATE_AGENT_GENERATION_COMPLETE_NAME in prompt
+    assert NL2A_WRAPPER_NAME in prompt
     assert "external_registry" not in prompt
     assert "MCP_OFFICIAL_REGISTRY" not in prompt
 
@@ -470,6 +440,15 @@ def test_requirement_clarification_accepts_at_most_five_questions():
         )
 
 
+@pytest.mark.parametrize("configured_steps, expected_steps", [(None, 15), (8, 15), (20, 20)])
+def test_create_nl2agent_config_leaves_room_for_multi_step_verification(configured_steps, expected_steps):
+    snapshot = None if configured_steps is None else {
+        "agent_id": 42, "version_no": 0, "description": "Creator", "max_steps": configured_steps,
+    }
+    config = create_nl2agent_agent_config("zh", [], snapshot=snapshot)
+    assert config.max_steps == expected_steps
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
 async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(language):
@@ -533,6 +512,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     assert prompt_context.metadata == {
         "authority": "platform",
         "layout_order": -1,
+        "creator_tools": {"save_tool_name": SAVE_AGENT_DRAFT_FIELDS_NAME, "wrapper_name": NL2A_WRAPPER_NAME},
     }
     assert prompt_context.content["text"] == build_nl2agent_system_prompt(language)
 

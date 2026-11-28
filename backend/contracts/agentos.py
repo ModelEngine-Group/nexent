@@ -791,6 +791,14 @@ class PreparedAgentCreatorRun(PreparedCreatorRun):
     bound_resources: str = Field(min_length=1)
     conversation_id: PositiveInt | None = None
     resource_pending: bool = False
+    generation_stage: Literal["prepare", "verify_resources", "generate_prompt", "finalize"] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_generation_stage(self, handler):
+        data = super().serialize_trajectory_scope(handler)
+        if self.generation_stage is None:
+            data.pop("generation_stage", None)
+        return data
 
 
 class PreparedEvaluationRun(AgentRunSpec):

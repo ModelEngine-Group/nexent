@@ -114,14 +114,13 @@ RESOURCE_REQUIREMENT_LIMIT_DESCRIPTION = (
 )
 SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
     "Search the current tenant's installed and available MCP tools using keywords. "
-    "Returns JSON text ordered by relevance. Decode the result with json.loads "
-    f"before passing it to {NL2A_WRAPPER_NAME}, preserve the decoded content unchanged, "
-    "and use print(result) to expose the decoded observation."
+    "Returns JSON text ordered by relevance. Decode the JSON result "
+    f"before passing it unchanged to {NL2A_WRAPPER_NAME}."
 )
 SEARCH_INSTALLED_RESOURCES_DESCRIPTION = (
     "Search all current-user-visible installed Local Tools, MCP Tools, and Skills "
     "for a structured set of capability requirements. Return no more than 12 "
-    "ranked candidates as JSON text. Decode the result with json.loads before "
+    "ranked candidates as JSON text. Decode the JSON result before "
     "indexing it, and preserve the decoded candidates unchanged when calling "
     f"{RECOMMEND_RESOURCES_NAME}. {RESOURCE_REQUIREMENT_LIMIT_DESCRIPTION}"
 )
@@ -143,8 +142,7 @@ NL2A_WRAPPER_DESCRIPTION = (
     "`questions`. For resource installation or binding, pass `agent_id` and the "
     "verified `resource_result`. JSON parameters must be decoded dictionaries, "
     "never raw JSON strings. An empty installed-resource result returns a "
-    "non-interactive success result so Prompt generation can continue immediately. "
-    f"Call the tool as `result = {NL2A_WRAPPER_NAME}(...)`, then use `print(result)`."
+    "non-interactive success result so Prompt generation can continue immediately."
 )
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
@@ -164,13 +162,11 @@ SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Only submit the fields determined by the current action. A save does not validate full generation. "
     "The name field may be set only when the existing draft name is empty; "
     "display_name may be set only alongside the first name on an empty Workbench Draft; "
-    "all other display names are immutable. Call the tool as "
-    f"`result = {SAVE_AGENT_DRAFT_FIELDS_NAME}(...)`, then use `print(result)` exactly once."
+    "all other display names are immutable."
 )
 VALIDATE_AGENT_GENERATION_COMPLETE_DESCRIPTION = (
     "Read the authorized target draft and validate full generation after all requested fields "
-    "have been saved. This tool does not write fields. Call only for full generation; "
-    f"use `result = {VALIDATE_AGENT_GENERATION_COMPLETE_NAME}()` and then `print(result)`."
+    "have been saved. This tool does not write fields. Call only for full generation."
 )
 
 MAX_BINDING_CANDIDATES = 12

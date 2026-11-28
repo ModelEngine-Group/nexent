@@ -39,6 +39,31 @@ def test_qwen_empty_id_continuation_preserves_bound_call(openai_profile, stream_
     assert completed.tool_calls[0].parsed_arguments == {"query": "owned"}
 
 
+def test_null_type_continuation_preserves_bound_function(openai_profile, stream_request):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    decoder.push(chunk({"index": 0, "id": "bound-call", "type": "function",
+        "function": {"name": "search", "arguments": '{"query":'}}))
+    events = decoder.push(chunk({"index": 0, "id": None, "type": None,
+        "function": {"name": "", "arguments": '"owned"}'}}))
+    assert [event.type for event in events] == ["tool_call_delta"]
+    decoder.push(chunk(finish="tool_calls"))
+    [call] = decoder.push(SSEEvent("[DONE]"))[0].message.tool_calls
+    assert call.provider_call_id == "bound-call"
+    assert call.name == "search"
+    assert call.parsed_arguments == {"query": "owned"}
+
+
+@pytest.mark.parametrize("bound,kind", [(False, None), (True, "other"), (True, 0), (True, "")])
+def test_invalid_tool_types_still_fail(openai_profile, stream_request, bound, kind):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    if bound:
+        decoder.push(chunk({"index": 0, "id": "bound-call", "type": "function",
+            "function": {"name": "search", "arguments": ""}}))
+    with pytest.raises(ModelAdapterError, match="^MODEL_TOOL_CALL_INVALID$"):
+        decoder.push(chunk({"index": 0, "id": "bound-call", "type": kind,
+            "function": {"arguments": "{}"}}))
+
+
 @pytest.mark.parametrize("identity", ["other-call", " ", 0])
 def test_real_identity_conflicts_still_fail(openai_profile, stream_request, identity):
     decoder = OpenAIStreamDecoder(stream_request, openai_profile)

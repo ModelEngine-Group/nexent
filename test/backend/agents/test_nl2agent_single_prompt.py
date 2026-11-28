@@ -7,14 +7,16 @@ import re
 
 import pytest
 
-from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
+from nexent.core.agents.cores.nl2agent_prompt import nl2agent_protocol
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt, create_nl2agent_agent_config
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_prompt_examples_save_only_visible_content(language):
     prompt = build_nl2agent_system_prompt(language)
     saves = []
-    for source in re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL):
+    protocol = nl2agent_protocol(create_nl2agent_agent_config(language, []).context_items, language, "smolagents")
+    for source in re.findall(r"<code>\n(.*?)\n</code>", protocol.content["text"], re.DOTALL):
         tree = ast.parse(source)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -33,6 +35,7 @@ def test_prompt_examples_save_only_visible_content(language):
     assert len(saves) == 2
     for fields in saves:
         assert set(fields) == {"prompt"}
+        assert "<code>" not in ast.literal_eval(fields["prompt"])
     assert "constraint_prompt" not in prompt
     assert "few_shots_prompt" not in prompt
     assert ('`updated_fields` 是 `["prompt"]`' in prompt

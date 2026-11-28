@@ -8,7 +8,7 @@ implementations:
 acceptance_bindings:
   AC-SAVE-ONLY: [test_prompt_only_save_does_not_complete_existing_draft]
   AC-INCOMPLETE: [test_failed_validation_keeps_successful_conversation_save]
-  AC-COMPLETE: [test_explicit_success_emits_completion_after_save]
+  AC-COMPLETE: [test_explicit_success_emits_completion_after_save, test_native_creator_saves_and_validates_with_business_tools]
   AC-TRUSTED-RESULT: [test_stdout_cannot_publish_or_stop_before_real_clarification]
   AC-CONFIRMATION: [test_cancel_conflict_and_full_generation_continuation]
   AC-EMPTY-PROMPT: [test_empty_prompt_applies_directly_without_card]

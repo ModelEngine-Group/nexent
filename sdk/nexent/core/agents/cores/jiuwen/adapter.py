@@ -109,6 +109,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         self._closed = False
         self._tool_executions = []
         self.text_protocol = False
+        self._nl2agent_native = False
         self._parallel_children = {}
         self._parallel_tools = set()
         self._native_call_names = {}
@@ -130,7 +131,9 @@ class JiuwenAdapter(AgentCoreAdapter):
             *self.external_agents,
         ])
         occupied = {*reserved_names, *(child.invocation_name for child in self.external_agents)}
-        self.clarification = JiuwenClarification(occupied) if (
+        self.clarification = JiuwenClarification(
+            occupied, workbench=getattr(config, "origin", None) == "SYSTEM" and config.name == "workbench_main",
+        ) if (
             root_clarification_allowed(run_info) and getattr(config, "response_mode", "chat") == "chat"
             and getattr(getattr(run_info, "observer", None), "enable_nl2a_wrapper", False) is not True
         ) else None
@@ -305,7 +308,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                 "JIUWEN_EXECUTION_FAILED", "JIUWEN_TERMINAL_MISSING",
             }:
                 diagnostic = previous
-            else:
+            elif diagnostic.diagnostic_code is None:
                 diagnostic = self.events.resource_error or previous or diagnostic
         self.events.record_error(diagnostic)
         origin = error.__traceback__
@@ -433,7 +436,9 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.resources.agent = SimpleNamespace(tools=self.business_tools, python_executor=None)
         if self.clarification is not None:
             # A configured class may expose a different runtime tool name.
-            self.clarification = JiuwenClarification(set(self.business_tools) | self.visible_tool_names)
+            self.clarification = JiuwenClarification(
+                set(self.business_tools) | self.visible_tool_names, workbench=self.clarification.workbench,
+            )
         self._parallel_tools = {tool.card.name for tool in native_tools if tool.card.parallel_safe}
         self._parallel_tools.update(self._parallel_children)
         if info.parallel_child_mode != "read_only":
@@ -494,10 +499,10 @@ class JiuwenAdapter(AgentCoreAdapter):
                             description="Ask for essential missing user information and end this turn awaiting input.",
                             input_params=self.clarification.schema)
             self.native_agent.ability_manager.add_ability(card, LocalFunction(card, terminal_only))
-        if not self.native_parallel and any(config.class_name == "ParallelExecutorTool" and
+        if not (self.native_parallel or self._nl2agent_native) and any(config.class_name == "ParallelExecutorTool" and
                (config.name or "parallel_executor") in self.visible_tool_names for config in self.tool_configs):
             self._bind_parallel_tool()
-        if not self.artifact_output and info.parallel_child_mode != "read_only":
+        if not (self.artifact_output or self._nl2agent_native) and info.parallel_child_mode != "read_only":
             self._bind_text_executor()
 
     def _remote_handler(self, tool, external):
@@ -669,11 +674,13 @@ class JiuwenAdapter(AgentCoreAdapter):
         return execute
 
     def _compile_context(self):
+        from nexent.core.agents.cores.nl2agent_prompt import nl2agent_protocol
         from nexent.core.agents.orchestration.execution import _get_authorized_context_items, _get_authorized_history
 
         config = self.run_info.agent_config
+        items = _get_authorized_context_items(self.run_info) or ()
         context = []
-        for item in _get_authorized_context_items(self.run_info) or ():
+        for item in items:
             if item.type not in {ContextItemType.SYSTEM, ContextItemType.TOOL, ContextItemType.SKILL,
                                  ContextItemType.WORKER_AGENT, ContextItemType.EXTERNAL_AGENT,
                                  ContextItemType.CURRENT_TASK}:
@@ -687,12 +694,14 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.agents.cores.jiuwen.protocol import NATIVE_PROTOCOL_INSTRUCTION
         from nexent.core.agents.prompt.policies import business_system_instructions
 
+        language = getattr(self.run_info.observer, "lang", "en")
         shared = business_system_instructions(
-            config.instructions or config.description, _get_authorized_context_items(self.run_info) or (),
-            getattr(getattr(self.run_info, "observer", None), "lang", "en"),
+            config.instructions or config.description, items, language,
             is_subagent=not root_clarification_allowed(self.run_info),
         )
-        protocol = "" if self.text_protocol or self.artifact_output else NATIVE_PROTOCOL_INSTRUCTION
+        creator = nl2agent_protocol(items, language, "jiuwen" if self.text_protocol else "native")
+        self._nl2agent_native = creator is not None and not self.text_protocol
+        protocol = "" if self.text_protocol or self.artifact_output or creator is not None else NATIVE_PROTOCOL_INSTRUCTION
         if self.native_parallel:
             protocol += (
                 "\nFor independent reads or delegations that can run in parallel, emit their individual native tool calls "
@@ -702,10 +711,10 @@ class JiuwenAdapter(AgentCoreAdapter):
             protocol = "This parallel delegation is read-only. Use only the listed read tools and return your findings."
         if self.artifact_output:
             shared = [config.instructions or "", *(
-                item.content.get("text", "") for item in _get_authorized_context_items(self.run_info) or ()
+                item.content.get("text", "") for item in items
                 if item.type == ContextItemType.SYSTEM
             )]
-        if getattr(config, "response_mode", "chat") == "python_workflow" and not self.text_protocol:
+        if config.response_mode == "python_workflow" and not self.text_protocol and creator is None:
             protocol += (
                 "\nThe shared creation workflow describes Python action PAYLOADS. Its code tags and print examples "
                 "are not the response wire format. Execute each complete action by calling nexent_execute_python "
@@ -717,7 +726,10 @@ class JiuwenAdapter(AgentCoreAdapter):
         clarification = self.clarification.instructions(
             getattr(getattr(self.run_info, "observer", None), "lang", "en"), text_protocol=self.text_protocol,
         ) if self.clarification is not None else ""
-        return "\n\n".join(text for text in (*shared, self.delegation.instruction, protocol, clarification) if text)
+        creator_text = creator.content["text"] if creator is not None else ""
+        return "\n\n".join(
+            text for text in (*shared, self.delegation.instruction, protocol, creator_text, clarification) if text
+        )
 
     def _create_model(self):
         from nexent.core.agents.cores.jiuwen.model import JiuwenServiceModel
@@ -767,7 +779,9 @@ class JiuwenAdapter(AgentCoreAdapter):
                                   on_step=on_step, on_event=on_event,
                                   on_error=self.events.record_error, on_recovery=self.events.recovery,
                                   delegation=self.delegation, artifact_output=self.artifact_output,
-                                  clarification=self.clarification)
+                                  clarification=self.clarification,
+                                  verification_pending=getattr(info.observer, "has_pending_nl2agent_verification", None),
+                                  full_generation_pending=getattr(info.observer, "pending_full_generation_action", None))
 
     def _bind_text_executor(self):
         from openjiuwen.core.foundation.tool import LocalFunction

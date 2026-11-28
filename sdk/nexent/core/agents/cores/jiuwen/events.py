@@ -204,6 +204,8 @@ class JiuwenEventAdapter:
                 error = payload.get("error")
                 if reason is None and isinstance(error, str):
                     reason = _RUNNER_ERROR_REASONS.get(error)
+                if reason is None and payload.get("output") == "Max iterations reached without completion":
+                    reason = "runner_round_limit"
                 raise JiuwenExecutionError(reason or "runner_error_result")
             output = payload.get("output")
             if not isinstance(output, str):

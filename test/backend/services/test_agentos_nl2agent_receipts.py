@@ -3,6 +3,7 @@
 
 import json
 from threading import Event
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,6 +40,65 @@ def test_callback_catalog_preserves_all_local_tools_and_receipts(mocker):
     assert [item["type"] for item in messages] == ["nl2a"]
     assert tools["nl2a_read_generation_context"].invoke({"agent_id": 8})["code"] == "agent_context_mismatch"
     assert invoke.call_count == 1
+
+
+def test_creator_tracks_pending_verification_across_callback_results(mocker):
+    payload = SimpleNamespace(agent_id=7, run_id="a" * 32)
+    actor = ServicePrincipal("owner", "tenant")
+    observer = runtime._Nl2AgentBoundaryObserver(
+        lang="en", stop_event=Event(), agent_id=7, run_id=payload.run_id, conversation_id="9",
+    )
+
+    def wrapped(result):
+        return {"agentos_tool_result": True, "content": [{"text": json.dumps(result)}], "meta": None}
+
+    first = {"status": "success", "verification_batch_id": "first"}
+    next_batch = {"status": "success", "verification_batch_id": "second"}
+    premature_card = {"status": "error", "code": "verification_incomplete", "verification_batch_id": "second"}
+    mocker.patch.object(runtime, "_invoke_tool", side_effect=[
+        first, wrapped(next_batch), wrapped(premature_card), wrapped({"status": "success", "card_required": False}),
+    ])
+    tools = {config.name: config.metadata for config in runtime._callback_tools(payload, actor, observer)}
+    assert not observer.has_pending_nl2agent_verification()
+    assert tools["nl2a_discover_requirements"].invoke({}) == first
+    assert observer.has_pending_nl2agent_verification()
+    verify = tools["nl2a_verify_requirements"]
+    assert json.loads(verify.invoke({"verification_batch_id": "first", "checks": []})) == next_batch
+    assert observer.has_pending_nl2agent_verification()
+    assert json.loads(tools["nl2a_show_resource_card"].invoke({})) == premature_card
+    assert observer.has_pending_nl2agent_verification()
+    verify.invoke({"verification_batch_id": "second", "checks": []})
+    assert not observer.has_pending_nl2agent_verification()
+
+
+def test_full_generation_advances_only_on_trusted_receipts():
+    observer = runtime._Nl2AgentBoundaryObserver(
+        lang="en", stop_event=Event(), agent_id=7, run_id="run", conversation_id="9",
+        generation_stage="prepare",
+    )
+
+    def send(tool, payload, event_id, run_id="run"):
+        observer.on_mcp_tool_result(tool, {NL2AGENT_RECEIPT_KEY: {
+            "event_id": event_id, "run_id": run_id, "conversation_id": "9",
+            "payload": {"agent_id": 7, **payload},
+        }})
+
+    assert observer.pending_full_generation_action() == "prepare"
+    send("nl2a_save_agent_draft_fields", {"event": "agent_draft_fields_saved", "updated_fields": ["name"]}, "name")
+    assert observer.pending_full_generation_action() == "save_description"
+    send("nl2a_save_agent_draft_fields", {"event": "agent_draft_fields_saved",
+                                       "updated_fields": ["description"]}, "description")
+    assert observer.pending_full_generation_action() == "discover_resources"
+    send("nl2a_validate_agent_generation_complete", {"event": "agent_generation_completed"}, "early")
+    assert observer.pending_full_generation_action() == "discover_resources"
+    observer.record_verification_result("show_resource_card", {"status": "success", "card_required": False})
+    assert observer.pending_full_generation_action() == "generate_prompt"
+    send("nl2a_save_agent_draft_fields", {"event": "agent_draft_fields_saved", "updated_fields": ["prompt"]}, "prompt")
+    assert observer.pending_full_generation_action() == "finalize"
+    send("nl2a_validate_agent_generation_complete", {"event": "agent_generation_completed"}, "foreign", "other")
+    assert observer.pending_full_generation_action() == "finalize"
+    send("nl2a_validate_agent_generation_complete", {"event": "agent_generation_completed"}, "validated")
+    assert observer.pending_full_generation_action() is None
 
 
 @pytest.mark.asyncio

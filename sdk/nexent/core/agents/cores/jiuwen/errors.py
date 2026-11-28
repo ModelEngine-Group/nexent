@@ -32,8 +32,20 @@ _PROTOCOL_MESSAGES = {
         "The model requested an unauthorized tool. Check the generated tool name.",
     ),
     "JIUWEN_TERMINAL_MISSING": ("智能体执行结束但未返回最终结果。", "The agent ended without a final result."),
+    "NL2AGENT_VERIFICATION_PENDING": (
+        "还有资源候选需要核验，流程尚未完成。",
+        "Resource verification is still pending.",
+    ),
+    "NL2AGENT_GENERATION_PENDING": (
+        "智能体完整创建尚未完成，请查看已保存的草稿和待办步骤。",
+        "Full Agent creation is still pending. Check the saved draft and remaining steps.",
+    ),
     "JIUWEN_DUPLICATE_TERMINAL": ("智能体返回了重复的最终结果。", "The agent returned duplicate final results."),
     "JIUWEN_FINAL_OUTPUT_INVALID": ("智能体最终输出格式无效。", "The agent's final output format is invalid."),
+    "JIUWEN_WORKBENCH_CONFIRMATION_REQUIRED": (
+        "模型未返回可交互的创建确认卡。可以从输入框下方直接进入智能体创建。",
+        "The model did not return an interactive creation confirmation. You can open Agent Creation from the composer.",
+    ),
     "JIUWEN_DELEGATION_REQUIRED": ("模型未按要求调用子智能体。", "The model did not perform the required delegation."),
     "INVALID_TOOL_ARGUMENTS": ("模型生成的工具参数不符合工具定义。", "The model generated invalid tool arguments."),
     "JIUWEN_INVALID_CLARIFICATION": ("模型生成的澄清请求无效，请重新发送请求。",

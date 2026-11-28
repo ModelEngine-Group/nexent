@@ -9,8 +9,11 @@ import type { NexentOutputStatus } from "@/types/nexentOutput";
 import { getCreatorMode } from "@/lib/creatorConversation";
 import { recordNl2AgentState } from "./nl2agent-state-history";
 import type { Nl2AgentStateEvent } from "./remote-chat-model-adapter";
-import { messageExecutionStatus } from "@/lib/messageExecutionState";
 import { describeConversationRunError } from "@/lib/conversationRunError";
+import {
+  hasRootExecutionError,
+  messageExecutionStatus,
+} from "@/lib/messageExecutionState";
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
@@ -1158,7 +1161,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 ...(error?.reference && { errorReference: error.reference }),
                 ...(runHasFinalAnswer
                   ? { isWarning: true }
-                  : { isError: true }),
+                  : { isError: true, invocation_id: part.invocation_id }),
               };
               const meta = buildMetadata(part.invocation_id);
               if (meta) errorPart.metadata = meta;
@@ -1444,10 +1447,16 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         role: msg.role,
         // A persisted active status is not a live runtime connection. Hydrate it
         // as idle so useConversationResume can establish the actual stream.
-        ...(msg.role === "assistant" ? { status: messageExecutionStatus(
-          msg.status === "streaming" || msg.status === "pending" ? "completed"
-            : msg.status ?? (content.some(part => "isError" in part && part.isError) ? "failed" : "completed")
-        ) } : {}),
+        ...(msg.role === "assistant"
+          ? {
+              status: messageExecutionStatus(
+                msg.status === "streaming" || msg.status === "pending"
+                  ? "completed"
+                  : (msg.status ??
+                    (hasRootExecutionError(content) ? "failed" : "completed"))
+              ),
+            }
+          : {}),
         content,
         // A persisted running flag does not represent an attached local stream.
         // The shared resume hook reconnects it under the original user boundary.
