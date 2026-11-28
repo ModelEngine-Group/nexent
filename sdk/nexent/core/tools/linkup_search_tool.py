@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 
 from linkup import LinkupClient, LinkupSearchImageResult, LinkupSearchTextResult
 from smolagents.tools import Tool
@@ -54,7 +53,8 @@ class LinkupSearchTool(Tool):
         linkup_api_key: str = Field(description="Linkup API key"),
         observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
         max_results: int = Field(description="Maximum number of search results", default=3, ge=1, le=100),
-        image_filter: bool = Field(description="Whether to enable image filtering", default=True)
+        image_filter: bool = Field(description="Whether to enable image filtering", default=True),
+        data_process_service: str = Field(description="Data process service URL", default=None, exclude=True)
     ):
         super().__init__()
         self.observer = observer
@@ -62,7 +62,7 @@ class LinkupSearchTool(Tool):
         self.max_results = max(1, min(int(unwrap_field_info(max_results) or 3), 100))
         self.record_ops = 1
         self.image_filter = image_filter
-        self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
+        self.data_process_service = unwrap_field_info(data_process_service)
 
     def forward(self, query: str) -> str:
         # Perform linkup search

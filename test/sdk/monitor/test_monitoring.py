@@ -2383,3 +2383,29 @@ class TestClientLevelIntegrationPaths:
                 monitored.chat.completions.create(stream=False, messages=[])
 
             buf.add_record.assert_not_called()
+
+
+class TestBufferConfiguration:
+    """MonitoringRecordBuffer takes its settings as parameters, not from the environment."""
+
+    def test_parameters_override_defaults(self, monkeypatch):
+        monkeypatch.setenv("ENABLE_MODEL_MONITORING", "true")
+        monkeypatch.setenv("MODEL_MONITORING_BATCH_SIZE", "7")
+        monkeypatch.setenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "9")
+
+        buf = MonitoringRecordBuffer(
+            enabled=False, batch_size=5, flush_interval=11)
+
+        assert buf.is_enabled is False
+        assert buf._batch_size == 5
+        assert buf._flush_interval == 11
+
+    def test_defaults_ignore_environment(self, monkeypatch):
+        monkeypatch.setenv("ENABLE_MODEL_MONITORING", "false")
+        monkeypatch.setenv("MODEL_MONITORING_BATCH_SIZE", "7")
+        monkeypatch.setenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "9")
+
+        buf = MonitoringRecordBuffer(enabled=False)
+
+        assert buf._batch_size == 100
+        assert buf._flush_interval == 30

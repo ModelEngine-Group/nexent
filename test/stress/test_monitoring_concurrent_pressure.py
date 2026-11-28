@@ -63,8 +63,7 @@ class PressureTestResult:
 def _create_test_buffer(
     batch_size: int = 100, buffer_maxlen: int = 5000, flush_interval: int = 3
 ) -> MonitoringRecordBuffer:
-    os.environ["ENABLE_MODEL_MONITORING"] = "false"
-    buf = MonitoringRecordBuffer()
+    buf = MonitoringRecordBuffer(enabled=False)
     buf._enabled = True
     buf._running = False
     buf._batch_size = batch_size

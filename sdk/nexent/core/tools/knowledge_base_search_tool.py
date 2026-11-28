@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from typing import List, Optional
 
 from pydantic import Field
@@ -98,6 +97,9 @@ class KnowledgeBaseSearchTool(Tool):
         rerank_model: RerankAdapter = Field(
             description="The rerank model to use", default=None, exclude=True
         ),
+        data_process_service: str = Field(
+            description="Data process service URL", default=None, exclude=True
+        ),
         vdb_core: VectorDatabaseCore = Field(
             description="Vector database client", default=None, exclude=True),
         display_name_to_index_map: dict = Field(
@@ -136,7 +138,7 @@ class KnowledgeBaseSearchTool(Tool):
         self.rerank = rerank
         self.rerank_model_name = rerank_model_name
         self.rerank_model = rerank_model
-        self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
+        self.data_process_service = unwrap_field_info(data_process_service)
         self.display_name_to_index_map = display_name_to_index_map
         # `document_paths` is declared with `exclude=True` so smolagents passes the
         # raw FieldInfo default when no value is supplied. Unwrap it here so the
