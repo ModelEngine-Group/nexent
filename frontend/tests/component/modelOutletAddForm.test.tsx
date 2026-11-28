@@ -457,16 +457,11 @@ it("keeps an unchanged batch draft ready when its parent recreates equivalent co
   expect(api.createModelOutlet).not.toHaveBeenCalled();
 }, 15000);
 
-it.each([true, false])(
-  "keeps the batch Other editor available for provider profile found=%s",
-  async (catalogued) => {
-    const provider = {
-      key: "vendor-route",
-      name: "Vendor route",
-      revision: "p1",
-    };
+it.each(["siliconflow-cn", "siliconflow", null])(
+  "keeps batch Other provider selection unchanged for provider ID %s",
+  async (providerId) => {
     api.listProviderProfiles.mockResolvedValue({
-      items: catalogued ? [provider] : [],
+      items: [{ key: "siliconflow-cn", name: "SiliconFlow", revision: "p1" }],
     });
     const client = new QueryClient({
       defaultOptions: {
@@ -485,7 +480,7 @@ it.each([true, false])(
                 request_model_id: "unlisted-model",
                 provider_info: {
                   base_url: "https://models.invalid/v1",
-                  provider_id: provider.key,
+                  provider_id: providerId,
                 },
               },
               onApply,
@@ -502,16 +497,21 @@ it.each([true, false])(
     const tools = screen.queryByRole("switch", {
       name: "modelProfile.nativeTools",
     });
-    if (catalogued) {
+    if (providerId) {
       expect(tools).not.toBeInTheDocument();
     } else {
       expect(tools).toBeEnabled();
+      fireEvent.click(tools!);
+      await waitFor(() => expect(button).toBeEnabled());
     }
     fireEvent.click(button);
     await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
-    expect(onApply.mock.calls[0][0].provider_profile).toEqual(
-      catalogued ? { key: provider.key, revision: provider.revision } : null
-    );
+    expect(onApply.mock.calls[0][0]).toMatchObject({
+      selection_mode: "manual",
+      provider_info: { provider_id: providerId },
+      provider_profile: null,
+      native_tool_call_supported: providerId ? undefined : true,
+    });
   },
   15000
 );

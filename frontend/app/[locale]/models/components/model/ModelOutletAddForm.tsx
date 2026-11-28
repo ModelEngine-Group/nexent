@@ -212,21 +212,14 @@ export function ModelOutletAddForm({
     queryKey: ["model-profiles"],
     queryFn: ({ signal }) => listModelProfiles({ page_size: 100 }, signal),
   });
-  const batchProviderId = configuration
-    ? initial?.provider_info.provider_id
-    : null;
   const provider = providers.data?.items.find(
-    (item) =>
-      item.key ===
-      (providerKey === "__custom__" && batchProviderId
-        ? batchProviderId
-        : providerKey)
+    (item) => item.key === providerKey
   );
   const showNativeTools =
     providerKey === "__custom__" &&
     modelKey === "__other__" &&
     !provider &&
-    (!batchProviderId || providers.isSuccess);
+    !configuration?.draft.provider_info.provider_id;
   const model = useMemo(
     () =>
       modelKey
