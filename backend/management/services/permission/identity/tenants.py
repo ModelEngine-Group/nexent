@@ -47,6 +47,7 @@ from management.db.configuration.tenant import (
     delete_config_by_tenant_config_id,
     get_all_configs_by_tenant_id,
     get_all_tenant_ids,
+    get_existing_tenant_ids,
     get_single_config_info,
     insert_config,
     tenant_exists,
@@ -87,36 +88,33 @@ def _is_displayable_tenant_id(tenant_id: Optional[str]) -> bool:
     return normalized_tenant_id not in {"", DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}
 
 
-def get_tenant_info(tenant_id: str, *, initialize_name: bool = True) -> Dict[str, Any]:
+def get_tenant_info(tenant_id: str, *, verified_exists: bool = False) -> Dict[str, Any]:
     """
-    Get tenant information by tenant ID
+    Get tenant information by tenant ID.
 
-    If TENANT_NAME config is missing, automatically create one with default name.
+    Read-only: a missing TENANT_NAME config yields an empty name instead of
+    being backfilled, so a concurrent tenant delete cannot be resurrected by
+    a read.
 
     Args:
         tenant_id (str): Tenant ID
+        verified_exists (bool): Skip the identity-row check when the caller
+            already verified existence through a batched query (listing paths).
 
     Returns:
         Dict[str, Any]: Tenant information
+
+    Raises:
+        NotFoundException: When the tenant identity row does not exist.
     """
     if not _is_displayable_tenant_id(tenant_id):
         return {}
 
     # A missing identity row means the tenant does not exist (or was deleted).
-    # Never resurrect it by auto-backfilling its name config below.
-    if not tenant_exists(tenant_id):
+    if not verified_exists and not tenant_exists(tenant_id):
         raise NotFoundException(f"Tenant {tenant_id} does not exist")
 
-    # Get tenant name
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
-    if not name_config and initialize_name:
-        logger.warning(
-            f"The name of tenant {tenant_id} not found, creating default config.")
-        # Auto-create TENANT_NAME config with default name
-        _ensure_tenant_name_config(tenant_id)
-        # Re-fetch after creation
-        name_config = get_single_config_info(tenant_id, TENANT_NAME)
-
     group_config = get_single_config_info(tenant_id, DEFAULT_GROUP_ID)
 
     tenant_info = {
@@ -139,42 +137,7 @@ def get_tenant_info_for_user(
 
     if not has_any_role(role, {'SU'}) and tenant_id != requester_tenant_id:
         raise ForbiddenError("Not authorized to access this tenant")
-    if has_any_role(role, {"OPS"}) and not has_any_role(role, {"ADMIN", "SU"}):
-        return get_tenant_info(tenant_id, initialize_name=False)
     return get_tenant_info(tenant_id)
-
-
-def _ensure_tenant_name_config(tenant_id: str) -> bool:
-    """
-    Ensure TENANT_NAME config exists for the tenant.
-    Creates a default name config if it doesn't exist.
-
-    Args:
-        tenant_id: Tenant ID
-
-    Returns:
-        bool: True if config exists or was created successfully, False otherwise
-    """
-    # Check if already exists (double-check in case of race condition)
-    existing = get_single_config_info(tenant_id, TENANT_NAME)
-    if existing:
-        return True
-
-    # Create default TENANT_NAME config
-    tenant_name_data = {
-        "tenant_id": tenant_id,
-        "config_key": TENANT_NAME,
-        "config_value": "Unnamed Tenant",
-        "created_by": "system_auto_create",
-        "updated_by": "system_auto_create"
-    }
-    success = insert_config(tenant_name_data)
-    if success:
-        logger.info(f"Auto-created TENANT_NAME config for tenant {tenant_id}")
-    else:
-        logger.error(
-            f"Failed to auto-create TENANT_NAME config for tenant {tenant_id}")
-    return success
 
 
 def check_tenant_name_exists(tenant_name: str, exclude_tenant_id: Optional[str] = None) -> bool:
@@ -221,7 +184,10 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     ]
     # Exclude ids whose identity row is gone (e.g. stale rows left behind by
     # the earlier deleted-tenant read-backfill bug) from both data and totals.
-    existing_tenant_ids = [tid for tid in all_tenant_ids if tenant_exists(tid)]
+    # One batched query replaces a per-id lookup and keeps the failure surface
+    # at a single query, matching get_all_tenant_ids above.
+    existing_set = set(get_existing_tenant_ids(all_tenant_ids))
+    existing_tenant_ids = [tid for tid in all_tenant_ids if tid in existing_set]
     total = len(existing_tenant_ids)
 
     # Calculate pagination
@@ -235,7 +201,8 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     tenants = []
     for tenant_id in page_tenant_ids:
         try:
-            tenant_info = get_tenant_info(tenant_id)
+            # Existence was already verified by the batched query above.
+            tenant_info = get_tenant_info(tenant_id, verified_exists=True)
             tenants.append(tenant_info)
         except NotFoundException:
             logging.warning(
@@ -437,8 +404,16 @@ async def _delete_skills_for_tenant(tenant_id: str, actor: str) -> None:
         logger.warning(
             f"Failed to soft-delete skill instances for tenant {tenant_id}: {str(e)}")
 
-    # 2. Soft-delete all skills for the tenant
-    skills = skill_db.list_skills(tenant_id)
+    # 2. Soft-delete all skills for the tenant. A listing failure must not
+    # abort the cascade (later steps would leave a partially deleted tenant);
+    # it only skips per-skill cleanup, keeping the best-effort semantics of
+    # the other cascade sub-steps.
+    try:
+        skills = skill_db.list_skills(tenant_id)
+    except Exception as e:
+        logger.warning(
+            f"Failed to list skills for tenant {tenant_id}, skipping skill soft-deletion: {str(e)}")
+        skills = []
     for skill in skills:
         try:
             skill_name = skill.get("name")
@@ -492,6 +467,15 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
     # Validate tenant exists via its identity row; a stale name-only config row
     # (e.g. left behind by an earlier read-backfill bug) must not make deletion pass.
     if not tenant_exists(tenant_id):
+        # The id is not a tenant, but historical ghost name-only rows may still
+        # hold it visible to other consumers. Purge them so the ghost is gone
+        # instead of merely 404ing, then report the missing tenant.
+        ghost_name_config = get_single_config_info(tenant_id, TENANT_NAME)
+        if ghost_name_config:
+            ghost_config_id = ghost_name_config.get("tenant_config_id")
+            logger.warning(
+                f"Purging ghost tenant {tenant_id}: soft-deleting name-only config row {ghost_config_id}")
+            delete_config_by_tenant_config_id(ghost_config_id)
         raise NotFoundException(f"Tenant {tenant_id} does not exist")
 
     logger.info(

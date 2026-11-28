@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { TFunction } from "i18next";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TenantList } from "../../app/[locale]/resource-manage/components/UserManageComp";
+import { ApiError } from "../../services/api";
 import type { Tenant } from "../../services/tenantService";
 
 const deleteTenantMock = vi.fn();
@@ -105,5 +106,79 @@ describe("TenantList delete confirmation feedback", () => {
 
     await waitFor(() => expect(onTenantsRefetchMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("tenantResources.tenantDeleteFailed")).toBeNull();
+  });
+
+  it("treats an idempotent 404 as already deleted: closes the dialog and refreshes", async () => {
+    setup();
+    const confirmButton = await openDeleteModal();
+
+    deleteTenantMock.mockRejectedValueOnce(
+      new ApiError(404, "Tenant does not exist")
+    );
+    onTenantsRefetchMock.mockResolvedValueOnce(undefined);
+    fireEvent.click(confirmButton);
+
+    // Already-deleted notice instead of a delete failure, and the dialog
+    // closes so the user cannot be trapped in a 404 retry loop.
+    await waitFor(() =>
+      expect(
+        screen.getByText("tenantResources.tenants.alreadyDeleted")
+      ).toBeTruthy()
+    );
+    await waitFor(() => expect(onTenantsRefetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "common.confirm" })
+      ).toBeNull()
+    );
+    expect(screen.queryByText("tenantResources.tenantDeleteFailed")).toBeNull();
+  });
+
+  it("closes the dialog and warns separately when the delete succeeds but the refresh fails", async () => {
+    setup();
+    const confirmButton = await openDeleteModal();
+
+    deleteTenantMock.mockResolvedValueOnce(undefined);
+    onTenantsRefetchMock.mockRejectedValueOnce(new Error("refresh failed"));
+    fireEvent.click(confirmButton);
+
+    // The delete itself succeeded: the dialog is gone immediately.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "common.confirm" })
+      ).toBeNull()
+    );
+    // The refresh failure gets its own message, not the delete-failure error.
+    await waitFor(() =>
+      expect(
+        screen.getByText("tenantResources.tenants.refreshFailed")
+      ).toBeTruthy()
+    );
+    expect(screen.queryByText("tenantResources.tenantDeleteFailed")).toBeNull();
+  });
+
+  it("disables the confirm button while tenant members are still loading", async () => {
+    setup();
+    let resolveUsers: (value: { users: unknown[] }) => void = () => {};
+    getTenantUsersMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUsers = resolve;
+      })
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "tenantResources.tenants.deleteTenant",
+      })
+    );
+    const confirmButton = await screen.findByRole("button", {
+      name: "common.confirm",
+    });
+
+    // Members are not shown yet, so confirming must be blocked.
+    expect(confirmButton).toBeDisabled();
+
+    resolveUsers({ users: [] });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
   });
 });

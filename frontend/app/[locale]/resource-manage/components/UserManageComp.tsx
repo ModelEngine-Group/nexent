@@ -52,6 +52,7 @@ import {
   getTenantUsers,
   getTenant,
 } from "@/services/tenantService";
+import { ApiError } from "@/services/api";
 import {
   createInvitation,
   deleteInvitation,
@@ -243,11 +244,41 @@ export function TenantList({
 
     setDeleteError(null);
     setDeleteConfirming(true);
+
+    // Stage 1: only the delete request. A non-404 failure keeps the modal
+    // open with inline feedback; an idempotent 404 means the tenant is
+    // already gone and is treated as deleted instead of trapping the user.
+    let alreadyDeleted = false;
     try {
       await deleteTenant(deletingTenant.tenant_id);
-      message.success(t("tenantResources.tenants.deleted"));
+    } catch (error) {
+      if (error instanceof ApiError && Number(error.code) === 404) {
+        alreadyDeleted = true;
+      } else {
+        setDeleteError(
+          getTenantResourceLimitMessage(error, t) ||
+            t("tenantResources.tenantDeleteFailed")
+        );
+        return;
+      }
+    } finally {
+      setDeleteConfirming(false);
+    }
 
-      // Refresh the tenant list
+    // The tenant is deleted (or was already gone): close immediately so a
+    // later refresh failure cannot be mistaken for a failed delete.
+    if (alreadyDeleted) {
+      message.info(t("tenantResources.tenants.alreadyDeleted"));
+    } else {
+      message.success(t("tenantResources.tenants.deleted"));
+    }
+    setDeleteModalVisible(false);
+    setDeletingTenant(null);
+    setTenantUsers([]);
+
+    // Stage 2: post-delete bookkeeping. A refresh failure only warns; the
+    // delete itself has succeeded.
+    try {
       await onTenantsRefetch();
 
       // Clear selection if the deleted tenant was selected
@@ -262,20 +293,9 @@ export function TenantList({
           onSelect("");
         }
       }
-
-      // Only a successful delete closes the modal.
-      setDeleteModalVisible(false);
-      setDeletingTenant(null);
-      setTenantUsers([]);
     } catch (error) {
-      // Keep the modal open with inline feedback so the failure is visible
-      // and the user can retry or cancel instead of a silent dismiss.
-      setDeleteError(
-        getTenantResourceLimitMessage(error, t) ||
-          t("tenantResources.tenantDeleteFailed")
-      );
-    } finally {
-      setDeleteConfirming(false);
+      console.error("Failed to refresh tenant list after delete:", error);
+      message.warning(t("tenantResources.tenants.refreshFailed"));
     }
   };
 
@@ -1002,7 +1022,7 @@ export function TenantList({
         onCancel={handleDeleteCancel}
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, disabled: deleteLoading }}
         confirmLoading={deleteConfirming}
         width={500}
       >

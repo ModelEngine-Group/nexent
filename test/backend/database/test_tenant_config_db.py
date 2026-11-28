@@ -124,7 +124,37 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Now we can safely import the module under test
-from management.db.configuration.tenant import get_all_configs_by_tenant_id, get_configs_by_tenant_id_and_keys, get_tenant_config_info, get_single_config_info, insert_config, delete_config_by_tenant_config_id, delete_config, update_config_by_tenant_config_id, update_config_by_tenant_config_id_and_data, get_all_tenant_ids, create_tenant_with_default_group, tenant_exists
+from management.db.configuration.tenant import get_all_configs_by_tenant_id, get_configs_by_tenant_id_and_keys, get_tenant_config_info, get_single_config_info, insert_config, delete_config_by_tenant_config_id, delete_config, update_config_by_tenant_config_id, update_config_by_tenant_config_id_and_data, get_all_tenant_ids, create_tenant_with_default_group, tenant_exists, get_existing_tenant_ids
+
+
+def test_get_existing_tenant_ids_returns_live_identity_rows(monkeypatch, mock_session):
+    """One batched query answers existence for the whole id list."""
+    session, query = mock_session
+
+    mock_distinct = MagicMock()
+    mock_distinct.all.return_value = [("tenant1",), ("tenant2",)]
+    mock_filter = MagicMock()
+    mock_filter.distinct.return_value = mock_distinct
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
+
+    result = get_existing_tenant_ids(["tenant1", "ghost", "tenant2"])
+
+    assert result == ["tenant1", "tenant2"]
+    query.filter.assert_called_once()
+
+
+def test_get_existing_tenant_ids_empty_list_skips_session(monkeypatch):
+    """An empty id list must not open a database session."""
+    get_db_session = MagicMock()
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", get_db_session)
+
+    assert get_existing_tenant_ids([]) == []
+    get_db_session.assert_not_called()
 
 
 def test_get_configs_by_tenant_id_and_keys_success(monkeypatch, mock_session):

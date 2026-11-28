@@ -3114,6 +3114,8 @@
   "tenantResources.tenants.created": "租户已创建",
   "tenantResources.tenants.deleteTenant": "删除租户",
   "tenantResources.tenants.deleted": "租户已删除",
+  "tenantResources.tenants.alreadyDeleted": "租户已被删除，无需重复操作",
+  "tenantResources.tenants.refreshFailed": "租户列表刷新失败，请手动刷新页面",
   "tenantResources.tenants.editTenant": "编辑租户",
   "tenantResources.tenants.name": "租户名称",
   "tenantResources.tenants.tenants": "租户",

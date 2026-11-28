@@ -36,6 +36,7 @@ from contracts.errors.exceptions import (
     ValidationError,
 )
 from management.services.permission.identity.tenants import (
+    _delete_skills_for_tenant,
     get_tenant_info,
     get_tenant_info_for_user,
     get_tenants_paginated,
@@ -96,7 +97,8 @@ def service_mocks():
             patch('management.services.permission.identity.tenants.create_tenant_with_default_group') as mock_create_tenant_with_default_group, \
             patch('management.services.permission.identity.tenants.update_config_by_tenant_config_id') as mock_update_config, \
             patch('management.services.permission.identity.tenants.get_all_tenant_ids') as mock_get_all_tenant_ids, \
-            patch('management.services.permission.identity.tenants.tenant_exists', return_value=True) as mock_tenant_exists:
+            patch('management.services.permission.identity.tenants.tenant_exists', return_value=True) as mock_tenant_exists, \
+            patch('management.services.permission.identity.tenants.get_existing_tenant_ids', side_effect=lambda ids: list(ids)) as mock_get_existing_tenant_ids:
 
         yield {
             'get_single_config_info': mock_get_single_config,
@@ -104,7 +106,8 @@ def service_mocks():
             'create_tenant_with_default_group': mock_create_tenant_with_default_group,
             'update_config_by_tenant_config_id': mock_update_config,
             'get_all_tenant_ids': mock_get_all_tenant_ids,
-            'tenant_exists': mock_tenant_exists
+            'tenant_exists': mock_tenant_exists,
+            'get_existing_tenant_ids': mock_get_existing_tenant_ids
         }
 
 
@@ -149,29 +152,26 @@ class TestGetTenantInfo:
         service_mocks['insert_config'].assert_not_called()
 
     def test_get_tenant_info_name_not_found(self, service_mocks):
-        """Test get_tenant_info when tenant name is not found - should auto-create config"""
+        """A missing name row yields an empty name; the read stays side-effect free."""
         # Setup
         tenant_id = "test_tenant_id"
 
         # Mock config functions
         service_mocks['get_single_config_info'].side_effect = [
-            {},                    # TENANT_NAME first check (not found)
-            {},                    # TENANT_NAME check in _ensure_tenant_name_config (double-check)
-            {"config_value": "Unnamed Tenant", "tenant_config_id": 1},  # TENANT_NAME after auto-create
+            {},                    # TENANT_NAME (not found)
             {"config_value": "group-123"}  # DEFAULT_GROUP_ID
         ]
-        service_mocks['insert_config'].return_value = True
 
         # Execute
         result = get_tenant_info(tenant_id)
 
-        # Assert - should return tenant info with auto-created default name
+        # Assert - empty name, no write-back (read path must stay read-only)
         assert result["tenant_id"] == tenant_id
-        assert result["tenant_name"] == "Unnamed Tenant"
+        assert result["tenant_name"] == ""
         assert result["default_group_id"] == "group-123"
 
-        # Verify insert_config was called to create the missing config
-        service_mocks['insert_config'].assert_called_once()
+        # Verify no config is auto-created on read
+        service_mocks['insert_config'].assert_not_called()
 
     def test_get_tenant_info_with_empty_group_id(self, service_mocks):
         """Test get_tenant_info when default group ID is empty"""
@@ -207,33 +207,28 @@ class TestGetTenantInfo:
             get_tenant_info(tenant_id)
 
     def test_get_tenant_info_both_configs_none(self, service_mocks):
-        """Test get_tenant_info when both configs return None - should auto-create name config"""
+        """A missing name row yields an empty name; the read stays side-effect free."""
         # Setup
         tenant_id = "test_tenant_id"
 
         # Mock config functions:
         # 1st call: TENANT_NAME not found (None)
-        # 2nd call: TENANT_NAME check in _ensure_tenant_name_config (None - double-check)
-        # 3rd call: after insert, re-fetch returns the created config
-        # 4th call: DEFAULT_GROUP_ID returns None
+        # 2nd call: DEFAULT_GROUP_ID returns None
         service_mocks['get_single_config_info'].side_effect = [
-            None,                    # TENANT_NAME first check (None)
-            None,                    # TENANT_NAME check in _ensure_tenant_name_config
-            {"config_value": "Unnamed Tenant", "tenant_config_id": 1},  # TENANT_NAME after auto-create
+            None,                    # TENANT_NAME (None)
             None                     # DEFAULT_GROUP_ID (None)
         ]
-        service_mocks['insert_config'].return_value = True
 
         # Execute
         result = get_tenant_info(tenant_id)
 
-        # Assert - should return tenant info with auto-created default name and empty group_id
+        # Assert - empty name and group, no write-back on read
         assert result["tenant_id"] == tenant_id
-        assert result["tenant_name"] == "Unnamed Tenant"
+        assert result["tenant_name"] == ""
         assert result["default_group_id"] == ""
 
-        # Verify insert_config was called to create the missing config
-        service_mocks['insert_config'].assert_called_once()
+        # Verify no config is auto-created on read
+        service_mocks['insert_config'].assert_not_called()
 
     def test_get_tenant_info_missing_identity_raises_not_found(self, service_mocks):
         """A deleted tenant (identity row gone) must not be resurrected on read.
@@ -250,6 +245,20 @@ class TestGetTenantInfo:
         # The resurrection path must not run: no name config is read or inserted.
         service_mocks['get_single_config_info'].assert_not_called()
         service_mocks['insert_config'].assert_not_called()
+
+    def test_get_tenant_info_verified_exists_skips_identity_query(self, service_mocks):
+        """Listing paths pass verified_exists to avoid re-checking batched ids."""
+        tenant_id = "test_tenant_id"
+        service_mocks['get_single_config_info'].side_effect = [
+            {"config_value": "Test Tenant"},
+            {"config_value": "group-1"},
+        ]
+
+        result = get_tenant_info(tenant_id, verified_exists=True)
+
+        assert result["tenant_name"] == "Test Tenant"
+        # The per-id existence lookup is skipped entirely.
+        service_mocks['tenant_exists'].assert_not_called()
 
 
 class TestGetTenantsPaginated:
@@ -281,19 +290,28 @@ class TestGetTenantsPaginated:
             assert result["data"] == tenant_infos
 
     def test_get_tenants_paginated_excludes_tenants_without_identity_row(self, service_mocks):
-        """Ghost ids (identity row gone) must be excluded from both data and totals."""
+        """Ghost ids (identity row gone) are filtered via one batched query, not per-id lookups."""
         service_mocks['get_all_tenant_ids'].return_value = ["tenant1", "ghost", "tenant2"]
-        service_mocks['tenant_exists'].side_effect = lambda tid: tid != "ghost"
+        service_mocks['get_existing_tenant_ids'].side_effect = \
+            lambda ids: [tid for tid in ids if tid != "ghost"]
 
         with patch('management.services.permission.identity.tenants.get_tenant_info', side_effect=[
             {"tenant_id": "tenant1", "tenant_name": "Tenant 1", "default_group_id": "g1"},
             {"tenant_id": "tenant2", "tenant_name": "Tenant 2", "default_group_id": "g2"},
-        ]):
+        ]) as mock_get_info:
             result = get_tenants_paginated(page=1, page_size=20)
 
         assert [t["tenant_id"] for t in result["data"]] == ["tenant1", "tenant2"]
         assert result["total"] == 2
         assert result["total_pages"] == 1
+        # One batched existence query replaces per-id lookups.
+        service_mocks['get_existing_tenant_ids'].assert_called_once()
+        service_mocks['tenant_exists'].assert_not_called()
+        # The page loop skips the per-id re-check via verified_exists.
+        assert all(
+            kwargs.get("verified_exists") is True
+            for _, kwargs in mock_get_info.call_args_list
+        )
 
     def test_get_tenants_paginated_excludes_virtual_tenants(self, service_mocks):
         """Virtual/system tenants must not appear in admin tenant listings."""
@@ -322,7 +340,7 @@ class TestGetTenantsPaginated:
         tenant_ids = ["tenant1", "tenant2", "tenant3"]
 
         # Mock get_tenant_info to return tenant info for all, but with missing configs for tenant3
-        def mock_get_tenant_info(tenant_id):
+        def mock_get_tenant_info(tenant_id, **kwargs):
             if tenant_id == "tenant3":
                 # Simulate missing name config - returns empty name
                 return {
@@ -386,7 +404,7 @@ class TestGetTenantsPaginated:
         tenant_ids = ["tenant1", "tenant2", "tenant3", "tenant4", "tenant5"]
 
         # Create a function that returns tenant info based on tenant_id
-        def mock_get_tenant_info(tenant_id):
+        def mock_get_tenant_info(tenant_id, **kwargs):
             idx = int(tenant_id.replace("tenant", ""))
             return {"tenant_id": tenant_id, "tenant_name": f"Tenant {idx}", "default_group_id": f"group{idx}"}
 
@@ -412,7 +430,7 @@ class TestGetTenantsPaginated:
         tenant_ids = ["tenant1", "tenant2", "tenant3", "tenant4", "tenant5"]
 
         # Create a function that returns tenant info based on tenant_id
-        def mock_get_tenant_info(tenant_id):
+        def mock_get_tenant_info(tenant_id, **kwargs):
             idx = int(tenant_id.replace("tenant", ""))
             return {"tenant_id": tenant_id, "tenant_name": f"Tenant {idx}", "default_group_id": f"group{idx}"}
 
@@ -782,12 +800,55 @@ class TestDeleteTenant:
 
         # Mock get_single_config_info to return a name row on purpose: identity
         # absence must win over a leftover TENANT_NAME row.
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config:
+        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
+                patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+
             mock_get_config.return_value = {"tenant_config_id": 1, "config_value": "Ghost Tenant"}
 
             # Execute & Assert
             with pytest.raises(NotFoundException, match="does not exist"):
                 await delete_tenant(tenant_id, deleted_by)
+
+            # The ghost name-only row is purged so the id stops resurfacing.
+            mock_delete_config.assert_called_once_with(1)
+
+    @pytest.mark.asyncio
+    async def test_delete_tenant_not_found_without_ghost_rows(self):
+        """No leftover name rows: 404 without any purge writes."""
+        tenant_id = "clean_missing_tenant"
+        deleted_by = "admin_user"
+
+        with patch('management.services.permission.identity.tenants.tenant_exists', return_value=False), \
+                patch('management.services.permission.identity.tenants.get_single_config_info', return_value={}) as mock_get_config, \
+                patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            with pytest.raises(NotFoundException, match="does not exist"):
+                await delete_tenant(tenant_id, deleted_by)
+
+            mock_get_config.assert_called_once()
+            mock_delete_config.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_skills_for_tenant_listing_failure_isolated():
+    """A skill listing failure only skips per-skill cleanup; nothing is raised.
+
+    Regression for the review finding: after the missing `await` was fixed,
+    an unguarded list_skills() failure could abort the whole cascade and
+    leave a partially deleted tenant behind.
+    """
+    tenant_id = "test_tenant"
+
+    with patch('management.services.permission.identity.tenants.skill_db') as mock_skill_db, \
+            patch('management.services.permission.identity.tenants.CONTAINER_SKILLS_PATH', ""):
+        mock_skill_db.list_skills.side_effect = Exception("skill listing failed")
+
+        # Must not raise; the failure only skips per-skill soft-deletion.
+        await _delete_skills_for_tenant(tenant_id, "system")
+
+        mock_skill_db.delete_skill_instances_by_tenant.assert_called_once_with(
+            tenant_id, "system")
+        mock_skill_db.delete_skill.assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("runtime_error", [

@@ -114,6 +114,29 @@ def tenant_exists(tenant_id: str) -> bool:
         return result is not None
 
 
+def get_existing_tenant_ids(tenant_ids: List[str]) -> List[str]:
+    """Return the subset of ids that have a live tenant identity row.
+
+    Batch form of tenant_exists for listing paths: one IN query replaces one
+    session per id, and a failure surface of a single query. Ids are returned
+    in arbitrary order; callers order/filter as needed.
+    """
+    if not tenant_ids:
+        return []
+    with get_db_session() as session:
+        rows = (
+            session.query(TenantConfig.tenant_id)
+            .filter(
+                TenantConfig.tenant_id.in_(tenant_ids),
+                TenantConfig.config_key == TENANT_ID,
+                TenantConfig.delete_flag == "N",
+            )
+            .distinct()
+            .all()
+        )
+        return [row[0] for row in rows]
+
+
 def get_single_config_info(tenant_id: str, select_key: str):
     with get_db_session() as session:
         result = (
