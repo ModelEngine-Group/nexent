@@ -10,7 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
-from local_auth import ROOT, disposable_database
+from local_auth import disposable_database
 from psycopg2.extensions import parse_dsn
 
 
@@ -57,8 +57,7 @@ def native_runtime():
             cursor.execute("CREATE SCHEMA nexent")
             from shared.merged_migrations import merged_migration_sql
             cursor.execute(merged_migration_sql("v2.9.0_009_system_configuration.sql"))
-            migration = ROOT / "deploy/sql/migrations/v2.9.0_020_local_session_renewal.sql"
-            cursor.execute(migration.read_text(encoding="utf-8"))
+            cursor.execute(merged_migration_sql("v2.9.0_019_local_session_renewal.sql"))
         models.TableBase.metadata.create_all(
             db_client.engine, tables=[model.__table__ for model in tables]
         )
