@@ -2073,7 +2073,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         error instanceof ApiError &&
         ["model_not_available", "model_unavailable"].includes(
           String(error.code)
-        )
+        ) &&
+        (error.details?.agent_id === undefined ||
+          error.details.agent_id === requestBody.agent_id)
       ) {
         rejectModelSelection(Number(requestBody.model_id));
       }

@@ -29,9 +29,13 @@ case:
     - order: 3
       action: Submit a formerly valid effort after capability removal and an available tenant model outside the ordinary Agent's configured set; then select a valid permitted model and submit again.
       expected: Unsupported effort returns 422 before streaming; outside-Agent-scope selection is denied with existing scope enforcement; valid reselection succeeds through the original route.
+    - order: 4
+      action: Run a parent with a valid model and a pinned child whose only configured model was deleted, then run that child as a root.
+      expected: Both requests return 404 model_not_available with the failing child's agent_id, agent_name and version_no; the parent name and provider credentials are absent and Runtime is not dispatched.
   expected_results:
     - All explicit invalid model or permission requests fail before provider calls and maintain tenant-safe error details.
     - Valid models remain selectable under each entry's original scope and successful reselection uses normal response contracts.
+    - Configured-model failures identify the actual failing Agent and bound version without leaking provider data.
   forbidden_side_effects:
     - No unauthorized provider calls, draft/history/configuration writes or default-model fallback.
     - No foreign model names, endpoints, secrets or tenant data in responses or diagnostics.
@@ -48,4 +52,9 @@ case:
       description: Permissions and tenant/model validity block forbidden execution without disclosure or fallback.
       steps: [1, 2, 3]
       expected_results: [1, 2]
+      forbidden_side_effects: [1, 2]
+    - id: AC-02
+      description: Recursive preparation errors retain the failing Agent identity through the public HTTP envelope.
+      steps: [4]
+      expected_results: [3]
       forbidden_side_effects: [1, 2]

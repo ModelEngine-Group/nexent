@@ -17,6 +17,8 @@ def build_run_info(*, language="zh", **prepared_values) -> AgentRunInfo:
         prepared_values["observer"] = MessageObserver(lang=language)
     if "stop_event" not in prepared_values:
         prepared_values["stop_event"] = threading.Event()
+    prepared_values.setdefault("collaboration_timeout_seconds", environment.RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS)
+    prepared_values.setdefault("tool_call_timeout_seconds", environment.DEFAULT_TOOL_CALL_TIMEOUT)
     return AgentRunInfo(**prepared_values)
 
 

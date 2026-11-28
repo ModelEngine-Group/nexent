@@ -213,7 +213,7 @@ export function ListHeader({
             onClick={onRefresh}
             disabled={refreshDisabled || refreshLoading}
             aria-busy={refreshLoading}
-            className="flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[#2673E5]"
+            className="flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[var(--color-brand)] enabled:hover:text-[var(--color-brand-hover)] enabled:active:text-[var(--color-brand-active)] disabled:cursor-not-allowed disabled:text-[var(--color-text-disabled)]"
           >
             <RefreshCw
               size={14}
@@ -318,7 +318,9 @@ export function ResourceTabs({
             onClick={() => onChange?.(tab.key)}
             className={cn(
               "cursor-pointer border-0 bg-transparent p-0 text-[14px] leading-[20px]",
-              activeKey === tab.key ? "text-[#2D5BB3]" : "text-[#737373]"
+              activeKey === tab.key
+                ? "text-[var(--color-brand)]"
+                : "text-[var(--color-text-secondary)] hover:text-[var(--color-brand-hover)]"
             )}
           >
             {tab.label}
@@ -587,6 +589,7 @@ export function ResourceDrawer({
 }: ResourceDrawerProps) {
   const { t } = useTranslation("common");
   const titleId = useId();
+  const confirmLabel = confirmText ?? t("resourcePicker.confirm", "确认");
   const handleClose = () => {
     if (!confirmLoading) onClose();
   };
@@ -735,30 +738,28 @@ export function ResourceDrawer({
       </fieldset>
       <div
         data-picker-part="footer"
-        className="flex shrink-0 justify-end gap-3"
+        className="flex h-8 shrink-0 items-center justify-end gap-4"
       >
         {footerLeading && <div className="mr-auto">{footerLeading}</div>}
-        <button
-          type="button"
+        <Button
+          autoInsertSpace={false}
           onClick={handleClose}
           disabled={confirmLoading}
-          className="h-8 min-w-[89px] shrink-0 cursor-pointer whitespace-nowrap rounded-[2px] border border-[#C9C9C9] bg-white px-4 text-[14px] leading-[22px] text-[#191919]"
         >
           {closeText ?? t("resourcePicker.close", "关闭")}
-        </button>
+        </Button>
         {showConfirm && (
-          <button
-            type="button"
+          <Button
+            type="primary"
+            autoInsertSpace={false}
             onClick={onConfirm}
             disabled={disabled || confirmDisabled || confirmLoading}
+            loading={confirmLoading}
+            aria-label={confirmLabel}
             aria-busy={confirmLoading}
-            className="inline-flex h-8 min-w-[89px] shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[2px] border-0 bg-[#1476FF] px-4 text-[14px] leading-[22px] text-white"
           >
-            {confirmLoading && (
-              <RefreshCw aria-hidden size={14} className="animate-spin" />
-            )}
-            {confirmText ?? t("resourcePicker.confirm", "确认")}
-          </button>
+            {confirmLabel}
+          </Button>
         )}
       </div>
     </Drawer>

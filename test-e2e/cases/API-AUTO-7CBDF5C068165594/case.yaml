@@ -6,39 +6,31 @@ case:
   feature_id: F-096
   business_rule_ids:
   - F-096-RULE-01
-  title: /agent/run 与 /agent/internal/northbound/run 过载/排队超时返回 429 与 Retry-After｜错误契约
+  title: /agent/run 与 /nb/v1/chat/run 透传运行时过载和排队超时的 429 与 Retry-After｜错误契约
   type: API-IT
   priority: P1
   status: active
   automation: automated
-  objective: /agent/run 与 /agent/internal/northbound/run 过载/排队超时返回 429 与 Retry-After｜错误契约
+  objective: 验证普通对话与北向对话入口完整保留运行时过载和排队超时的 HTTP 响应。
   preconditions:
-  - 本地 API 集成测试环境可运行（backend 服务与测试账号就绪）；不要求外部模型服务或外部 A2A Agent 在线。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/environment.yaml。
-  - 可通过本地配置或运行时内部注入方式将 Agent 运行调度置于容量已满或排队等待超时状态，以触发 RuntimeCapacityExceededError / RuntimeQueueTimeoutError。
+  - 通过进程内 ASGI 挂载当前 Management 对话与北向路由，提供受控身份及运行时错误响应。
+  - 设置仓库外的 NEXENT_TEST_HOME。不需要外部服务、模型、测试账号或持久化资源。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/config/environment.yaml'
+    runtime_errors: RUNTIME_CAPACITY_FULL and RUNTIME_QUEUE_TIMEOUT
   steps:
   - order: 1
-    action: 在本地 API 集成环境启动 Agent 主服务（backend 运行时），加载固定测试账号与最小配置；不依赖真实模型或外部 A2A Agent。
+    action: 在进程内 ASGI 应用执行实际的两个 Management HTTP 路由。
     expected: 四个场景均返回 HTTP 429 TOO_MANY_REQUESTS，而非 500。
   - order: 2
-    action: 使用经验证的 Gateway 会话签名发送 POST /agent/run，使后端在调度前抛出 RuntimeCapacityExceededError（通过本地容量约束或运行时内部注入过载状态触发），记录响应状态码、响应体（code/message/retryable）与响应头
-      Retry-After。
+    action: 向 POST /agent/run 发送请求，在运行时调用边界注入容量已满响应，检查 HTTP 状态、JSON 和 Retry-After。
     expected: RuntimeCapacityExceededError 场景响应体 code=RUNTIME_CAPACITY_FULL、message="Agent runtime is at capacity."、retryable=true，Retry-After
       头为 "1"。
   - order: 3
-    action: 使用经验证的 Gateway 会话签名发送 POST /agent/run，使后端抛出 RuntimeQueueTimeoutError（排队等待超时），记录同样字段。
+    action: 向 POST /agent/run 发送请求，在运行时调用边界注入排队超时响应，检查同样的字段。
     expected: RuntimeQueueTimeoutError 场景响应体 code=RUNTIME_QUEUE_TIMEOUT、message="Agent runtime queue wait timed out."、retryable=true，Retry-After
       头等于 RuntimeQueueTimeoutError.retry_after_seconds 的字符串值。
   - order: 4
-    action: 对 POST /agent/internal/northbound/run（携带合法内部 runtime JWT）重复步骤 2-3，分别触发 RuntimeCapacityExceededError 与 RuntimeQueueTimeoutError。
+    action: 对当前北向入口 POST /nb/v1/chat/run 重复容量和排队超时场景。
     expected: 响应体为标准 JSON，无 "Agent run error."/"Agent run error." 的 500 通用 detail。
   - order: 5
     action: 断言各响应状态码为 429、响应体契约字段与 Retry-After 头正确，且未落入 500 兜底（响应体不是 "Agent run error."/"Agent run error." 的通用 detail）。
@@ -51,6 +43,11 @@ case:
     头等于 RuntimeQueueTimeoutError.retry_after_seconds 的字符串值。
   - 响应体为标准 JSON，无 "Agent run error."/"Agent run error." 的 500 通用 detail。
   forbidden_side_effects: []
+  acceptance:
+  - id: AC-01
+    description: Both supported conversation routes preserve the capacity and queue-timeout HTTP responses.
+    steps: [1, 2, 3, 4, 5]
+    expected_results: [1, 2, 3, 4]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
@@ -58,11 +55,7 @@ case:
   contract:
     protocol: HTTP API
     request_expectations:
-    - 在本地 API 集成环境启动 Agent 主服务（backend 运行时），加载固定测试账号与最小配置；不依赖真实模型或外部 A2A Agent。
-    - 使用经验证的 Gateway 会话签名发送 POST /agent/run，使后端在调度前抛出 RuntimeCapacityExceededError（通过本地容量约束或运行时内部注入过载状态触发），记录响应状态码、响应体（code/message/retryable）与响应头
-      Retry-After。
-    - 使用经验证的 Gateway 会话签名发送 POST /agent/run，使后端抛出 RuntimeQueueTimeoutError（排队等待超时），记录同样字段。
-    - 对 POST /agent/internal/northbound/run（携带合法内部 runtime JWT）重复步骤 2-3，分别触发 RuntimeCapacityExceededError 与 RuntimeQueueTimeoutError。
+    - 对 POST /agent/run 和 POST /nb/v1/chat/run 各注入一次容量已满和一次排队超时响应。
     - 断言各响应状态码为 429、响应体契约字段与 Retry-After 头正确，且未落入 500 兜底（响应体不是 "Agent run error."/"Agent run error." 的通用 detail）。
     response_expectations:
     - 四个场景均返回 HTTP 429 TOO_MANY_REQUESTS，而非 500。

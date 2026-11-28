@@ -214,6 +214,9 @@ const Nl2SkillChatSession: FC<Nl2SkillChatPanelProps> = ({
           <div className="min-h-0 flex-1">
             <Chat
               selectedAgent={displayAgent}
+              modelPreferenceConversationId={
+                selectedId ? Number(selectedId) : undefined
+              }
               generatedTitle={assistantTitle}
               welcomeTitle={t("skillManagement.chat.createWelcomeTitle")}
               isLoadingAgents={false}

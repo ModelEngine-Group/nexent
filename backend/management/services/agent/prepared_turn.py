@@ -271,7 +271,7 @@ async def start_turn(
             raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
         if isinstance(exc, RunModelControlsError):
             status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
-            raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+            raise HTTPException(status_code=status, detail=exc.to_detail()) from exc
         if isinstance(exc, ValidationError):
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         raise

@@ -2,6 +2,8 @@
 
 This guide applies to Nexent deployments managed with Helm. Run the upgrade during an idle or low-traffic window whenever possible. Business writes must stop before the backup starts, but the Pods do not need to be stopped.
 
+Keep the original deployment directory and configuration, and record the image version. If you need to roll back, restore the backup to the corresponding persistent volumes, then redeploy from the old directory. See the [Kubernetes Rollback Guide](./kubernetes-rollback-guide).
+
 > ⚠️ If business writes continue during the copy, data from PostgreSQL, Elasticsearch, Redis, MinIO, and other components may not represent the same point in time, and the backup may not be recoverable.
 
 ## 1. Pre-upgrade Check and Backup
@@ -22,11 +24,13 @@ The script runs `du` in the containers and prints the uncompressed size of each 
 
 The script first uses `kubectl cp` to copy each PVC's files to the local machine. If that command fails and the target container contains `tar`, it uses `kubectl exec ... tar -cf -` to stream the files and immediately extract them locally without retaining a tar file. When a minimal image such as MinIO does not contain `tar`, the script uses Bash and basic coreutils in the container to enumerate the directory tree, then exports each file through `kubectl exec ... cat`; this path is slower when a volume contains many files. The script does not use `sudo`, create temporary Pods, or generate compressed archives or SHA-256 files.
 
-The actual backup directory preserves each PVC's name at the top level, for example `nexent-postgresql/`, `nexent-workspace/`, `nexent-skills/`, and the names of PVCs for enabled monitoring components. Follow the source selection and copy progress through `[INFO]` messages. The backup is complete only when `[PASS] Backup complete: <path>` appears; this means every PVC in the specified namespace was copied, and `<path>` is the actual backup directory. If `[ERROR]` appears, do not use the incomplete `.partial` directory printed by the script.
+Each run creates one `k8s-<timestamp>/` directory under `--backup-dir` on the management host. Each subdirectory uses the actual name of its PVC. When the script reports `[PASS] Backup complete: <path>`, it has finished copying every PVC in the specified namespace. Keep the entire directory at `<path>` for rollback. A directory ending in `.partial` contains an unfinished copy.
 
 ## 2. Perform the Upgrade
 
-Web marks authentication cookies `Secure` by default. If users still connect directly over HTTP on an isolated network, set `NEXENT_AUTH_COOKIE_SECURE=false` in `deploy/env/.env` before upgrading so browsers can store the session. Keep the default `true` for HTTPS ingress and reverse proxies.
+**Keep the existing cluster's storage mode and volumes.** When no storage mode is saved or specified, the current script uses `dynamic`. If you omit `--storage-class`, it uses the cluster's default StorageClass. Before upgrading, check `deploy/k8s/deploy.options`, the target namespace, and the existing PVCs. If the previous deployment uses static hostPath storage and has no saved storage mode, add `--persistence-mode local` to the deployment command. If it uses pre-created PVCs, retain the original `existing` setting and claim names.
+
+Web marks authentication cookies `Secure` by default. Use the configured HTTPS endpoint to verify login from another machine. For a local check, forward the Web port as described in [Access Your Installation](./kubernetes-installation#access-your-installation).
 
 ### 2.1 Online Upgrade
 
@@ -38,15 +42,15 @@ git pull --ff-only
 bash deploy.sh k8s --defaults --version X.Y.Z
 ```
 
-`--defaults` reuses the saved Kubernetes deployment configuration and skips the interactive interface. Before upgrading, verify that the components, port policy, image source, persistence mode, and namespace in `deploy/k8s/deploy.options` match the current environment. See [Kubernetes Installation and Deployment](./kubernetes-installation.md#online-deployment) for more information about online deployment.
+Replace `X.Y.Z` with the target image tag. If you omit `--version`, the script reads `VERSION` from the current deployment directory. `--defaults` reuses the saved components, port policy, image source, and storage settings. The version selected for this run takes precedence over any application version in an old options file. See [Kubernetes Installation and Deployment](./kubernetes-installation.md#online-deployment).
 
 ### 2.2 Offline Upgrade
 
 When the target cluster cannot access public image registries, follow [Kubernetes Offline Deployment](./kubernetes-installation.md#offline-deployment) to download a target-version package matching the cluster node architecture, copy it to a management host that can reach the cluster, and extract it:
 
 ```bash
-unzip nexent-<version>-amd64.zip -d nexent-<version>
-cd nexent-<version>
+unzip 'nexent-<version>-amd64.zip' -d 'nexent-<version>'
+cd 'nexent-<version>'
 ```
 
 For a single-node cluster backed by the Docker container runtime, load the new package images directly and upgrade:
@@ -72,14 +76,14 @@ bash deploy.sh \
 
 `/path/to/previous/nexent` must be the actual root of the previously extracted deployment package and contain `deploy/env/.env`. `--reuse-from` reuses its `.env`, `monitoring.env`, and Kubernetes deployment options. Use the corresponding `arm64` package name for ARM64 cluster nodes.
 
-During the upgrade, `nexent-config` runs automatic database migrations while the other backend services wait for migrations to reach the target state. Existing merged SQL files must not be modified, renamed, or deleted.
-
 ## 3. Post-upgrade Checks
 
-Inspect Pod status in the target namespace. The following example uses the default `nexent` namespace:
+A standard application upgrade pauses the application Pods while the bootstrap Job runs database migrations and initializes the system agents. Application services start after the Job succeeds. The v2.9.0 migrations are bundled in `v2.9.0_merged_migrations.sql`. At startup, Config checks the migration records and checksums and skips migrations that are already current. If initialization fails, the application stays paused. The deployment log includes the Job output. The terminal prints the log path, which defaults to `logs/deploy/deploy-YYYYMMDD-HHMMSS.log` under the deployment directory.
+
+Check the application and its storage in the target namespace. This example uses the default namespace, `nexent`.
 
 ```bash
 kubectl get pods -n nexent -o wide
 ```
 
-The check passes when every Nexent Pod is `Running` and its READY count matches the expected value. Continue waiting while a Pod reports `ContainerCreating`; the check fails if a Pod reports `CrashLoopBackOff`, `Error`, or remains `Pending` for an extended period.
+Confirm that each application Deployment has the expected number of ready replicas and that the original PVCs are still `Bound` to the expected PVs. If a Pod stays `Pending`, check PVC events and the StorageClass. Finally, sign in with an existing account and open a conversation or attachment from before the upgrade to confirm the application is reading the original data.

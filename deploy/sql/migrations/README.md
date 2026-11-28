@@ -57,6 +57,12 @@ For the v2.9.0 release, the resource denylist migration is embedded at the end o
 `v2.9.0_merged_migrations.sql`, after the runtime replica section and the system
 configuration table definition. It has no separate migration file.
 
+The remote MCP per-server TLS verification switch (`ssl_verify` on
+`nexent.mcp_record_t`) is embedded as the final section of
+`v2.9.0_merged_migrations.sql`, after the resource denylist section. It has no
+separate migration file; environments that already applied the pre-fold bundle
+replay the idempotent sections once.
+
 The trajectory execution summaries, statistics snapshots, historical
 conversation placeholders, and OPS/SU menu grants are consolidated as the
 `v2.9.0_011_trajectory.sql` section of `v2.9.0_merged_migrations.sql`. That

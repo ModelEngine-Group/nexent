@@ -18,10 +18,11 @@ journey("WB-CONTROLS-D4-001", async ({ page, contract }) => {
     const search = actions.getByRole("button", {name:"搜索",exact:true});
     await expect(page.getByRole("textbox",{name:"搜索历史对话",exact:true})).toHaveCount(0);
     const row = await actions.getByRole("button").evaluateAll(elements => elements.map(el=>{const r=el.getBoundingClientRect(); return {y:r.y+r.height/2,width:r.width};}));
-    expect(row).toHaveLength(3);
-    expect(row[0].width).toBeGreaterThan(row[1].width*3);
+    expect(row).toHaveLength(2);
     expect(Math.abs(row[0].y-row[1].y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(row[0].y-row[2].y)).toBeLessThanOrEqual(1);
+    const newConversationBounds = await newConversation.boundingBox();
+    expect(newConversationBounds!.width).toBeGreaterThan(row[0].width * 3);
+    expect(newConversationBounds!.y).toBeGreaterThan(row[0].y);
     await expect(search.locator(".lucide-search")).toBeVisible();
     await search.click();
     const historySearch=page.locator("[data-workbench-history-search]");
@@ -39,9 +40,9 @@ journey("WB-CONTROLS-D4-001", async ({ page, contract }) => {
     await historySearch.getByRole("button",{name:"取消",exact:true}).click();
     await expect(searchInput).toHaveCount(0);
     await expect(page.locator("button[data-radix-collection-item]").filter({hasText:"Header Search Beta"})).toBeVisible();
-    await actions.getByRole("button",{name:"Toggle Sidebar",exact:true}).click();
+    await actions.getByRole("button",{name:"收起侧边栏",exact:true}).click();
     await expect(actions).toHaveCount(0);
-    await page.getByRole("button").filter({has:page.locator(".lucide-panel-left")}).click();
+    await page.getByRole("button",{name:"展开",exact:true}).click();
     await expect(actions).toBeVisible();
     await expect(page.locator("[data-composer-action-trigger]")).toHaveCount(0);
     const upload = page.getByRole("button", { name: "上传附件", exact: true });
@@ -74,7 +75,7 @@ journey("WB-CONTROLS-D4-001", async ({ page, contract }) => {
     expect(Math.abs(voiceBounds.y - sendBounds.y)).toBeLessThanOrEqual(1);
     expect(Math.abs((voiceBounds.x - uploadBounds.x - uploadBounds.width) - (sendBounds.x - voiceBounds.x - voiceBounds.width))).toBeLessThanOrEqual(1);
     await expect(send).toBeDisabled();
-    const disabledColor = await voice.evaluate(el => getComputedStyle(el).color);
+    const disabledColor = "rgb(100, 116, 139)";
     await expect(send).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(send).toHaveCSS("border-top-width", "0px");
     await expect(send.locator("svg")).toHaveCSS("color", disabledColor);

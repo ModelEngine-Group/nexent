@@ -3,7 +3,9 @@
 "use client";
 
 import { WorkbenchResourceDrawer } from "./WorkbenchResourceDrawer";
-import { ResourceTagFilter } from "./ResourceTagFilter";
+import { ResourceTagFilterControl } from "@/components/resource-picker/ResourceTagFilterControl";
+import drawerStyles from "@/components/resource-picker/ResourcePickerDrawer.module.css";
+import { cn } from "@/lib/utils";
 import { useResourceTags } from "../hooks/useResourceTags";
 import { Bot } from "lucide-react";
 import {
@@ -420,6 +422,7 @@ export function AgentPicker({
         </Spin>
       }
       picker={{
+        bodyClassName: cn(drawerStyles.drawer, drawerStyles.agent),
         searchPlaceholder: t(
           "agent.collaborative.selector.searchPlaceholder",
           "搜索智能体名称或描述"
@@ -430,7 +433,7 @@ export function AgentPicker({
           setPage(1);
         },
         tagFilter: (
-          <ResourceTagFilter filter={tags} onChange={() => setPage(1)} />
+          <ResourceTagFilterControl filter={tags} onChange={() => setPage(1)} />
         ),
         listTitle: t("resourcePicker.list.agent", "智能体列表"),
         selected: draft.map((agent) => ({

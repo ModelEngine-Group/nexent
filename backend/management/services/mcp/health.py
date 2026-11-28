@@ -5,10 +5,10 @@ from contextlib import AsyncExitStack
 
 from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
-from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_record_by_id_and_tenant, update_mcp_record_status_by_id, update_mcp_status_by_name_and_url
+from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_record_by_id_and_tenant, get_mcp_ssl_verify_by_name_and_url, update_mcp_record_status_by_id, update_mcp_status_by_name_and_url
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from backend.http.client import create_httpx_client
+from backend.http.client import create_httpx_client, create_verified_httpx_client
 from management.services.mcp.common import (
     logger,
 )
@@ -70,6 +70,7 @@ async def mcp_server_health(
     remote_mcp_server: str,
     authorization_token: str | None = None,
     custom_headers: dict | None = None,
+    ssl_verify: bool = True,
 ) -> bool:
     """Check if an MCP server is healthy and reachable via MCP protocol.
 
@@ -83,7 +84,7 @@ async def mcp_server_health(
     if custom_headers:
         headers.update(custom_headers)
 
-    tool_names = await _mcp_protocol_health_check(url_stripped, headers)
+    tool_names = await _mcp_protocol_health_check(url_stripped, headers, ssl_verify=ssl_verify)
     if not tool_names:
         raise MCPConnectionError(
             "MCP server is unreachable or does not support MCP protocol"
@@ -91,29 +92,35 @@ async def mcp_server_health(
     return True
 
 
-async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[str]:
+def _select_mcp_httpx_client_factory(ssl_verify: bool):
+    """Pick the httpx client factory matching the record's TLS verification flag."""
+    return create_verified_httpx_client if ssl_verify else create_httpx_client
+
+
+async def _mcp_protocol_health_check(url_stripped: str, headers: dict, ssl_verify: bool = True) -> list[str]:
     """Try to establish an MCP protocol-level connection and return tool names.
 
     Returns a list of tool names on success, or an empty list on failure.
     """
+    httpx_client_factory = _select_mcp_httpx_client_factory(ssl_verify)
     try:
         if url_stripped.endswith("/sse"):
             transport = SSETransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client,
+                httpx_client_factory=httpx_client_factory,
             )
         elif url_stripped.endswith("/mcp"):
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client,
+                httpx_client_factory=httpx_client_factory,
             )
         else:
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client,
+                httpx_client_factory=httpx_client_factory,
             )
 
         async def list_mcp_tools() -> list:
@@ -136,7 +143,7 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
         raise MCPConnectionError(_format_mcp_connection_error(e))
 
 
-async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
+async def _mcp_protocol_connect(url_stripped: str, headers: dict, ssl_verify: bool = True) -> bool:
     """Lightweight MCP connectivity check: establish an MCP initialize handshake only.
 
     Uses fastmcp.Client in an async context manager. The ``async with client:``
@@ -146,24 +153,25 @@ async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
     This is significantly faster than _mcp_protocol_health_check() which
     additionally calls list_tools().
     """
+    httpx_client_factory = _select_mcp_httpx_client_factory(ssl_verify)
     try:
         if url_stripped.endswith("/sse"):
             transport = SSETransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client,
+                httpx_client_factory=httpx_client_factory,
             )
         elif url_stripped.endswith("/mcp"):
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client,
+                httpx_client_factory=httpx_client_factory,
             )
         else:
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
-                httpx_client_factory=create_httpx_client,
+                httpx_client_factory=httpx_client_factory,
             )
 
         async def connect_client() -> bool:
@@ -186,6 +194,7 @@ async def test_mcp_connection(
     server_url: str,
     authorization_token: str | None = None,
     custom_headers: dict | None = None,
+    ssl_verify: bool = True,
 ) -> bool:
     """Test connectivity to an MCP server using a lightweight initialize handshake.
 
@@ -200,7 +209,7 @@ async def test_mcp_connection(
     if custom_headers:
         headers.update(custom_headers)
 
-    return await _mcp_protocol_connect(url_stripped, headers)
+    return await _mcp_protocol_connect(url_stripped, headers, ssl_verify=ssl_verify)
 
 
 async def check_mcp_health_and_update_db(
@@ -223,12 +232,16 @@ async def check_mcp_health_and_update_db(
     custom_headers = get_mcp_custom_headers_by_name_and_url(
         mcp_name=service_name, mcp_server=mcp_url, tenant_id=tenant_id
     )
+    ssl_verify = get_mcp_ssl_verify_by_name_and_url(
+        mcp_name=service_name, mcp_server=mcp_url, tenant_id=tenant_id
+    )
 
     try:
         status = await mcp_server_health(
             remote_mcp_server=mcp_url,
             authorization_token=authorization_token,
             custom_headers=custom_headers,
+            ssl_verify=ssl_verify,
         )
     except BaseException:
         status = False
@@ -290,12 +303,14 @@ async def check_mcp_service_health(
 
     authorization_token = record.get("authorization_token")
     custom_headers = record.get("custom_headers")
+    ssl_verify = record.get("ssl_verify", True)
 
     try:
         status = await mcp_server_health(
             remote_mcp_server=server_url,
             authorization_token=authorization_token,
             custom_headers=custom_headers,
+            ssl_verify=ssl_verify,
         )
     except MCPConnectionError:
         if persist_status:

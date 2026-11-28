@@ -143,11 +143,14 @@ async def test_failed_default_does_not_supply_legacy_aliases(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("explicit", [False, True])
-async def test_missing_selected_snapshot_raises_domain_error_during_actual_config_compilation(monkeypatch, explicit):
+@pytest.mark.parametrize("display_name,expected_name", [("厨师助手", "厨师助手"), ("  ", "agent"), (None, "agent")])
+async def test_missing_selected_snapshot_raises_domain_error_during_actual_config_compilation(
+    monkeypatch, explicit, display_name, expected_name,
+):
     from contracts.errors.exceptions import RunModelControlsError
 
     monkeypatch.setattr(compiler, "search_agent_info_by_agent_id", Mock(
-        return_value={"name": "agent", "description": "", "model_ids": [123]},
+        return_value={"name": "agent", "display_name": display_name, "description": "", "model_ids": [123]},
     ))
     monkeypatch.setattr(compiler, "query_sub_agent_relations", Mock(return_value=[]))
     monkeypatch.setattr(compiler, "_get_external_a2a_agents", Mock(return_value=[]))
@@ -167,6 +170,10 @@ async def test_missing_selected_snapshot_raises_domain_error_during_actual_confi
         )
 
     assert caught.value.code == "model_not_available"
+    assert caught.value.to_detail() == {
+        "code": "model_not_available",
+        "details": {"agent_id": 7, "agent_name": expected_name, "version_no": 0},
+    }
     if explicit:
         model_lookup.assert_not_called()
     else:

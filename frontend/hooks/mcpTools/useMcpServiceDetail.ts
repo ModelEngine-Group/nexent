@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -209,7 +211,8 @@ export function useMcpServiceDetail({
       !isSameStringArray(draft.tags, selectedService.tags) ||
       (draft.authorizationToken ?? "") !==
         (selectedService.authorizationToken ?? "") ||
-      (draft.version ?? "") !== (selectedService.version ?? "")
+      (draft.version ?? "") !== (selectedService.version ?? "") ||
+      (draft.sslVerify ?? true) !== (selectedService.sslVerify ?? true)
     );
   }, [draft, selectedService]);
 
@@ -250,6 +253,7 @@ export function useMcpServiceDetail({
           group_ids: currentDraft.groupIds ?? undefined,
           ingroup_permission: currentDraft.ingroupPermission ?? undefined,
           shared_fields: currentDraft.sharedFields ?? undefined,
+          ssl_verify: currentDraft.sslVerify,
         });
         message.success(t("mcpTools.service.saveSuccess"));
         invalidateServices();

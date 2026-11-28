@@ -87,7 +87,10 @@ it("shared Close discards the pending skill draft without applying defaults or s
   expect(
     screen.queryByRole("button", { name: "恢复默认" })
   ).not.toBeInTheDocument();
-  await userEvent.click(screen.getByText("关闭", { selector: "button" }));
+  const footer = screen
+    .getByRole("dialog")
+    .querySelector<HTMLElement>('[data-picker-part="footer"]')!;
+  await userEvent.click(within(footer).getByRole("button", { name: "关闭" }));
   expect(cancel).toHaveBeenCalledOnce();
   expect(confirm).not.toHaveBeenCalled();
 });
@@ -261,13 +264,13 @@ it("UT-FE-WB-023 required configuration blocks confirmation until complete", asy
   render(
     <SkillPicker open selected={[]} onCancel={vi.fn()} onConfirm={confirm} />
   );
-  await userEvent.click(
-    await screen.findByRole("option", { name: /Default Skill/ })
-  );
-  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  const skill = await screen.findByRole("option", { name: /Default Skill/ });
+  expect(skill).not.toHaveTextContent("需要填写必填配置");
+  await userEvent.click(skill);
+  await userEvent.click(screen.getByRole("button", { name: /^保存$/ }));
   expect(confirm).not.toHaveBeenCalled();
   await userEvent.type(screen.getByLabelText("Default Skill region"), "CN");
-  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  await userEvent.click(screen.getByRole("button", { name: /^保存$/ }));
   await userEvent.click(screen.getByRole("button", { name: "确认" }));
   expect(confirm.mock.calls[0][0]).toEqual([
     { skill_id: 1, config_values: { region: "CN" } },
@@ -316,6 +319,46 @@ it("UT-FE-WB-035 published instance values are displayed without fetching draft 
     "published-v3"
   );
 });
+it("edits a selected Skill using the shared config UI and applies it only on drawer confirmation", async () => {
+  vi.mocked(fetchSkillsList).mockResolvedValue([
+    {
+      ...base,
+      config_schemas: [{ name: "region", type: "string", required: true }],
+      config_values: { region: "catalog" },
+    },
+  ]);
+  const confirm = vi.fn();
+  render(
+    <SkillPicker
+      open
+      selected={[{ skill_id: 1, config_values: { region: "current-session" } }]}
+      onCancel={vi.fn()}
+      onConfirm={confirm}
+    />
+  );
+  const row = await screen.findByRole("option", { name: "Default Skill" });
+  expect(row.closest("[data-resource-view]")).toHaveAttribute(
+    "data-resource-view",
+    "list"
+  );
+  await userEvent.click(screen.getByRole("button", { name: /^配置$/ }));
+  const input = await screen.findByLabelText("Default Skill region");
+  expect(input.closest("[data-config-variant]")).toHaveAttribute(
+    "data-config-variant",
+    "skill"
+  );
+  expect(input).toHaveValue("current-session");
+  await userEvent.clear(input);
+  await userEvent.type(input, "updated-session");
+  await userEvent.click(screen.getByRole("button", { name: /^保存$/ }));
+  expect(row).toHaveAttribute("aria-selected", "true");
+  expect(confirm).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: /^确认$/ }));
+  expect(confirm.mock.calls[0][0]).toEqual([
+    { skill_id: 1, config_values: { region: "updated-session" } },
+  ]);
+});
+
 it("UT-FE-WB-036 confirming a new set excludes cancelled defaults and supports empty selection", async () => {
   const confirm = vi.fn();
   render(
@@ -425,7 +468,7 @@ it("UT-FE-WB-023 renders boolean and enum controls with typed values", async () 
   expect(
     screen.getByRole("combobox", { name: "Default Skill region" })
   ).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  await userEvent.click(screen.getByRole("button", { name: /^保存$/ }));
   await userEvent.click(screen.getByRole("button", { name: "确认" }));
   expect(confirm.mock.calls[0][0]).toEqual([
     { skill_id: 1, config_values: { enabled: true } },

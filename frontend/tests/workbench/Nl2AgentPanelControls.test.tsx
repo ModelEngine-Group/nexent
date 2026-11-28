@@ -639,6 +639,9 @@ it("shows scoped history count, restores a turn and starts another conversation 
     expect(fixture.runtime.thread.import).toHaveBeenCalledWith(saved)
   );
   expect(conversationChanged).toHaveBeenCalledExactlyOnceWith(42);
+  expect(fixture.thread.mock.calls.at(-1)?.[0]).toMatchObject({
+    modelPreferenceConversationId: 12,
+  });
   async function send() {
     const result = fixture.adapter!.run({
       messages: [],
@@ -659,6 +662,9 @@ it("shows scoped history count, restores a turn and starts another conversation 
     expect(fixture.runtime.thread.reset).toHaveBeenCalledOnce()
   );
   expect(conversationChanged).toHaveBeenCalledTimes(2);
+  expect(
+    fixture.thread.mock.calls.at(-1)?.[0].modelPreferenceConversationId
+  ).toBeUndefined();
   await act(send);
   expect(
     fixture.remoteRun.mock.calls.at(-1)?.[0].runConfig?.custom?.agentId

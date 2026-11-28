@@ -1,0 +1,21 @@
+schema_version: '1.0'
+change:
+  change_id: DEVELOP-CASE-REPAIR-20261127
+  change_type: test-fix
+  title: Repair Agent configuration fixtures and current Workbench and overload checks
+  description: Seed the browser session in the shared Agent editor fixture, match current component model and authorization dependencies, and align the Workbench sidebar check with its approved title row and separate new-conversation action. Verify HTTP overload responses at the current Management conversation routes.
+  affected_features:
+    existing: [AGENT-CORE-CONFIG, AGENT-EDITOR-WORKFLOWS, F-054, F-096, WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGENT-CORE-UI-D4-001, AGENT-EDITOR-D4-003, AGENT-EDITOR-D4-004, AGENT-EDITOR-D4-005]
+    added: []
+    modified: [AGENT-EDITOR-D4-007, API-AUTO-7CBDF5C068165594, UT-FE-AUTO-3D13A0DB24D58E7C, UT-FE-AUTO-A2A0CB86E6D3E2F3, UT-FE-AUTO-A60EF4DAA250E60E, WB-CONTROLS-D4-001]
+    retired: []
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: These changes maintain controlled fixtures and existing formal tests.
+  notes: The HTTP cases close their ASGI client and use no shared assets. Agent editor and Workbench mutations are intercepted within owned browser contexts.

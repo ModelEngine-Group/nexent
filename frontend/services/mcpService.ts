@@ -73,6 +73,7 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           group_ids: server.group_ids,
           ingroup_permission: server.ingroup_permission,
           shared_fields: server.shared_fields,
+          ssl_verify: server.ssl_verify,
         };
       });
 

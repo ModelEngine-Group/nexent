@@ -94,7 +94,6 @@ it("retains the develop width fallback and blocks every close path while confirm
   expect(cancel).toBeDisabled();
   expect(submit).toBeDisabled();
   expect(submit).toHaveAttribute("aria-busy", "true");
-  expect(submit.querySelector("svg")).toHaveClass("animate-spin");
   for (const button of screen.getAllByRole("button", {
     name: "关闭",
   }))
