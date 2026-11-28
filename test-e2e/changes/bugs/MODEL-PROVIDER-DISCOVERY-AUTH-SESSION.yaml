@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PROVIDER-DISCOVERY-AUTH-SESSION
+  change_type: bugfix
+  bug_id: MODEL-PROVIDER-DISCOVERY-AUTH-SESSION
+  title: Preserve the Nexent session when model discovery rejects the provider API key
+  description: Distinguish provider authentication from Nexent authentication at both batch model discovery endpoints.
+  observed_behavior: A provider 401 reaches the browser as a Nexent 401 and triggers the session-expired flow.
+  expected_behavior: A provider 401 returns a 502 with an API key error. Missing or expired Nexent credentials still return 401.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Model onboarding coverage does not exercise provider authentication failure with a valid Nexent session.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Both batch discovery endpoints map provider 401 to a safe 502 and retain 401 for Nexent session expiry.
+    - Both batch discovery endpoints preserve provider 403, 404 and 502 errors.
+    reason: Parameterized endpoint tests reproduce the exact HTTP boundary. A focused browser regression on the test VM verifies the error and successful retry in the same session.
+    test_selectors:
+    - test/backend/app/test_model_managment_app.py
+  notes: The model-access-native-agent SPEC defines the batch discovery flow. The backend HTTP contract reserves 401 for Nexent credentials. Existing onboarding cases exercise successful discovery. The focused regression checks error classification and same-session retry without creating models.
