@@ -749,8 +749,7 @@ app.prepare().then(() => {
     const isProxyRequest =
       internalPathname.startsWith("/api/") ||
       internalPathname.startsWith("/nb/") ||
-      (internalPathname.includes("/attachments/") &&
-        !internalPathname.startsWith("/api/"));
+      isAttachmentProxyPath(internalPathname);
     if (isProxyRequest && BASE_PATH) {
       req.url = req.url.slice(BASE_PATH.length) || "/";
     }
@@ -895,10 +894,14 @@ async function handleProjectConfigApi(pathname, req, res) {
 /**
  * 静态附件代理 /attachments/
  */
+function isAttachmentProxyPath(pathname) {
+  return (
+    pathname.startsWith("/attachments/") && !pathname.startsWith("/api/")
+  );
+}
+
 function handleAttachmentProxy(pathname, req, res) {
-  const isAttachmentRoute =
-    pathname.includes("/attachments/") && !pathname.startsWith("/api/");
-  if (!isAttachmentRoute) return false;
+  if (!isAttachmentProxyPath(pathname)) return false;
 
   proxy.web(req, res, { target: MINIO_BACKEND });
   return true;
