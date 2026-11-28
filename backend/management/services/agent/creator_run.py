@@ -17,7 +17,7 @@ from contracts.agentos import PreparedAgentCreatorRun
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.agentos_events import iter_sse_frames
 from management.services.agent.nl2agent import (
-    Nl2AgentDraftSaveError, _build_verified_bound_resources_context, _parse_nl2agent_card_action_agent_id,
+    Nl2AgentDraftSaveError, _parse_nl2agent_card_action_agent_id,
     _requires_policy_clarification,
 )
 from management.services.agent.nl2agent_callback import (
@@ -27,6 +27,7 @@ from management.services.agent.preparation.evaluation_snapshot import build_eval
 from management.services.agent.runtime_client import forward_creator_run
 from management.services.model.creator_snapshot import prepare_creator_model
 from nexent.core.concurrency import run_blocking
+from services.nl2agent_prompt_service import build_verified_bound_resources_context
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ async def prepare_nl2agent_snapshot(
     model_scope = await run_blocking(
         "nl2agent-model", prepare_creator_model, request, actor.tenant_id, lane="control-io", owner="management",
     )
-    context = await _build_verified_bound_resources_context(
+    context = await build_verified_bound_resources_context(
         agent_id=request.agent_id, user_id=actor.user_id, tenant_id=actor.tenant_id,
     )
     run_input = await run_blocking(
@@ -185,7 +186,7 @@ async def _apply_card_action(payload, actor, request, *, validate_only=False):
         query = "Continue from the resource action accepted by the runtime. Accepted resource action: " + json.dumps(result)
     else:
         return payload, frames
-    context = await _build_verified_bound_resources_context(
+    context = await build_verified_bound_resources_context(
         agent_id=payload.agent_id, user_id=actor.user_id, tenant_id=actor.tenant_id,
         prompt_scope=prompt_scope,
     )

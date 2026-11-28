@@ -17,6 +17,7 @@ from management.services.repository.agent.listing import _extract_root_agent_fro
 from nexent.core.utils.observer import MessageObserver
 from management.services.agent import nl2agent as service
 from management.services.agent import nl2agent_tools as tools
+from services.nl2agent_prompt_service import build_verified_bound_resources_context
 
 
 def test_request_and_tool_accept_only_canonical_prompt():
@@ -113,7 +114,7 @@ async def test_verified_context_preserves_complete_prompt(mocker):
     mocker.patch.object(service, "_load_verified_nl2agent_state", return_value=(
         {"prompt": text, "description": "Keep"}, [],
     ))
-    context = await service._build_verified_bound_resources_context(
+    context = await build_verified_bound_resources_context(
         agent_id=170, tenant_id="tenant", user_id="owner",
     )
     state = json.loads(context.content["text"].split(": ", 1)[1])

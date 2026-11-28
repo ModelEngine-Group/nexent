@@ -11,6 +11,7 @@ import pytest
 from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 from management.services.agent import nl2agent as service
 from management.services.agent import nl2agent_tools as tools
+from services.nl2agent_prompt_service import build_verified_bound_resources_context
 
 FIELD = "enable_protocol_repair_retry"
 
@@ -48,7 +49,7 @@ def test_omitted_policy_does_not_reset_existing_setting(mocker):
 @pytest.mark.asyncio
 async def test_verified_state_includes_effective_policy(mocker, draft, expected):
     mocker.patch.object(service, "_load_verified_nl2agent_state", new=AsyncMock(return_value=(draft, [])))
-    context = await service._build_verified_bound_resources_context(agent_id=42, tenant_id="tenant", user_id="user")
+    context = await build_verified_bound_resources_context(agent_id=42, tenant_id="tenant", user_id="user")
     state = json.loads(context.content["text"].removeprefix("Verified database binding facts: "))
     assert state["draft_fields"][FIELD] is expected
 

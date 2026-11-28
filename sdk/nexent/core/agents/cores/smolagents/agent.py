@@ -303,7 +303,8 @@ class NexentAgent(AgentResources):
                 else list(getattr(agent_config, "context_items", None) or []),
                 tool_list,
             )
-            creator_protocol = nl2agent_protocol(context_items, self.observer.lang, "smolagents")
+            language = getattr(self.observer, "lang", "en")
+            creator_protocol = nl2agent_protocol(context_items, language, "smolagents")
             if creator_protocol is not None:
                 context_items.append(creator_protocol)
             resolved_external = {agent.agent_id: agent for agent in external_a2a_agents}
@@ -335,7 +336,7 @@ class NexentAgent(AgentResources):
                     content={
                         "text": clarification_policy(
                             tool_name,
-                            language=getattr(self.observer, "lang", "en"),
+                            language=language,
                         )
                     },
                     source=("runtime:clarification_protocol",),
@@ -356,7 +357,7 @@ class NexentAgent(AgentResources):
                 )
             context_runtime = ManagedContextRuntime(
                 context_manager,
-                items=(with_common_behavior(context_items, self.observer.lang,
+                items=(with_common_behavior(context_items, language,
                        is_subagent=not root_clarification_allowed(
                            self.core_run_info, managed_context=_managed_context))
                        if any(item.type == ContextItemType.SYSTEM for item in context_items) else context_items),

@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import unicodedata
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import quote
 
 from rapidfuzz import fuzz
@@ -24,7 +24,6 @@ from management.services.knowledge_base.recommendation import (
     MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
 )
 from nexent.core.agent_names import validate_agent_name
-from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.concurrency import run_blocking
 from management.services.agent.nl2agent_tools import (
     AgentDraftFields,
@@ -42,9 +41,6 @@ from management.services.agent.nl2agent_tools import (
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
 )
-
-if TYPE_CHECKING:
-    from services.nl2agent_state_service import ResourceScope
 
 logger = logging.getLogger(__name__)
 
@@ -1438,32 +1434,6 @@ async def read_generation_state(
         **({"bound_resources": facts} if facts is not None else {}),
         **({"binding_revision": bindings} if include_bindings and include_binding_revision else {}),
     }
-
-
-async def _build_verified_bound_resources_context(
-    *, agent_id: int, tenant_id: str, user_id: str, include_bindings: bool = True,
-    prompt_scope: "ResourceScope | None" = None,
-) -> ContextItemInput:
-    state = await read_generation_state(
-        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id, include_bindings=include_bindings,
-        include_binding_revision=prompt_scope is not None,
-    )
-    if prompt_scope is not None:
-        from services.nl2agent_prompt_service import refresh_basis
-
-        await refresh_basis(prompt_scope, state, complete_generation=True)
-        state.pop("binding_revision")
-    return ContextItemInput(
-        id="system:nl2agent_bound_resources",
-        type=ContextItemType.SYSTEM,
-        content={
-            "text": "Verified database binding facts: "
-            + json.dumps(state, ensure_ascii=False, separators=(",", ":")),
-        },
-        source=("database:agent_bindings",),
-        priority=85,
-        metadata={"authority": "tenant"},
-    )
 
 
 async def validate_agent_generation_complete_impl(

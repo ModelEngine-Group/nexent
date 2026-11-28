@@ -694,7 +694,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.agents.cores.jiuwen.protocol import NATIVE_PROTOCOL_INSTRUCTION
         from nexent.core.agents.prompt.policies import business_system_instructions
 
-        language = getattr(self.run_info.observer, "lang", "en")
+        language = getattr(getattr(self.run_info, "observer", None), "lang", "en")
         shared = business_system_instructions(
             config.instructions or config.description, items, language,
             is_subagent=not root_clarification_allowed(self.run_info),
@@ -724,7 +724,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                 "examples, without requiring Python actions or final_answer tags."
             )
         clarification = self.clarification.instructions(
-            getattr(getattr(self.run_info, "observer", None), "lang", "en"), text_protocol=self.text_protocol,
+            language, text_protocol=self.text_protocol,
         ) if self.clarification is not None else ""
         creator_text = creator.content["text"] if creator is not None else ""
         return "\n\n".join(
@@ -737,6 +737,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.model_service.service import ModelService
 
         info, config = self.run_info, self.model_config
+        observer = getattr(info, "observer", None)
         profile = config.resolved_profile
         # Retired output budgets never constrain model dispatch, for any Core.
         service = info.model_service
@@ -780,8 +781,8 @@ class JiuwenAdapter(AgentCoreAdapter):
                                   on_error=self.events.record_error, on_recovery=self.events.recovery,
                                   delegation=self.delegation, artifact_output=self.artifact_output,
                                   clarification=self.clarification,
-                                  verification_pending=getattr(info.observer, "has_pending_nl2agent_verification", None),
-                                  full_generation_pending=getattr(info.observer, "pending_full_generation_action", None))
+                                  verification_pending=getattr(observer, "has_pending_nl2agent_verification", None),
+                                  full_generation_pending=getattr(observer, "pending_full_generation_action", None))
 
     def _bind_text_executor(self):
         from openjiuwen.core.foundation.tool import LocalFunction

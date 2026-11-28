@@ -33,7 +33,7 @@ def preparation(mocker):
         "input_budget": 4096, "context_window_tokens": 8192,
     })
     return mocker.patch.object(
-        creator_run, "_build_verified_bound_resources_context",
+        creator_run, "build_verified_bound_resources_context",
         side_effect=lambda **kwargs: ContextItemInput(
             id="system:bound", type=ContextItemType.SYSTEM,
             content={"text": f"{kwargs['tenant_id']}:{kwargs['agent_id']}"}, source=("database",),
@@ -80,8 +80,8 @@ async def test_confirmed_full_creation_uses_verified_prompt_basis(
     apply_card = mocker.patch.object(nl2agent_resource_flow, "apply_card_action", return_value={
         "purpose": purpose, "next_step": next_step, "action": "continue",
     })
-    mocker.patch.object(creator_run, "_build_verified_bound_resources_context",
-                        new=nl2agent._build_verified_bound_resources_context)
+    mocker.patch.object(creator_run, "build_verified_bound_resources_context",
+                        new=nl2agent_prompt_service.build_verified_bound_resources_context)
     draft, resources = {"prompt": "Existing prompt"}, [{"resource_id": 9, "resource_type": "tool"}]
     needs_basis = expected_stage == "generate_prompt"
     generation_state = mocker.patch.object(nl2agent, "_load_verified_nl2agent_state", return_value=(
