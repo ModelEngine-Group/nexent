@@ -135,7 +135,7 @@ def get_groups_endpoint(
     """
     resolve_tenant_scope(current_user, request.tenant_id)
     try:
-        get_tenant_info(request.tenant_id, initialize_name=False)
+        get_tenant_info(request.tenant_id)
         # Get groups under given tenant with pagination and sorting
         group_kwargs = {
             "tenant_id": request.tenant_id,

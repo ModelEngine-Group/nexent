@@ -19,7 +19,6 @@ import {
   Modal,
   Form,
   Input,
-  message,
   Switch,
   Spin,
   Pagination,
@@ -53,6 +52,7 @@ import {
   getTenantUsers,
   getTenant,
 } from "@/services/tenantService";
+import { ApiError } from "@/services/api";
 import {
   createInvitation,
   deleteInvitation,
@@ -87,7 +87,7 @@ const DEFAULT_PAGE_SIZE = 20;
 
 // Removed mockTenants - now using real data from API
 
-function TenantList({
+export function TenantList({
   selected,
   onSelect,
   tenants,
@@ -130,6 +130,13 @@ function TenantList({
   const [deletingTenant, setDeletingTenant] = useState<Tenant | null>(null);
   const [tenantUsers, setTenantUsers] = useState<any[]>([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  // Tracks the delete confirmation request itself so the OK button shows
+  // feedback and cannot be double-submitted while the request is in flight.
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  // Inline failure feedback; the modal stays open so the user can retry.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const { message } = App.useApp();
 
   // State for auto-install official skills feature
   const [installOfficialSkills, setInstallOfficialSkills] = useState(false);
@@ -235,11 +242,43 @@ function TenantList({
   const handleDeleteConfirm = async () => {
     if (!deletingTenant) return;
 
+    setDeleteError(null);
+    setDeleteConfirming(true);
+
+    // Stage 1: only the delete request. A non-404 failure keeps the modal
+    // open with inline feedback; an idempotent 404 means the tenant is
+    // already gone and is treated as deleted instead of trapping the user.
+    let alreadyDeleted = false;
     try {
       await deleteTenant(deletingTenant.tenant_id);
-      message.success(t("tenantResources.tenants.deleted"));
+    } catch (error) {
+      if (error instanceof ApiError && Number(error.code) === 404) {
+        alreadyDeleted = true;
+      } else {
+        setDeleteError(
+          getTenantResourceLimitMessage(error, t) ||
+            t("tenantResources.tenantDeleteFailed")
+        );
+        return;
+      }
+    } finally {
+      setDeleteConfirming(false);
+    }
 
-      // Refresh the tenant list
+    // The tenant is deleted (or was already gone): close immediately so a
+    // later refresh failure cannot be mistaken for a failed delete.
+    if (alreadyDeleted) {
+      message.info(t("tenantResources.tenants.alreadyDeleted"));
+    } else {
+      message.success(t("tenantResources.tenants.deleted"));
+    }
+    setDeleteModalVisible(false);
+    setDeletingTenant(null);
+    setTenantUsers([]);
+
+    // Stage 2: post-delete bookkeeping. A refresh failure only warns; the
+    // delete itself has succeeded.
+    try {
       await onTenantsRefetch();
 
       // Clear selection if the deleted tenant was selected
@@ -255,14 +294,8 @@ function TenantList({
         }
       }
     } catch (error) {
-      message.error(
-        getTenantResourceLimitMessage(error, t) ||
-          t("tenantResources.tenantDeleteFailed")
-      );
-    } finally {
-      setDeleteModalVisible(false);
-      setDeletingTenant(null);
-      setTenantUsers([]);
+      console.error("Failed to refresh tenant list after delete:", error);
+      message.warning(t("tenantResources.tenants.refreshFailed"));
     }
   };
 
@@ -271,6 +304,7 @@ function TenantList({
     setDeleteModalVisible(false);
     setDeletingTenant(null);
     setTenantUsers([]);
+    setDeleteError(null);
   };
 
   // Handle admin password input change
@@ -542,6 +576,7 @@ function TenantList({
                       type="text"
                       size="small"
                       icon={<Trash2 className="h-3 w-3" />}
+                      aria-label={t("tenantResources.tenants.deleteTenant")}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDeleteClick(tenant);
@@ -987,8 +1022,8 @@ function TenantList({
         onCancel={handleDeleteCancel}
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
-        okButtonProps={{ danger: true }}
-        confirmLoading={deleteLoading}
+        okButtonProps={{ danger: true, disabled: deleteLoading }}
+        confirmLoading={deleteConfirming}
         width={500}
       >
         <Alert
@@ -1063,6 +1098,11 @@ function TenantList({
             {t("tenantResources.tenants.noUsers")}
           </div>
         )}
+
+        {/* Inline failure feedback; the modal stays open for retry */}
+        {deleteError ? (
+          <Alert type="error" showIcon className="mt-4" title={deleteError} />
+        ) : null}
       </Modal>
     </div>
   );

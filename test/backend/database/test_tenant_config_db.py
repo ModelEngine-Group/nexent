@@ -124,7 +124,37 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Now we can safely import the module under test
-from management.db.configuration.tenant import get_all_configs_by_tenant_id, get_configs_by_tenant_id_and_keys, get_tenant_config_info, get_single_config_info, insert_config, delete_config_by_tenant_config_id, delete_config, update_config_by_tenant_config_id, update_config_by_tenant_config_id_and_data, get_all_tenant_ids, create_tenant_with_default_group
+from management.db.configuration.tenant import get_all_configs_by_tenant_id, get_configs_by_tenant_id_and_keys, get_tenant_config_info, get_single_config_info, insert_config, delete_config_by_tenant_config_id, delete_config, update_config_by_tenant_config_id, update_config_by_tenant_config_id_and_data, get_all_tenant_ids, create_tenant_with_default_group, tenant_exists, get_existing_tenant_ids
+
+
+def test_get_existing_tenant_ids_returns_live_identity_rows(monkeypatch, mock_session):
+    """One batched query answers existence for the whole id list."""
+    session, query = mock_session
+
+    mock_distinct = MagicMock()
+    mock_distinct.all.return_value = [("tenant1",), ("tenant2",)]
+    mock_filter = MagicMock()
+    mock_filter.distinct.return_value = mock_distinct
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
+
+    result = get_existing_tenant_ids(["tenant1", "ghost", "tenant2"])
+
+    assert result == ["tenant1", "tenant2"]
+    query.filter.assert_called_once()
+
+
+def test_get_existing_tenant_ids_empty_list_skips_session(monkeypatch):
+    """An empty id list must not open a database session."""
+    get_db_session = MagicMock()
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", get_db_session)
+
+    assert get_existing_tenant_ids([]) == []
+    get_db_session.assert_not_called()
 
 
 def test_get_configs_by_tenant_id_and_keys_success(monkeypatch, mock_session):
@@ -319,6 +349,42 @@ def test_get_single_config_info_not_found(monkeypatch, mock_session):
     result = get_single_config_info("test_tenant", "test_key")
 
     assert result == {}
+
+
+def test_tenant_exists_true_when_identity_row_present(monkeypatch, mock_session):
+    """A live TENANT_ID identity row marks the tenant as existing."""
+    session, query = mock_session
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = MockTenantConfig(
+        tenant_id="test_tenant",
+        config_key="TENANT_ID",
+        config_value="test_tenant",
+    )
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
+
+    assert tenant_exists("test_tenant") is True
+
+
+def test_tenant_exists_false_when_identity_row_missing(monkeypatch, mock_session):
+    """A soft-deleted or absent identity row means the tenant does not exist."""
+    session, query = mock_session
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = None
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
+
+    assert tenant_exists("ghost_tenant") is False
 
 
 def test_insert_config_success(monkeypatch, mock_session):

@@ -3232,6 +3232,8 @@
   "tenantResources.tenants.created": "Tenant created",
   "tenantResources.tenants.deleteTenant": "Delete Tenant",
   "tenantResources.tenants.deleted": "Tenant deleted",
+  "tenantResources.tenants.alreadyDeleted": "This tenant was already deleted; no action needed",
+  "tenantResources.tenants.refreshFailed": "Failed to refresh the tenant list; reload the page manually",
   "tenantResources.tenants.editTenant": "Edit Tenant",
   "tenantResources.tenants.name": "Tenant Name",
   "tenantResources.tenants.tenants": "Tenants",
