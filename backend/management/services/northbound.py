@@ -248,22 +248,17 @@ def _normalize_northbound_attachments(
 
 
 # -----------------------------
-# In-memory idempotency and rate limit placeholders
+# In-memory idempotency placeholders
 # -----------------------------
+# The per-tenant rate limiter moved to the shared Web layer
+# (``backend/http/server/northbound.py``) so the ops ``/nb`` mirror consumes
+# the same budget; re-exported below for the existing call sites.
 _IDEMPOTENCY_RUNNING: Dict[str, float] = {}
 _IDEMPOTENCY_LOCK = asyncio.Lock()
-
-_RATE_STATE: Dict[str, Dict[str, int]] = {}
-_RATE_LOCK = asyncio.Lock()
 
 
 def _now_seconds() -> float:
     return time.time()
-
-
-def _minute_bucket(ts: Optional[float] = None) -> str:
-    t = int((ts or _now_seconds()) // 60)
-    return str(t)
 
 
 async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None:
@@ -306,34 +301,31 @@ async def _release_idempotency_after_delay(key: str, seconds: int = 3) -> None:
     await idempotency_end(key)
 
 
+# The rate limiter core lives in the shared Web layer (backend/http/server/
+# northbound.py); the ops /nb mirror calls it with the shared defaults. This
+# module keeps a thin call that feeds the core with its own long-standing
+# patchable state — the module-level runtime_state_service and rate
+# constants — so this service's callers and tests keep the exact surface
+# they had before the core moved. The in-memory state objects are the shared
+# singletons: clearing them here resets the shared core too.
+from backend.http.server.northbound import (  # noqa: F401 - shared singletons
+    _RATE_LOCK,
+    _RATE_STATE,
+    _minute_bucket,
+)
+from backend.http.server.northbound import (
+    check_and_consume_rate_limit as _shared_check_and_consume_rate_limit,
+)
+
+
 async def check_and_consume_rate_limit(tenant_id: str) -> None:
-    if not NORTHBOUND_RATE_LIMIT_ENABLED:
-        return
-
-    if runtime_state_service.enabled:
-        try:
-            await runtime_state_service.consume_rate_limit_async(
-                tenant_id=tenant_id,
-                limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
-            )
-            return
-        except ValueError:
-            raise LimitExceededError("Query rate exceeded limit. Please try again later")
-        except Exception:
-            logger.exception("Northbound rate limit Redis operation failed")
-            raise LimitExceededError("Rate limit service is unavailable. Please try again later.")
-
-    bucket = _minute_bucket()
-    async with _RATE_LOCK:
-        state = _RATE_STATE.setdefault(tenant_id, {})
-        count = state.get(bucket, 0)
-        if count >= NORTHBOUND_RATE_LIMIT_PER_MINUTE:
-            raise LimitExceededError("Query rate exceeded limit. Please try again later")
-        state[bucket] = count + 1
-        # cleanup old buckets, keep only current
-        for b in list(state.keys()):
-            if b != bucket:
-                state.pop(b, None)
+    """Consume one request from the tenant's per-minute budget (shared core)."""
+    await _shared_check_and_consume_rate_limit(
+        tenant_id,
+        runtime_state_service=runtime_state_service,
+        enabled=NORTHBOUND_RATE_LIMIT_ENABLED,
+        limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+    )
 
 
 def _build_idempotency_key(*parts: Any) -> str:

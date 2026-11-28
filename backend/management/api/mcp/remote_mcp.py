@@ -146,6 +146,7 @@ async def add_mcp_service_endpoint(
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
             skip_health_check=payload.skip_health_check if payload.skip_health_check is not None else False,
+            ssl_verify=payload.ssl_verify,
         )
 
         # Credential-bearing fields (authorization_token, custom_headers,
@@ -381,6 +382,7 @@ async def update_mcp_service_endpoint(
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
+            ssl_verify=payload.ssl_verify,
         )
 
         # authorization_token/custom_headers/config_json never reach the log;
@@ -581,6 +583,7 @@ async def get_mcp_record(
                 "mcp_server": mcp_record.get("mcp_server"),
                 "authorization_token": mcp_record.get("authorization_token"),
                 "custom_headers": mcp_record.get("custom_headers"),
+                "ssl_verify": mcp_record.get("ssl_verify", True),
                 "status": "success",
             },
         )
@@ -744,6 +747,7 @@ async def test_mcp_connection_endpoint(
             server_url=payload.server_url,
             authorization_token=payload.authorization_token,
             custom_headers=payload.custom_headers,
+            ssl_verify=payload.ssl_verify,
         )
 
         return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})

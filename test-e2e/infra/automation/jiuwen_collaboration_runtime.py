@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+import runpy
 from contextlib import asynccontextmanager, nullcontext
 from threading import Event
 from unittest.mock import Mock
@@ -180,7 +181,7 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
 
 async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwen", protocol="native",
                             remote_protocol="JSONRPC", fault=None, run_timeouts=None, remote_delay=0,
-                            remote_stream=False, repeat_child=False):
+                            remote_stream=False, repeat_child=False, use_deployment_timeouts=False):
     monitoring = Mock()
     monitoring.trace_llm_request.side_effect = lambda *args, **kwargs: nullcontext(None)
     monkeypatch.setattr("nexent.core.model_service.service.get_monitoring_manager", lambda: monitoring)
@@ -285,11 +286,17 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
                              name == "sandbox" and fault != "capacity" else 1, max_queue_size=8)
             for name in ("agent-run", "model-tool-io", "mcp-session", "background-service", "sandbox", "control-io")})
         manager.start()
-        from runtime.adapters.nexent.factory import build_run_info
+        from runtime.adapters.nexent import factory
 
-        timeouts = {"collaboration_timeout_seconds": 0.4 if fault == "capacity" else 5}
+        if use_deployment_timeouts:
+            settings = runpy.run_module("contracts.constants.environment")
+            for name in ("RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS", "DEFAULT_TOOL_CALL_TIMEOUT"):
+                monkeypatch.setattr(factory.environment, name, settings[name])
+            timeouts = {}
+        else:
+            timeouts = {"collaboration_timeout_seconds": 0.4 if fault == "capacity" else 5}
         timeouts.update(run_timeouts or {})
-        info = build_run_info(query="Call the subagent delegate. PARENT_TASK_ONLY", agent_config=root,
+        info = factory.build_run_info(query="Call the subagent delegate. PARENT_TASK_ONLY", agent_config=root,
             model_config_list=[model("/parent", 0.9, "parent-only", 7)], observer=MessageObserver(lang="en"),
             stop_event=Event(), thread_manager=manager, **timeouts,
             tenant_id="spike-tenant", user_context={"user_id": "trusted"})

@@ -387,7 +387,7 @@ def test_external_a2a_binding_rebuilds_only_authorized_revision(mocker, change, 
 @pytest.mark.parametrize(("change", "status"), [
     ("remote", None), ("local", None), ("revoked", 404), ("disabled", 404), ("rotated", 409), ("params", 409),
     ("override", None), ("override_rotated", 409), ("override_params", 409), ("unknown_override", None),
-    ("wire_unknown_override", 422),
+    ("wire_unknown_override", 422), ("ssl_verify_off", None),
 ])
 @pytest.mark.asyncio
 async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, change, status):
@@ -466,6 +466,10 @@ async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mo
         tool_row["instance_params"] = {"private_param": "changed"}
     elif change == "override_params":
         tool_row["instance_params"]["limit"] = 10
+    elif change == "ssl_verify_off":
+        # Disabling verification after snapshot export must not change the
+        # pinned revision; the flag takes effect without re-binding.
+        server["ssl_verify"] = False
     reader = mocker.patch("runtime.agentos.prepared_mcp.read_bound_mcp_tools",
                           return_value=[] if change == "revoked" else [tool_row])
     mocker.patch("runtime.agentos.prepared_mcp.read_mcp_execution_servers", return_value=[server])
@@ -487,6 +491,11 @@ async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mo
             assert callable(host["httpx_client_factory"])
         else:
             assert host["headers"] == {"Authorization": "remote-token", "X-Key": "remote-key"}
+            if change == "ssl_verify_off":
+                assert callable(host["httpx_client_factory"])
+            else:
+                # Enabled verification keeps the SDK default verified client.
+                assert "httpx_client_factory" not in host
         assert info.user_context["user_id"] == "user-a"
         assert info.user_context["tenant_id"] == "tenant-a"
         assert info.user_context["user_groups"] == ["Support"]

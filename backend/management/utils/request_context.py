@@ -6,33 +6,16 @@ from contracts.constants.constants import LANGUAGE
 from typing import Optional
 from fastapi import Request
 
-# ``get_request_id`` is pure HTTP plumbing and the shared Web layer needs it to
-# write ``requestId`` into error bodies, so its definition lives with that layer
+# ``get_request_id`` and ``get_client_ip`` are pure HTTP plumbing and the
+# shared Web layer needs them to write ``requestId`` into error bodies and to
+# resolve audit client addresses, so their definitions live with that layer
 # (the shared layer must not import business source). Re-exported here so the
 # existing management call sites keep working.
 from backend.http.server.request_context import (  # noqa: F401 - re-exported
     REQUEST_ID_HEADER,
+    get_client_ip,
     get_request_id,
 )
-
-
-def get_client_ip(request: Optional[Request]) -> str:
-    """Resolve the client IP: first hop of X-Forwarded-For, then X-Real-IP, then peer.
-
-    X-Forwarded-For is attacker-controllable, so the result is a lead for
-    investigation, not proof of origin.
-    """
-    if request is None:
-        return ""
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    if forwarded_for:
-        first_hop = forwarded_for.split(",")[0].strip()
-        if first_hop:
-            return first_hop
-    real_ip = request.headers.get("x-real-ip", "").strip()
-    if real_ip:
-        return real_ip
-    return request.client.host if request.client else ""
 
 
 def get_user_language(request: Request = None) -> str:

@@ -65,7 +65,7 @@ async def run_conversation(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except RunModelControlsError as exc:
         status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
-        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+        raise HTTPException(status_code=status, detail=exc.to_detail()) from exc
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeServiceTimeoutError as exc:

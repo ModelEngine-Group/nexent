@@ -247,6 +247,57 @@ def test_ops_monitoring_routes_reach_ops_only_for_sessions(method, path):
     assert default_registry().match("PATCH", path) is None
 
 
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/nb/v1/monitoring/models"),
+    ("GET", "/nb/v1/monitoring/models/summary"),
+    ("GET", "/nb/v1/monitoring/models/trends"),
+    ("GET", "/nb/v1/monitoring/models/rankings"),
+    ("POST", "/nb/v1/monitoring/models/refresh"),
+    ("GET", "/nb/v1/monitoring/models/refreshes/r-1"),
+    ("GET", "/nb/v1/monitoring/skills"),
+    ("POST", "/nb/v1/monitoring/skills/refresh"),
+    ("GET", "/nb/v1/monitoring/agents"),
+    ("GET", "/nb/v1/monitoring/agents/rankings"),
+    ("GET", "/nb/v1/monitoring/mcp-tools"),
+    ("GET", "/nb/v1/monitoring/mcp-tools/catalog"),
+    ("GET", "/nb/v1/monitoring/mcp-tools/overview"),
+    ("POST", "/nb/v1/monitoring/mcp-tools/refresh"),
+])
+def test_nb_ops_monitoring_mirror_reaches_ops_for_api_keys(method, path):
+    """The /nb mirror of the monitoring surface is API-key only and ops-owned."""
+    match = default_registry().match(method, path)
+    assert match is not None
+    assert match.target == "ops"
+    assert match.credential_kinds == ("api_key",)
+    # The internal session lane stays the only PATCH-free surface; the mirror
+    # never widens into other credential kinds.
+    assert default_registry().match("PATCH", path) is None
+
+
+def test_nb_ops_monitoring_rows_can_be_emergency_excluded_by_capability(monkeypatch):
+    """The hand-written rows carry capability ids for the kill switch."""
+    import gateway.exposure.registry as registry_module
+
+    snapshot = Path(registry_module.__file__).with_name("registry.json")
+    document = json.loads(snapshot.read_text(encoding="utf-8"))
+    rows = [row for row in document["routes"] if row["path"].startswith("/nb/v1/monitoring/")]
+    assert rows and all(row.get("capability_id", "").startswith("monitoring.") for row in rows)
+
+    import gateway.configuration as configuration
+
+    settings = configuration.load_settings(
+        {**dict(GATEWAY_AUTH_ENABLED="true"), "GATEWAY_NB_EXCLUDED_CAPABILITIES": "monitoring.models.refresh"}
+    )
+    monkeypatch.setattr(configuration, "load_settings", lambda: settings)
+    registry_module.default_registry.cache_clear()
+    try:
+        excluded = registry_module.default_registry()
+        assert excluded.match("POST", "/nb/v1/monitoring/models/refresh") is None
+        assert excluded.match("GET", "/nb/v1/monitoring/models") is not None
+    finally:
+        registry_module.default_registry.cache_clear()
+
+
 def test_http_and_websocket_do_not_share_an_implicit_get_grant():
     assert select_upstream("GET", "/api/voice/stt/ws") is None
     assert select_upstream("GET", "/api/voice/stt/ws", transport="websocket") == "runtime"

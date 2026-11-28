@@ -157,6 +157,7 @@ def update_mcp_service(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    ssl_verify: bool | None = None,
 ) -> None:
     """Update an MCP service record by ID.
 
@@ -174,6 +175,8 @@ def update_mcp_service(
         market_id: Linked market record ID
         group_ids: Comma-separated group IDs that can access this MCP
         ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
+        ssl_verify: Whether to verify the remote MCP server TLS certificate;
+            None keeps the stored value
 
     Raises:
         McpNotFoundError: If MCP record is not found
@@ -218,6 +221,7 @@ def update_mcp_service(
         group_ids=group_ids,
         ingroup_permission=ingroup_permission,
         shared_fields=shared_fields,
+        ssl_verify=ssl_verify,
     )
 
 
@@ -266,6 +270,7 @@ async def update_mcp_service_enabled(
         if isinstance(current_record.get("custom_headers"), dict)
         else None
     )
+    ssl_verify = current_record.get("ssl_verify", True)
 
     config_json = current_record.get("config_json")
     # Uploaded images have no rebuild configuration. Toggle their availability
@@ -459,6 +464,7 @@ async def update_mcp_service_enabled(
                 remote_mcp_server=server_url,
                 authorization_token=authorization_token,
                 custom_headers=custom_headers,
+                ssl_verify=ssl_verify,
             )
             update_mcp_record_status_by_id(
                 mcp_id=mcp_id,
@@ -710,6 +716,7 @@ async def get_remote_mcp_server_list(
             "group_ids": record.get("group_ids"),
             "ingroup_permission": record.get("ingroup_permission"),
             "shared_fields": record.get("shared_fields"),
+            "ssl_verify": record.get("ssl_verify", True),
         }
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")
@@ -787,7 +794,7 @@ async def get_mcp_record_by_id(
             the user cannot see in the list view are treated as not found
 
     Returns:
-        Dictionary containing mcp_name, mcp_server, authorization_token, and custom_headers, or None if not found
+        Dictionary containing mcp_name, mcp_server, authorization_token, custom_headers, and ssl_verify, or None if not found
     """
     mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not mcp_record:
@@ -808,4 +815,5 @@ async def get_mcp_record_by_id(
         "mcp_server": mcp_record.get("mcp_server"),
         "authorization_token": mcp_record.get("authorization_token"),
         "custom_headers": mcp_record.get("custom_headers"),
+        "ssl_verify": mcp_record.get("ssl_verify", True),
     }

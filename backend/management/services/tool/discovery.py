@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Optional
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
 from contracts.tool import ToolInfo, ToolSourceEnum
 from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS
-from management.db.mcp.remote import get_mcp_records_by_tenant
+from management.db.mcp.remote import get_mcp_records_by_tenant, get_mcp_ssl_verify_by_name_and_url
 from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from backend.http.client import create_httpx_client
+from backend.http.client import create_httpx_client, create_verified_httpx_client
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.tool.catalog import get_local_tools_classes
 from management.services.tool.common import (
@@ -68,6 +68,7 @@ def _create_mcp_transport(
     url: str,
     authorization_token: Optional[str] = None,
     custom_headers: Optional[Dict[str, Any]] = None,
+    ssl_verify: bool = True,
 ):
     """
     Create appropriate MCP transport based on URL ending.
@@ -76,6 +77,7 @@ def _create_mcp_transport(
         url: MCP server URL
         authorization_token: Optional authorization token
         custom_headers: Optional custom HTTP headers
+        ssl_verify: Whether to verify the MCP server TLS certificate
 
     Returns:
         Transport instance (SSETransport or StreamableHttpTransport)
@@ -86,19 +88,22 @@ def _create_mcp_transport(
         headers["Authorization"] = authorization_token
     if custom_headers:
         headers.update(custom_headers)
+    httpx_client_factory = (
+        create_verified_httpx_client if ssl_verify else create_httpx_client
+    )
 
     if url_stripped.endswith("/sse"):
         return SSETransport(
-            url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client
+            url=url_stripped, headers=headers, httpx_client_factory=httpx_client_factory
         )
     elif url_stripped.endswith("/mcp"):
         return StreamableHttpTransport(
-            url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client
+            url=url_stripped, headers=headers, httpx_client_factory=httpx_client_factory
         )
     else:
         # Default to StreamableHttpTransport for unrecognized formats
         return StreamableHttpTransport(
-            url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client
+            url=url_stripped, headers=headers, httpx_client_factory=httpx_client_factory
         )
 
 
@@ -431,6 +436,7 @@ async def get_tool_from_remote_mcp_server(
     tenant_id: Optional[str] = None,
     authorization_token: Optional[str] = None,
     custom_headers: Optional[Dict[str, Any]] = None,
+    ssl_verify: Optional[bool] = None,
 ):
     """
     Get the tool information from the remote MCP server, avoid blocking the event loop
@@ -441,6 +447,7 @@ async def get_tool_from_remote_mcp_server(
         tenant_id: Optional tenant ID for database lookup of authorization_token
         authorization_token: Optional authorization token for authentication (if not provided and tenant_id is given, will be fetched from database)
         custom_headers: Optional custom HTTP headers
+        ssl_verify: Optional TLS certificate verification flag (if not provided and tenant_id is given, will be fetched from database)
     """
     # Get authorization token from database if not provided
     if authorization_token is None and tenant_id:
@@ -459,6 +466,13 @@ async def get_tool_from_remote_mcp_server(
             "X-Tenant-ID": str(tenant_id),
             "X-Nexent-Internal-Token": NEXENT_MCP_INTERNAL_TOKEN,
         }
+        # Internal local MCP endpoints use the internal service certificate.
+        ssl_verify = False
+    elif ssl_verify is None and tenant_id:
+        # Get the TLS verification flag from database if not provided
+        ssl_verify = get_mcp_ssl_verify_by_name_and_url(
+            mcp_name=mcp_server_name, mcp_server=remote_mcp_server, tenant_id=tenant_id
+        )
 
     tools_info = []
 
@@ -467,7 +481,8 @@ async def get_tool_from_remote_mcp_server(
         connection_timeout = configuration.get("MCP_REQUEST_TIMEOUT_SECONDS")
         tool_timeout = configuration.get("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS")
         transport = _create_mcp_transport(
-            remote_mcp_server, authorization_token, custom_headers
+            remote_mcp_server, authorization_token, custom_headers,
+            ssl_verify=True if ssl_verify is None else ssl_verify,
         )
         client = Client(transport=transport, timeout=tool_timeout)
         async with AsyncExitStack() as stack:

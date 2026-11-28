@@ -50,6 +50,13 @@ class McpRecord(TableBase):
         doc="Custom HTTP headers as JSON object for MCP server requests",
         default=None,
     )
+    ssl_verify = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+        doc="Verify remote MCP server TLS certificate for discovery, health checks and agent invocation",
+    )
     source = Column(
         String(30), doc="Source type: local/mcp_registry/community")
     market_id = Column(Integer, doc="Published market record ID (FK to mcp_market_record_t)")
@@ -197,7 +204,7 @@ def read_mcp_execution_servers(tenant_id: str) -> list[dict]:
     with get_db_session() as session:
         rows = session.execute(select(
             server.mcp_id, server.mcp_name, server.mcp_server, server.authorization_token,
-            server.custom_headers, server.enabled,
+            server.custom_headers, server.ssl_verify, server.enabled,
         ).where(
             server.tenant_id == tenant_id, server.delete_flag != "Y", server.status.is_(True),
         )).mappings()

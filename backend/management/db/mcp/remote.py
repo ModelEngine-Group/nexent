@@ -32,6 +32,7 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str) ->
         "container_port",
         "authorization_token",
         "custom_headers",
+        "ssl_verify",
         "source",
         "market_id",
         "registry_json",
@@ -181,6 +182,7 @@ def update_mcp_record_manage_fields_by_id(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    ssl_verify: bool | None = None,
 ) -> None:
     with get_db_session() as session:
         update_data = {
@@ -201,6 +203,8 @@ def update_mcp_record_manage_fields_by_id(
             update_data["ingroup_permission"] = ingroup_permission
         if shared_fields is not None:
             update_data["shared_fields"] = shared_fields
+        if ssl_verify is not None:
+            update_data["ssl_verify"] = ssl_verify
         session.query(McpRecord).filter(
             McpRecord.mcp_id == mcp_id, McpRecord.tenant_id == tenant_id, McpRecord.delete_flag != "Y"
         ).update(update_data)
@@ -357,6 +361,30 @@ def get_mcp_custom_headers_by_name_and_url(mcp_name: str, mcp_server: str, tenan
         )
 
         return mcp_record.custom_headers if mcp_record else None
+
+
+def get_mcp_ssl_verify_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str) -> bool:
+    """
+    Get whether TLS certificate verification is enabled, by name, URL and tenant ID
+
+    :param mcp_name: MCP name
+    :param mcp_server: MCP server URL
+    :param tenant_id: Tenant ID
+    :return: ssl_verify flag, True if not found (fail-safe verification)
+    """
+    with get_db_session() as session:
+        mcp_record = (
+            session.query(McpRecord)
+            .filter(
+                McpRecord.mcp_name == mcp_name,
+                McpRecord.mcp_server == mcp_server,
+                McpRecord.tenant_id == tenant_id,
+                McpRecord.delete_flag != "Y",
+            )
+            .first()
+        )
+
+        return bool(mcp_record.ssl_verify) if mcp_record else True
 
 
 def update_mcp_record_by_name_and_url(update_data, tenant_id: str, user_id: str, status: bool = None):

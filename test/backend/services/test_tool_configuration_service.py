@@ -1449,22 +1449,25 @@ class TestGetToolFromRemoteMcpServer:
         assert result[1].description == "Test tool 2 description"
 
         # Verify calls
-        mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", None, None, ssl_verify=True)
         mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         assert mock_client.list_tools.call_count == 1
 
+    @patch_import_context('management.services.tool.discovery.get_mcp_ssl_verify_by_name_and_url')
     @patch_import_context('management.services.tool.configuration.Client')
     @patch_import_context('management.services.tool.configuration.jsonref.replace_refs')
     @patch_import_context('management.services.tool.configuration._sanitize_function_name')
     @patch_import_context('management.services.tool.configuration._create_mcp_transport')
     @patch_import_context('management.services.tool.configuration.get_mcp_authorization_token_by_name_and_url')
     @patch_import_context('management.services.tool.configuration.get_mcp_custom_headers_by_name_and_url')
-    async def test_get_tool_from_remote_mcp_server_with_token_from_db(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+    async def test_get_tool_from_remote_mcp_server_with_token_from_db(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls, mock_get_ssl_verify):
         """Test getting tools from remote MCP server with authorization token from database"""
         # Mock authorization token from database
         mock_get_token.return_value = "Bearer token_from_db"
         # Mock custom headers from database (default to None)
         mock_get_headers.return_value = None
+        # Mock the stored TLS verification flag from database (default enabled)
+        mock_get_ssl_verify.return_value = True
 
         # Mock transport
         mock_transport = Mock()
@@ -1507,17 +1510,20 @@ class TestGetToolFromRemoteMcpServer:
         )
 
         # Verify transport was created with token
-        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token_from_db", None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token_from_db", None, ssl_verify=True)
 
+    @patch_import_context('management.services.tool.discovery.get_mcp_ssl_verify_by_name_and_url')
     @patch_import_context('management.services.tool.configuration.Client')
     @patch_import_context('management.services.tool.configuration.jsonref.replace_refs')
     @patch_import_context('management.services.tool.configuration._sanitize_function_name')
     @patch_import_context('management.services.tool.configuration._create_mcp_transport')
     @patch_import_context('management.services.tool.configuration.get_mcp_custom_headers_by_name_and_url')
-    async def test_get_tool_from_remote_mcp_server_with_provided_token(self, mock_get_headers, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+    async def test_get_tool_from_remote_mcp_server_with_provided_token(self, mock_get_headers, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls, mock_get_ssl_verify):
         """Test getting tools from remote MCP server with directly provided authorization token"""
         # Mock custom headers from database (returns None since we're providing our own headers)
         mock_get_headers.return_value = None
+        # Mock the stored TLS verification flag from database (default enabled)
+        mock_get_ssl_verify.return_value = True
 
         # Mock transport
         mock_transport = Mock()
@@ -1553,7 +1559,7 @@ class TestGetToolFromRemoteMcpServer:
         assert result[0].name == "test_tool"
 
         # Verify transport was created with provided token (not fetched from DB)
-        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer provided_token", None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer provided_token", None, ssl_verify=True)
 
     @patch_import_context('management.services.tool.configuration.Client')
     @patch_import_context('management.services.tool.configuration._create_mcp_transport')
@@ -1590,7 +1596,7 @@ class TestGetToolFromRemoteMcpServer:
             await get_tool_from_remote_mcp_server("test_server", "http://test-server.com")
 
         # Verify transport was created before connection error
-        mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", None, None, ssl_verify=True)
 
     @patch_import_context('management.services.tool.configuration.Client')
     @patch_import_context('management.services.tool.configuration.jsonref.replace_refs')
@@ -1627,18 +1633,21 @@ class TestGetToolFromRemoteMcpServer:
         assert "see tool description" in str(result[0].inputs)
         assert "string" in str(result[0].inputs)
 
+    @patch_import_context('management.services.tool.discovery.get_mcp_ssl_verify_by_name_and_url')
     @patch_import_context('management.services.tool.configuration.Client')
     @patch_import_context('management.services.tool.configuration.jsonref.replace_refs')
     @patch_import_context('management.services.tool.configuration._sanitize_function_name')
     @patch_import_context('management.services.tool.configuration._create_mcp_transport')
     @patch_import_context('management.services.tool.configuration.get_mcp_authorization_token_by_name_and_url')
     @patch_import_context('management.services.tool.configuration.get_mcp_custom_headers_by_name_and_url')
-    async def test_get_tool_from_remote_mcp_server_with_custom_headers_from_db(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+    async def test_get_tool_from_remote_mcp_server_with_custom_headers_from_db(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls, mock_get_ssl_verify):
         """Test getting tools from remote MCP server with custom headers fetched from database."""
         # Mock custom headers from database
         mock_get_headers.return_value = {"X-Custom-Header": "custom_value", "X-API-Key": "api_key_123"}
         # Mock authorization token (returns None since we're only testing custom_headers here)
         mock_get_token.return_value = None
+        # Mock the stored TLS verification flag from database (default enabled)
+        mock_get_ssl_verify.return_value = True
 
         # Mock transport
         mock_transport = Mock()
@@ -1682,20 +1691,23 @@ class TestGetToolFromRemoteMcpServer:
 
         # Verify transport was created with custom headers
         mock_create_transport.assert_called_once_with(
-            "http://test-server.com", None, {"X-Custom-Header": "custom_value", "X-API-Key": "api_key_123"}
+            "http://test-server.com", None, {"X-Custom-Header": "custom_value", "X-API-Key": "api_key_123"}, ssl_verify=True
         )
 
+    @patch_import_context('management.services.tool.discovery.get_mcp_ssl_verify_by_name_and_url')
     @patch_import_context('management.services.tool.configuration.Client')
     @patch_import_context('management.services.tool.configuration.jsonref.replace_refs')
     @patch_import_context('management.services.tool.configuration._sanitize_function_name')
     @patch_import_context('management.services.tool.configuration._create_mcp_transport')
     @patch_import_context('management.services.tool.configuration.get_mcp_authorization_token_by_name_and_url')
     @patch_import_context('management.services.tool.configuration.get_mcp_custom_headers_by_name_and_url')
-    async def test_get_tool_from_remote_mcp_server_with_token_and_custom_headers(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+    async def test_get_tool_from_remote_mcp_server_with_token_and_custom_headers(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls, mock_get_ssl_verify):
         """Test getting tools with both authorization token and custom headers from database."""
         # Mock both token and custom headers from database
         mock_get_token.return_value = "Bearer token_from_db"
         mock_get_headers.return_value = {"X-Custom-Header": "custom_value"}
+        # Mock the stored TLS verification flag from database (default enabled)
+        mock_get_ssl_verify.return_value = True
 
         # Mock transport
         mock_transport = Mock()
@@ -1736,7 +1748,7 @@ class TestGetToolFromRemoteMcpServer:
 
         # Verify transport was created with both token and custom headers
         mock_create_transport.assert_called_once_with(
-            "http://test-server.com", "Bearer token_from_db", {"X-Custom-Header": "custom_value"}
+            "http://test-server.com", "Bearer token_from_db", {"X-Custom-Header": "custom_value"}, ssl_verify=True
         )
 
     @patch_import_context('management.services.tool.configuration.Client')
@@ -1781,7 +1793,7 @@ class TestGetToolFromRemoteMcpServer:
         assert result[0].name == "test_tool"
 
         # Verify transport was created with provided custom headers (not None)
-        mock_create_transport.assert_called_once_with("http://test-server.com", None, {"X-Direct-Header": "direct_value"})
+        mock_create_transport.assert_called_once_with("http://test-server.com", None, {"X-Direct-Header": "direct_value"}, ssl_verify=True)
 
 
 class TestUpdateToolList:

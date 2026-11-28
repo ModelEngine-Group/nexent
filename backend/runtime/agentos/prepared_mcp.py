@@ -82,6 +82,19 @@ class PreparedMCP:
                     from backend.http.client import create_httpx_client
 
                     host["httpx_client_factory"] = create_httpx_client
+                else:
+                    record = next(
+                        (r for r in self._servers or [] if r["mcp_id"] == server_id), None
+                    )
+                    if record is not None and record.get("ssl_verify") is False:
+                        # TLS verification explicitly disabled on the record; the
+                        # internal factory (verify=False) is the skip-verification
+                        # client. Enabled records keep the SDK default verified
+                        # client. The factory is injected after revision validation
+                        # so stored binding revisions stay unchanged.
+                        from backend.http.client import create_httpx_client
+
+                        host["httpx_client_factory"] = create_httpx_client
                 self.hosts[server_id] = {**host, "allowed_tools": {}}
             allowed = self.hosts[server_id]["allowed_tools"]
             if allowed.setdefault(origin_name, tool.class_name) != tool.class_name:
