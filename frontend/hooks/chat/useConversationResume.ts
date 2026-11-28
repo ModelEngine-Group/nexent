@@ -3,13 +3,31 @@
 "use client";
 
 import { useEffect, useRef, type RefObject } from "react";
-import type { AssistantRuntime } from "@assistant-ui/react";
+import type { AssistantRuntime, ChatModelRunResult } from "@assistant-ui/react";
 import type { ConversationDetailReader } from "@/types/conversation";
 import type { Agent } from "@/types/agentConfig";
 import { conversationService } from "@/services/conversationService";
-import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
+import {
+  remoteChatModelAdapter,
+  type PersistedReplay,
+} from "@/app/newchat/adapter/remote-chat-model-adapter";
 import log from "@/lib/logger";
 import { RemoteConversationHistoryAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
+
+const REPLAY_RETRY_DELAYS = [250, 750];
+
+function waitForReplayRetry(delay: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delay);
+    signal.addEventListener("abort", finish, { once: true });
+  });
+}
 
 export function useConversationResume({
   runtime,
@@ -37,12 +55,18 @@ export function useConversationResume({
   invalidateDetail?: (id: string) => void;
 }) {
   const pendingResumes = useRef(new Set<number>());
+  const exhaustedReplay = useRef<
+    { threadId: string; messageId: string } | undefined
+  >(undefined);
   const runningConversationIdRef = useRef<number | undefined>(undefined);
   // A route change tears down the local stream, while the backend keeps the
   // conversation marked as streaming. Reconnect the assistant-ui runtime when
   // the historical load reports that state.
   useEffect(() => {
     const pending = pendingResumes.current;
+    if (exhaustedReplay.current?.threadId !== activeThreadId) {
+      exhaustedReplay.current = undefined;
+    }
     const numericConversationId = Number(activeConversationId);
     const previousRunningId = runningConversationIdRef.current;
     runningConversationIdRef.current =
@@ -87,6 +111,8 @@ export function useConversationResume({
         ) {
           return;
         }
+        const streamingId = String(conversation.streaming_message.message_id);
+        if (exhaustedReplay.current?.messageId === streamingId) return;
 
         pending.add(numericConversationId);
         const remoteId = String(numericConversationId);
@@ -97,7 +123,6 @@ export function useConversationResume({
         );
         const repository = await history.load();
         if (cancelled || runtime.thread.getState().isRunning) return;
-        const streamingId = String(conversation.streaming_message.message_id);
         const streaming = repository.messages.find(
           (entry) => entry.message.id === streamingId
         );
@@ -159,7 +184,9 @@ export function useConversationResume({
                 ? { agentVersionNo: selectedAgent.current_version_no }
                 : {}),
               onGenerationStopped: handleGenerationStopped,
-              loadPersistedReplay: async () => {
+              loadPersistedReplay: async (): Promise<
+                PersistedReplay | undefined
+              > => {
                 invalidateDetail?.(remoteId);
                 const detail = await loadDetail(remoteId);
                 const status = detail.message.find(
@@ -167,8 +194,16 @@ export function useConversationResume({
                     message.role === "assistant" &&
                     String(message.message_id) === streamingId
                 )?.status;
-                // History presents active messages as idle until they reconnect.
-                // Require a persisted terminal status before using its result.
+                if (
+                  status === "streaming" ||
+                  status === "pending" ||
+                  (!status &&
+                    String(detail.streaming_message?.message_id) ===
+                      streamingId &&
+                    detail.streaming_message?.status === "streaming")
+                ) {
+                  return { state: "active" };
+                }
                 if (
                   status !== "completed" &&
                   status !== "failed" &&
@@ -186,9 +221,12 @@ export function useConversationResume({
                 )?.message;
                 if (saved?.role === "assistant") {
                   return {
-                    content: saved.content,
-                    metadata: saved.metadata,
-                    status: saved.status,
+                    state: "terminal",
+                    result: {
+                      content: saved.content,
+                      metadata: saved.metadata,
+                      status: saved.status,
+                    },
                   };
                 }
               },
@@ -199,15 +237,55 @@ export function useConversationResume({
           },
           stream: async function* (options) {
             // Preserve the persisted output until the server replays the stream.
+            let content = streamingMessage.content;
             yield {
-              content: streamingMessage.content,
+              content,
               metadata: streamingMessage.metadata,
             };
-            const resumedRun = remoteChatModelAdapter.run(options);
-            if (Symbol.asyncIterator in resumedRun) {
-              yield* resumedRun;
-            } else {
-              yield await resumedRun;
+            for (let attempt = 0; !options.abortSignal.aborted; attempt++) {
+              const resumedRun = remoteChatModelAdapter.run({
+                ...options,
+                runConfig: {
+                  ...options.runConfig,
+                  custom: {
+                    ...options.runConfig.custom,
+                    resumePreviouslyActive: attempt > 0,
+                  },
+                },
+              });
+              const results:
+                AsyncIterable<ChatModelRunResult> | ChatModelRunResult[] =
+                Symbol.asyncIterator in resumedRun
+                  ? resumedRun
+                  : [await resumedRun];
+              let reconnect = false;
+              for await (const result of results) {
+                if (result.content?.length) content = result.content;
+                const update = result.content ? { ...result, content } : result;
+                const { awaitingReplay, ...custom } =
+                  result.metadata?.custom ?? {};
+                if (!awaitingReplay) {
+                  yield update;
+                  continue;
+                }
+                const metadata = { ...result.metadata, custom };
+                if (attempt >= REPLAY_RETRY_DELAYS.length) {
+                  // Let re-entry retry without immediately restarting this loop.
+                  exhaustedReplay.current = {
+                    threadId: activeThreadId,
+                    messageId: streamingId,
+                  };
+                  yield { ...update, metadata };
+                  return;
+                }
+                reconnect = true;
+                yield { ...update, status: { type: "running" }, metadata };
+                await waitForReplayRetry(
+                  REPLAY_RETRY_DELAYS[attempt],
+                  options.abortSignal
+                );
+              }
+              if (!reconnect) return;
             }
           },
         });

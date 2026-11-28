@@ -2,7 +2,7 @@ schema_version: '1.0'
 case_id: WB-SESSION-RECOVERY-D4-001
 preparation:
   families: []
-notes: Self-contained controlled browser routes own creator histories and delayed response gates. Finally releases both gates and closes the page; no backend resource or provider is used.
+notes: Self-contained controlled browser routes own creator histories and delayed response gates. Cleanup releases all gates and closes the page without backend resources or model providers.
 implementations:
 - framework: playwright
   file: test.spec.ts

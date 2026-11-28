@@ -23,8 +23,8 @@ case:
     action: Submit the first card and return a second metadata-only card reusing its question IDs; submit the second card.
     expected: Both cards remain visible, only the latest unanswered card is editable and both submissions contain the correct questions and answers.
   - order: 3
-    action: Leave a running creator, return while it is active and retry a failed turn before leaving again.
-    expected: The page reconnects to the owned run without replaying generation and restores the retry result under the original user turn.
+    action: Retry a failed turn, leave while the creator runs, and return while its first replay is unavailable and its saved assistant message is still streaming.
+    expected: The partial reply has no terminal badge. The page reconnects to the same assistant message without replaying generation and restores the retry result under the original user turn.
   - order: 4
     action: Reconnect a creator answer containing multiple delta fragments and an explicit complete confirmation, then refresh its history.
     expected: The entire answer remains identical before and after refresh, with no fragment-only replacement or duplicate body.
@@ -48,7 +48,7 @@ case:
     steps: [1]
     expected_results: [1]
   - id: AC-02
-    description: Consecutive cards and retry reconnect preserve their identities.
+    description: Consecutive cards and retry reconnect preserve their identities, and an unavailable replay does not mark the still-active reply terminal.
     steps: [2, 3]
     expected_results: [2, 3]
     forbidden_side_effects: [1]

@@ -418,12 +418,17 @@ export interface Nl2aMessage {
   content: Nl2aPayload;
 }
 
+export type PersistedReplay =
+  | { state: "active" }
+  | { state: "terminal"; result: ChatModelRunResult };
+
 interface NexentRunConfig {
   modelPreferenceScope?: string;
   threadId?: string;
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
   onGenerationStopped?: (conversationId: number) => void;
-  loadPersistedReplay?: () => Promise<ChatModelRunResult | undefined>;
+  loadPersistedReplay?: () => Promise<PersistedReplay | undefined>;
+  resumePreviouslyActive?: boolean;
   onRunId?: (runId: string) => void;
   onRunStarted?: () => void;
   onNl2AgentCardResult?: (card: Nl2aMessage | null) => void;
@@ -1698,6 +1703,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         log.warn("[ChatModelAdapter] Persisted replay unavailable", error);
       }
     };
+    const awaitingReplay = (
+      result: ChatModelRunResult = {}
+    ): ChatModelRunResult => ({
+      ...result,
+      // A finished local subscription must not be promoted to a completed turn.
+      status: { type: "incomplete", reason: "other" },
+      metadata: {
+        ...result.metadata,
+        custom: { ...result.metadata?.custom, awaitingReplay: true },
+      },
+    });
     // Freeze the controls before draft creation or other asynchronous work.
     const creationConfig = custom?.creationWorkbenchConfig
       ? structuredClone(custom.creationWorkbenchConfig)
@@ -2103,21 +2119,28 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     if ("type" in agentResponse) {
       custom?.onNl2AgentCardResult?.(null);
-      cleanupAbortHandler();
-      const payload = agentResponse.data;
-      if (
-        payload &&
-        typeof payload === "object" &&
-        "replay_unavailable" in payload &&
-        payload.replay_unavailable === true
-      ) {
-        const saved = await loadPersistedReplay();
-        if (saved) yield saved;
+      try {
+        const payload = agentResponse.data;
+        if (
+          isResume &&
+          payload &&
+          typeof payload === "object" &&
+          "replay_unavailable" in payload &&
+          payload.replay_unavailable === true
+        ) {
+          const saved = await loadPersistedReplay();
+          if (abortSignal.aborted) return;
+          if (saved?.state === "terminal") yield saved.result;
+          else if (saved?.state === "active" || custom?.resumePreviouslyActive)
+            yield awaitingReplay();
+        }
+        log.log(
+          "[ChatModelAdapter] JSON response (resume finished):",
+          agentResponse.data
+        );
+      } finally {
+        cleanupAbortHandler();
       }
-      log.log(
-        "[ChatModelAdapter] JSON response (resume finished):",
-        agentResponse.data
-      );
       return;
     }
 
@@ -2141,11 +2164,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const streamTokenCounts = new Map<string, StepTokenCount>();
     let terminalOutcome: string | undefined;
     let replayUnavailable = false;
+    let replayFallbackOutcome: string | undefined;
     const updateResumeStatus = (chunk: SseChunk) => {
       replayUnavailable ||= chunk.replayUnavailable === true;
-      if (["completed", "failed", "stopped"].includes(chunk.content)) {
-        terminalOutcome = chunk.content;
-      }
+      if (!["completed", "failed", "stopped"].includes(chunk.content)) return;
+      if (chunk.replayUnavailable) replayFallbackOutcome = chunk.content;
+      else terminalOutcome = chunk.content;
     };
     const parentReasoning = createReasoningAccumulator(contentParts);
     const nl2SkillFilePartIndices = new Map<string, number>();
@@ -2686,6 +2710,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (terminalOutcome) return messageExecutionStatus(terminalOutcome);
       if (userAborted) return messageExecutionStatus("stopped");
       if (!streamFinished) return messageExecutionStatus("streaming");
+      if (replayFallbackOutcome)
+        return messageExecutionStatus(replayFallbackOutcome);
       // Legacy streams without a terminal event infer their outcome at EOF.
       return messageExecutionStatus(
         contentParts.some((part) => part.isError) ? "failed" : "completed"
@@ -3772,8 +3798,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
       if (isResume && (replayUnavailable || !terminalOutcome)) {
         const saved = await loadPersistedReplay();
-        if (saved) {
-          yield saved;
+        if (abortSignal.aborted) return;
+        if (saved?.state === "terminal") {
+          yield saved.result;
+          return;
+        }
+        if (saved?.state === "active" || custom?.resumePreviouslyActive) {
+          yield awaitingReplay(
+            buildStreamResult(collapseSubAgentParts(contentParts))
+          );
           return;
         }
       }

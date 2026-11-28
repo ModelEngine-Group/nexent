@@ -72,7 +72,10 @@ it.each(["json", "sse", "sse-tail"])(
   "replaces incomplete %s replay with the persisted answer exactly once",
   async (transport) => {
     const loadPersistedReplay = vi.fn().mockResolvedValue({
-      content: [{ type: "text", text: "persisted prefix and tail" }],
+      state: "terminal",
+      result: {
+        content: [{ type: "text", text: "persisted prefix and tail" }],
+      },
     });
     const results = await consume(
       transport === "json"

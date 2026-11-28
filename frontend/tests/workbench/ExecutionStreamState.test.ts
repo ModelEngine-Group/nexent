@@ -157,13 +157,33 @@ it("uses the saved terminal result after a resumed stream ends without one", asy
     content: [{ type: "text", text: "Saved answer" }],
     status: { type: "complete", reason: "stop" },
   };
-  const loadPersistedReplay = vi.fn().mockResolvedValue(saved);
+  const loadPersistedReplay = vi.fn().mockResolvedValue({
+    state: "terminal",
+    result: saved,
+  });
   const result = await run(
     [{ type: "error", content: "Intermediate error" }],
     options("12", { resume: true, loadPersistedReplay })
   );
   expect(loadPersistedReplay).toHaveBeenCalledOnce();
   expect(result).toEqual(saved);
+});
+
+it("preserves received content when the resume detail query rejects", async () => {
+  const loadPersistedReplay = vi
+    .fn()
+    .mockRejectedValue(new Error("detail timeout"));
+  const result = await run(
+    [{ type: "final_answer", content: "Received answer" }],
+    options("12", { resume: true, loadPersistedReplay })
+  );
+  expect(loadPersistedReplay).toHaveBeenCalledOnce();
+  expect(result).toMatchObject({
+    content: [
+      expect.objectContaining({ type: "text", text: "Received answer" }),
+    ],
+    status: { type: "complete", reason: "stop" },
+  });
 });
 
 it("keeps the legacy failure fallback at EOF without a terminal event", async () => {
