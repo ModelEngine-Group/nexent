@@ -21,21 +21,18 @@ from management.utils.request_context import get_request_id
 
 logger = logging.getLogger(__name__)
 
-
-def is_northbound_path(path: str) -> bool:
-    """Whether a request path belongs to the public northbound namespace."""
-    normalized = path or ""
-    return normalized == NORTHBOUND_PATH_PREFIX or normalized.startswith(f"{NORTHBOUND_PATH_PREFIX}/")
+# The lane policy is shared Web-layer plumbing: the ops ``/nb`` mirror selects
+# the same credential kind without importing this (management-only) module.
+# Re-exported here so existing management call sites keep working.
+from backend.http.server.northbound import (  # noqa: F401 - re-exported
+    credential_kind_for_path,
+    is_northbound_path,
+)
 
 
 def _request_path(request: Request) -> str:
     scope_path = request.scope.get("path") if request is not None else ""
     return scope_path or (request.url.path if request is not None else "")
-
-
-def credential_kind_for_path(path: str) -> CredentialKind:
-    """Select the credential policy from the path, never from unverified claims."""
-    return CredentialKind.API_KEY if is_northbound_path(path) else CredentialKind.SESSION
 
 
 async def unified_identity(

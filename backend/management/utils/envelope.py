@@ -8,16 +8,14 @@ gate wraps it:
 
     return northbound_envelope(result, request_id)
 
-The internal ``/api`` contract (``{code, message, data}``) is produced by the
-internal routes themselves; gates share the service implementations but never
-rewrite internal responses.
+The implementation lives in the shared Web layer
+(``backend/http/server/northbound.py``) because the ops ``/nb`` mirror wraps
+responses with the same shape; re-exported here so the existing management
+call sites keep working. The internal ``/api`` contract (``{code, message,
+data}``) is produced by the internal routes themselves; gates share the
+service implementations but never rewrite internal responses.
 """
 
-from typing import Any
+from backend.http.server.northbound import SUCCESS_MESSAGE, northbound_envelope  # noqa: F401 - re-exported
 
-SUCCESS_MESSAGE = "success"
-
-
-def northbound_envelope(data: Any = None, request_id: str = "", message: str = SUCCESS_MESSAGE) -> dict:
-    """Build the northbound ``{message, data, requestId}`` envelope."""
-    return {"message": message, "data": data, "requestId": request_id}
+__all__ = ["SUCCESS_MESSAGE", "northbound_envelope"]

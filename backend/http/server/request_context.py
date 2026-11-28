@@ -1,10 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Request correlation ids for the shared Web layer.
+"""Request correlation ids and client-address resolution for the shared Web layer.
 
 The shared Web layer writes ``requestId`` into error bodies, so the helper has
-to live with it rather than behind a business service. ``get_request_id`` is
-pure HTTP plumbing: no settings, no database, no business import.
+to live with it rather than behind a business service. ``get_request_id`` and
+``get_client_ip`` are pure HTTP plumbing: no settings, no database, no
+business import.
 """
 
 import uuid
@@ -33,3 +34,24 @@ def get_request_id(request: Optional[Request] = None) -> str:
         if state_value:
             return str(state_value)
     return str(uuid.uuid4())
+
+
+def get_client_ip(request: Optional[Request]) -> str:
+    """Resolve the client IP: first hop of X-Forwarded-For, then X-Real-IP, then peer.
+
+    X-Forwarded-For is attacker-controllable, so the result is a lead for
+    investigation, not proof of origin. Moved here from the management utils
+    so the shared security audit layer can resolve it without importing a
+    business service; the old location re-exports it.
+    """
+    if request is None:
+        return ""
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        first_hop = forwarded_for.split(",")[0].strip()
+        if first_hop:
+            return first_hop
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else ""
