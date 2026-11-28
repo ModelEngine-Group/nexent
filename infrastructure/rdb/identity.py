@@ -2,8 +2,7 @@
 """Bounded, read-only identity snapshots without business ORM or SDK imports."""
 
 import asyncio
-from datetime import datetime
-from time import time
+from datetime import UTC, datetime
 
 import asyncpg
 
@@ -94,7 +93,8 @@ class IdentityRepository:
             session_active = bool(await connection.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM nexent.user_local_session_t "
                 "WHERE session_id=$1 AND user_id=$2 AND revoked_at IS NULL AND delete_flag='N' "
-                "AND idle_expires_at>$3 AND absolute_expires_at>$3)", sid, user_id, int(time())))
+                "AND idle_expires_at>$3 AND absolute_expires_at>$3)",
+                sid, user_id, datetime.now(UTC).replace(tzinfo=None)))
         elif sid:
             # CAS stores naive local timestamps today. Gateway and Management
             # deployments use the same TZ; preserve the existing expiry contract.

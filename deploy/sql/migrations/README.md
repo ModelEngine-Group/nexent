@@ -53,11 +53,12 @@ safe to re-run.
 Newer migrations remain separate until their minor-version history is
 consolidated.
 
-For the v2.9.0 release, the resource denylist and remote MCP SSL verification
-sections follow the runtime replica section in `v2.9.0_merged_migrations.sql`.
-The local session table and its audit fields follow the MCP SSL section. These
-two local session sections also support environments where the session table
-or audit columns already exist.
+For the v2.9.0 release, the resource denylist migration is embedded at the end of
+`v2.9.0_merged_migrations.sql`, after the runtime replica section and the system
+configuration table definition. It has no separate migration file.
+
+`v2.9.0_020_local_session_renewal.sql` creates the local session table, including
+its audit fields. The application writes UTC values to its timestamp columns.
 
 The remote MCP per-server TLS verification switch (`ssl_verify` on
 `nexent.mcp_record_t`) is embedded as the final section of

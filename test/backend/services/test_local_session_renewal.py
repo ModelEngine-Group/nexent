@@ -4,7 +4,7 @@
 import hashlib
 import time
 from contextlib import nullcontext
-from types import SimpleNamespace
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock
 
 import jwt
@@ -30,11 +30,14 @@ def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def utc_at(epoch_seconds):
+    return datetime.fromtimestamp(epoch_seconds, UTC).replace(tzinfo=None)
+
+
 @pytest.fixture
 def clock(monkeypatch):
     now = int(time.time())
-    frozen = SimpleNamespace(time=lambda: now)
-    monkeypatch.setattr(local_session, "time", frozen)
+    monkeypatch.setattr(local_session, "_utc_now", lambda: utc_at(now))
     for module in (local_session, session):
         monkeypatch.setattr(module, "JWT_SECRET", SECRET)
         monkeypatch.setattr(module, "JWT_ISSUER", ISSUER)
@@ -58,8 +61,8 @@ def read_access(token):
 def row(clock):
     return {
         "refresh_digest": digest(REFRESH),
-        "idle_expires_at": clock + 300,
-        "absolute_expires_at": clock + 7200,
+        "idle_expires_at": utc_at(clock + 300),
+        "absolute_expires_at": utc_at(clock + 7200),
         "revoked_at": None,
         "retry_until": None,
     }
@@ -96,11 +99,14 @@ def test_issue_signs_token_and_persists_only_refresh_digest(monkeypatch, clock, 
     assert result["refresh_expires_at"] == clock + local_session.IDLE_SECONDS
     cleanup, insert = db.execute.call_args_list
     assert "LIMIT 32 FOR UPDATE SKIP LOCKED" in str(cleanup.args[0])
-    assert cleanup.args[1] == {"now": clock}
-    assert "created_by, updated_by" in str(insert.args[0])
+    assert cleanup.args[1] == {"now": utc_at(clock)}
+    insert_sql = str(insert.args[0])
+    assert "created_by, create_time, updated_by, update_time" in insert_sql
+    assert "created_at" not in insert_sql and "last_refreshed_at" not in insert_sql
     assert insert.args[1] == {
         "sid": claims["sid"], "uid": USER_ID, "digest": digest(result["refresh_token"]),
-        "now": clock, "idle": result["refresh_expires_at"], "absolute": clock + local_session.ABSOLUTE_SECONDS,
+        "now": utc_at(clock), "idle": utc_at(result["refresh_expires_at"]),
+        "absolute": utc_at(clock + local_session.ABSOLUTE_SECONDS),
     }
     assert result["refresh_token"] not in insert.args[1].values()
     if version is None:
@@ -111,7 +117,7 @@ def test_issue_signs_token_and_persists_only_refresh_digest(monkeypatch, clock, 
 
 def test_rotate_persists_one_successor_and_retry_returns_identical_tokens(monkeypatch, clock, row):
     access = access_at(clock - 60, lifetime=300)
-    row["absolute_expires_at"] = clock + 600
+    row["absolute_expires_at"] = utc_at(clock + 600)
     db = renewal_database(monkeypatch, row)
 
     result = local_session.rotate_local_session(access, REFRESH, REQUEST_ID)
@@ -129,7 +135,7 @@ def test_rotate_persists_one_successor_and_retry_returns_identical_tokens(monkey
     assert update["replacement"] == digest(result["refresh_token"])
     assert update["previous_refresh"] == digest(REFRESH)
     assert update["previous_access"] == digest(access)
-    assert update["retry_until"] == clock + local_session.RETRY_SECONDS
+    assert update["retry_until"] == utc_at(clock + local_session.RETRY_SECONDS)
     assert update["request_id"] == REQUEST_ID
 
     rotated = {
@@ -146,7 +152,7 @@ def test_rotate_persists_one_successor_and_retry_returns_identical_tokens(monkey
         (access, None, {}),
         (access, "different-request-id", {}),
         (access_at(clock - 120), REQUEST_ID, {}),
-        (access, REQUEST_ID, {"access_expires_at": clock}),
+        (access, REQUEST_ID, {"access_expires_at": utc_at(clock)}),
         (access, REQUEST_ID, {"rotation_nonce": "invalidated-nonce"}),
     ):
         db = renewal_database(monkeypatch, {**rotated, **changes})
@@ -154,13 +160,13 @@ def test_rotate_persists_one_successor_and_retry_returns_identical_tokens(monkey
             local_session.rotate_local_session(supplied_access, REFRESH, request_id)
         assert db.execute.call_count == 3
 
-    db = renewal_database(monkeypatch, {**rotated, "retry_until": clock})
+    db = renewal_database(monkeypatch, {**rotated, "retry_until": utc_at(clock)})
     with pytest.raises(UnauthorizedError, match="Invalid refresh token"):
         local_session.rotate_local_session(access, REFRESH, REQUEST_ID)
     assert db.execute.call_count == 3
 
     for seconds_later in (30, 60, 90):
-        monkeypatch.setattr(local_session.time, "time", lambda now=clock + seconds_later: now)
+        monkeypatch.setattr(local_session, "_utc_now", lambda now=clock + seconds_later: utc_at(now))
         db = renewal_database(monkeypatch, rotated)
         assert local_session.rotate_local_session(
             result["access_token"], result["refresh_token"], f"activity-request-{seconds_later}",
@@ -228,12 +234,12 @@ def test_rejects_inactive_owner_or_revised_credentials(monkeypatch, clock, row, 
 def test_rejects_inactive_or_unmatched_session_without_writing(monkeypatch, clock, row, state):
     access = access_at(clock - 60)
     if state == "expired-during-lock":
-        monkeypatch.setattr(local_session, "time", SimpleNamespace(time=lambda: clock + 3540))
+        monkeypatch.setattr(local_session, "_utc_now", lambda: utc_at(clock + 3540))
     elif state != "missing":
         row.update({
-            "revoked": {"revoked_at": clock},
-            "idle": {"idle_expires_at": clock},
-            "absolute": {"absolute_expires_at": clock},
+            "revoked": {"revoked_at": utc_at(clock)},
+            "idle": {"idle_expires_at": utc_at(clock)},
+            "absolute": {"absolute_expires_at": utc_at(clock)},
             "mismatch": {"refresh_digest": digest("elsewhere")},
         }[state])
     db = renewal_database(monkeypatch, None if state == "missing" else row)
@@ -311,7 +317,8 @@ def test_management_gateway_lookup_selects_the_session_store(mocker, sid, active
 def test_session_repository_reads_active_owner_and_revokes_only_that_session(monkeypatch, clock, database_value):
     db = Mock()
     db.execute.return_value.scalar.return_value = database_value
-    monkeypatch.setattr(session_db, "time", SimpleNamespace(time=lambda: clock))
+    now = Mock(return_value=datetime.fromtimestamp(clock, UTC))
+    monkeypatch.setattr(session_db, "datetime", Mock(now=now))
     monkeypatch.setattr(session_db, "get_db_session", lambda: nullcontext(db))
 
     assert session_db.is_local_session_active(SID, USER_ID) is bool(database_value)
@@ -322,6 +329,9 @@ def test_session_repository_reads_active_owner_and_revokes_only_that_session(mon
         sql, params = call.args
         assert "session_id = :sid AND user_id = :uid" in str(sql)
         assert "revoked_at IS NULL AND delete_flag = 'N'" in str(sql)
-        assert params == {"sid": SID, "uid": USER_ID, "now": clock}
+        assert params == {"sid": SID, "uid": USER_ID, "now": utc_at(clock)}
+    assert now.call_count == 2
+    now.assert_called_with(UTC)
     assert "idle_expires_at > :now AND absolute_expires_at > :now" in str(select_call.args[0])
     assert "revoked_at = :now, updated_by = :uid" in str(revoke_call.args[0])
+    assert "update_time = :now" in str(revoke_call.args[0])

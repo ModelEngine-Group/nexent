@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import re
 import secrets
-import time
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import jwt
@@ -39,7 +39,18 @@ def _successor(previous: str, sid: str, nonce: str) -> str:
     return hmac.new(key, f"{sid}:{nonce}:{previous}".encode(), "sha256").hexdigest()
 
 
+def _utc_now() -> datetime:
+    """Use UTC without a timezone offset and match JWT second precision."""
+    return datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+
+
+def _epoch_seconds(value: datetime) -> int:
+    return int(value.replace(tzinfo=UTC).timestamp())
+
+
 def _response(user_id, version, sid, refresh, issued_at, access_exp, refresh_exp):
+    issued_at = _epoch_seconds(issued_at)
+    access_exp = _epoch_seconds(access_exp)
     access = generate_session_jwt(
         user_id, access_exp - issued_at, sid, issued_at=issued_at, token_version=version,
     )
@@ -49,7 +60,7 @@ def _response(user_id, version, sid, refresh, issued_at, access_exp, refresh_exp
         "refresh_token": refresh,
         "expires_at": min(access_exp, issued_at + display_lifetime),
         "expires_in_seconds": min(access_exp - issued_at, display_lifetime),
-        "refresh_expires_at": refresh_exp,
+        "refresh_expires_at": _epoch_seconds(refresh_exp),
     }
 
 
@@ -58,8 +69,9 @@ def issue_local_session(user_id: str, token_version: int | None = None) -> dict:
         token_version = require_active_account(user_id)["token_version"]
     sid = LOCAL_SESSION_PREFIX + uuid4().hex
     refresh = secrets.token_urlsafe(32)
-    now = int(time.time())
-    idle = now + min(IDLE_SECONDS, ABSOLUTE_SECONDS)
+    now = _utc_now()
+    idle = now + timedelta(seconds=min(IDLE_SECONDS, ABSOLUTE_SECONDS))
+    access_exp = min(now + timedelta(seconds=JWT_EXPIRY_SECONDS), idle)
     with get_db_session() as db:
         db.execute(text("""
             DELETE FROM nexent.user_local_session_t WHERE session_id IN (
@@ -70,12 +82,12 @@ def issue_local_session(user_id: str, token_version: int | None = None) -> dict:
         """), {"now": now})
         db.execute(text("""
             INSERT INTO nexent.user_local_session_t
-                (session_id, user_id, refresh_digest, created_at, last_refreshed_at,
-                 idle_expires_at, absolute_expires_at, created_by, updated_by)
-            VALUES (:sid, :uid, :digest, :now, :now, :idle, :absolute, :uid, :uid)
+                (session_id, user_id, refresh_digest, idle_expires_at, absolute_expires_at,
+                 created_by, create_time, updated_by, update_time)
+            VALUES (:sid, :uid, :digest, :idle, :absolute, :uid, :now, :uid, :now)
         """), {"sid": sid, "uid": user_id, "digest": _digest(refresh), "now": now,
-               "idle": idle, "absolute": now + ABSOLUTE_SECONDS})
-        return _response(user_id, token_version, sid, refresh, now, min(now + JWT_EXPIRY_SECONDS, idle), idle)
+               "idle": idle, "absolute": now + timedelta(seconds=ABSOLUTE_SECONDS)})
+        return _response(user_id, token_version, sid, refresh, now, access_exp, idle)
 
 
 def _verified_claims(access_token: str) -> dict:
@@ -118,8 +130,8 @@ def rotate_local_session(access_token: str, refresh_token: str, request_id: str 
             SELECT * FROM nexent.user_local_session_t
             WHERE session_id = :sid AND user_id = :uid AND delete_flag = 'N' FOR UPDATE
         """), {"sid": sid, "uid": uid}).mappings().one_or_none()
-        now = int(time.time())
-        if (claims["exp"] <= now or row is None or row["revoked_at"] is not None
+        now = _utc_now()
+        if (claims["exp"] <= _epoch_seconds(now) or row is None or row["revoked_at"] is not None
                 or min(row["idle_expires_at"], row["absolute_expires_at"]) <= now):
             raise UnauthorizedError("Local session has expired or been revoked")
 
@@ -137,22 +149,23 @@ def rotate_local_session(access_token: str, refresh_token: str, request_id: str 
                 raise RefreshConflict("Session refresh was already processed")
             raise UnauthorizedError("Invalid refresh token")
 
-        if claims["exp"] >= row["absolute_expires_at"]:
+        if claims["exp"] >= _epoch_seconds(row["absolute_expires_at"]):
             return None
 
         nonce = secrets.token_hex(16)
         replacement = _successor(refresh_token, sid, nonce)
-        idle = min(now + IDLE_SECONDS, row["absolute_expires_at"])
-        access_exp = min(now + JWT_EXPIRY_SECONDS, idle)
+        idle = min(now + timedelta(seconds=IDLE_SECONDS), row["absolute_expires_at"])
+        access_exp = min(now + timedelta(seconds=JWT_EXPIRY_SECONDS), idle)
         db.execute(text("""
             UPDATE nexent.user_local_session_t
             SET refresh_digest = :replacement, previous_refresh_digest = :previous_refresh,
                 previous_access_digest = :previous_access, request_id = :request_id,
-                retry_until = :retry_until, rotation_nonce = :nonce, last_refreshed_at = :now,
+                retry_until = :retry_until, rotation_nonce = :nonce,
                 idle_expires_at = :idle, access_issued_at = :now, access_expires_at = :access_exp,
-                updated_by = :uid, update_time = timezone('UTC', CURRENT_TIMESTAMP)
+                updated_by = :uid, update_time = :now
             WHERE session_id = :sid
         """), {"replacement": _digest(replacement), "previous_refresh": refresh_digest,
-               "previous_access": access_digest, "request_id": request_id, "retry_until": now + RETRY_SECONDS,
+               "previous_access": access_digest, "request_id": request_id,
+               "retry_until": now + timedelta(seconds=RETRY_SECONDS),
                "nonce": nonce, "now": now, "idle": idle, "access_exp": access_exp, "sid": sid, "uid": uid})
         return _response(uid, version, sid, replacement, now, access_exp, idle)

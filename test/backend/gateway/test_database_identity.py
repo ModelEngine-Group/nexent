@@ -4,6 +4,7 @@
 import asyncio
 import ast
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -88,7 +89,10 @@ async def test_provider_sanitizes_storage_failures(error, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("active", [True, False])
-async def test_gateway_queries_local_session_state_before_authorizing(active):
+async def test_gateway_queries_local_session_state_before_authorizing(active, mocker):
+    current = datetime(2026, 11, 28, 9, 0, tzinfo=UTC)
+    clock = mocker.patch("infrastructure.rdb.identity.datetime")
+    clock.now.return_value = current
     record = snapshot()
     repo, connection, _, _ = repository([[record["account"]], [record["membership"]]], session_active=active)
     provider = DatabaseIdentityProvider(repo)
@@ -107,7 +111,8 @@ async def test_gateway_queries_local_session_state_before_authorizing(active):
     assert "revoked_at IS NULL" in sql and "delete_flag='N'" in sql
     assert "idle_expires_at>$3" in sql and "absolute_expires_at>$3" in sql
     assert (session_id, user_id) == ("local:fixture", "u1")
-    assert isinstance(now, int)
+    clock.now.assert_called_once_with(UTC)
+    assert now == current.replace(tzinfo=None)
 
 
 class Pool:

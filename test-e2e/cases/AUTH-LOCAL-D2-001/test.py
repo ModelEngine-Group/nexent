@@ -4,7 +4,7 @@
 import asyncio
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import jwt
@@ -191,7 +191,13 @@ def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, cap
     assert len(independent_before) == 1
     issued = original_row()
     assert issued["created_by"] == issued["updated_by"] == owner
-    assert issued["create_time"] <= issued["update_time"]
+    assert issued["create_time"] == issued["update_time"]
+    assert {"created_at", "last_refreshed_at"}.isdisjoint(issued)
+    assert issued["create_time"] == datetime.fromtimestamp(
+        claims_for(original["access_token"])["iat"], UTC,
+    ).replace(tzinfo=None)
+    assert issued["idle_expires_at"] == datetime.fromtimestamp(original["refresh_expires_at"], UTC).replace(tzinfo=None)
+    assert issued["absolute_expires_at"] > issued["idle_expires_at"]
     assert issued["delete_flag"] == "N"
 
     def refresh(access, refresh_token, request_id):
@@ -218,6 +224,10 @@ def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, cap
     assert rotated["created_by"] == rotated["updated_by"] == owner
     assert rotated["create_time"] == issued["create_time"]
     assert rotated["update_time"] >= issued["update_time"]
+    replacement_claims = claims_for(replacement["access_token"])
+    assert rotated["access_issued_at"] == datetime.fromtimestamp(replacement_claims["iat"], UTC).replace(tzinfo=None)
+    assert rotated["access_expires_at"] == datetime.fromtimestamp(replacement_claims["exp"], UTC).replace(tzinfo=None)
+    assert rotated["retry_until"] > rotated["access_issued_at"]
     retry = refresh(original["access_token"], original["refresh_token"], ids[winner])
     assert retry.status_code == 200
     assert retry.json()["data"]["session"] == replacement
@@ -259,6 +269,7 @@ def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, cap
     assert revoked_attempt.status_code == 401
     revoked = original_row()
     assert revoked["revoked_at"] is not None
+    assert revoked["revoked_at"] == revoked["update_time"]
     assert revoked["updated_by"] == owner
     assert revoked["update_time"] >= rotated["update_time"]
     assert client.get("/api/user/current_user_id", headers=bearer(other["access_token"])).status_code == 200
