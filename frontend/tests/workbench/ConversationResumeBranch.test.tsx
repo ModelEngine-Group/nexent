@@ -62,9 +62,9 @@ function detail(partial: boolean, completed = false): ApiConversationDetail {
   };
 }
 
-it("refreshes only the originally resumed assistant when replay is lost", async () => {
+it.each([true, false])("restores only the original assistant with a saved terminal status (completed: %s)", async (completed) => {
   const initial = detail(false);
-  const saved = detail(true, true);
+  const saved = detail(true, completed);
   saved.message.push({
     role: "assistant",
     message_id: 8,
@@ -74,12 +74,16 @@ it("refreshes only the originally resumed assistant when replay is lost", async 
   });
   const loadDetail = vi.fn().mockResolvedValueOnce(initial).mockResolvedValueOnce(saved);
   const invalidateDetail = vi.fn();
+  const replayLoaded = vi.fn();
   vi.mocked(remoteChatModelAdapter.run).mockImplementation(async function* (options) {
     expect(options.runConfig?.custom?.resumeMessageId).toBe(6);
-    const load = options.runConfig?.custom?.loadPersistedReplay as () => Promise<{
-      content: readonly { type: "text"; text: string }[];
-    }>;
-    yield await load();
+    const replay = await (
+      options.runConfig?.custom?.loadPersistedReplay as () => Promise<
+        { content: readonly { type: "text"; text: string }[] } | undefined
+      >
+    )();
+    replayLoaded(replay);
+    if (replay) yield replay;
   });
   const runtime = new AssistantRuntimeImpl(
     new LocalRuntimeCore({ adapters: { chatModel: remoteChatModelAdapter } }, undefined)
@@ -102,9 +106,22 @@ it("refreshes only the originally resumed assistant when replay is lost", async 
     invalidateDetail,
   }));
   try {
-    await waitFor(() => expect(runtime.thread.getState().messages.at(-1)?.content).toEqual([
-      expect.objectContaining({ type: "text", text: "answer-6" }),
-    ]));
+    await waitFor(() => expect(replayLoaded).toHaveBeenCalledOnce());
+    if (completed) {
+      expect(replayLoaded).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: [expect.objectContaining({ type: "text", text: "answer-6" })],
+          status: expect.objectContaining({ type: "complete" }),
+        })
+      );
+      await waitFor(() =>
+        expect(runtime.thread.getState().messages.at(-1)?.content).toEqual([
+          expect.objectContaining({ type: "text", text: "answer-6" }),
+        ])
+      );
+    } else {
+      expect(replayLoaded).toHaveBeenCalledWith(undefined);
+    }
     expect(invalidateDetail).toHaveBeenCalledWith("42");
     expect(loadDetail).toHaveBeenCalledTimes(2);
   } finally {

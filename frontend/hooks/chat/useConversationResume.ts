@@ -161,10 +161,25 @@ export function useConversationResume({
               onGenerationStopped: handleGenerationStopped,
               loadPersistedReplay: async () => {
                 invalidateDetail?.(remoteId);
+                const detail = await loadDetail(remoteId);
+                const status = detail.message.find(
+                  (message) =>
+                    message.role === "assistant" &&
+                    String(message.message_id) === streamingId
+                )?.status;
+                // History presents active messages as idle until they reconnect.
+                // Require a persisted terminal status before using its result.
+                if (
+                  status !== "completed" &&
+                  status !== "failed" &&
+                  status !== "stopped"
+                ) {
+                  return;
+                }
                 const persistedHistory = new RemoteConversationHistoryAdapter(
                   () => remoteId,
                   async () => ({ remoteId }),
-                  () => loadDetail(remoteId)
+                  async () => detail
                 );
                 const saved = (await persistedHistory.load()).messages.find(
                   (entry) => entry.message.id === streamingId

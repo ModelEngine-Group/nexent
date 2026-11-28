@@ -34,7 +34,7 @@ function options(
   } as unknown as ChatModelRunOptions;
 }
 
-async function run(events: object[], runOptions = options()) {
+async function collectResults(events: object[], runOptions = options()) {
   api.runAgent.mockResolvedValueOnce(
     new ReadableStream<Uint8Array>({
       start(c) {
@@ -51,7 +51,11 @@ async function run(events: object[], runOptions = options()) {
   const results = [];
   if (Symbol.asyncIterator in generator)
     for await (const result of generator) results.push(result);
-  return results.at(-1)!;
+  return results;
+}
+
+async function run(events: object[], runOptions = options()) {
+  return (await collectResults(events, runOptions)).at(-1)!;
 }
 
 it("acknowledges only admitted sends, never resume or HTTP rejection", async () => {
@@ -82,11 +86,12 @@ it("acknowledges only admitted sends, never resume or HTTP rejection", async () 
 it.each(["failed", "stopped"])(
   "retains the real %s terminal outcome",
   async (outcome) => {
-    const result = await run([
+    const results = await collectResults([
       { type: "error", content: "provider rejected" },
       { status: outcome },
     ]);
-    expect(result.status).toMatchObject({
+    expect(results[0].status).toEqual({ type: "running" });
+    expect(results.at(-1)?.status).toMatchObject({
       type: "incomplete",
       reason: outcome === "failed" ? "error" : "cancelled",
     });
@@ -100,6 +105,76 @@ it("does not convert a recoverable warning into failure", async () => {
     { status: "completed" },
   ]);
   expect(result.status).toMatchObject({ type: "complete" });
+});
+
+it.each([true, false])(
+  "keeps Workbench creation running after a recoverable error (final answer: %s)",
+  async (hasFinalAnswer) => {
+    const results = await collectResults(
+      [
+        { type: "error", content: "Intermediate error" },
+        {
+          type: "human_interaction",
+          unit_index: 9,
+          content: {
+            schema_version: 1,
+            questions: [
+              { id: "goal", type: "text", title: "What is the goal?" },
+            ],
+          },
+        },
+        ...(hasFinalAnswer ? [{ type: "final_answer", content: "Done" }] : []),
+        { status: "completed" },
+      ],
+      options("12", {
+        runtimeMode: "nl2agent",
+        agentId: 42,
+        persistCreationHistory: true,
+      })
+    );
+    expect(results[0].content).toContainEqual(
+      expect.objectContaining({ type: "text", text: "Intermediate error" })
+    );
+    for (const result of results.slice(0, -1)) {
+      expect(result.status).toEqual({ type: "running" });
+    }
+    expect(results[1].content).toContainEqual(
+      expect.objectContaining({
+        type: "data",
+        name: "clarification",
+        data: expect.objectContaining({ completed: undefined }),
+      })
+    );
+    expect(results.at(-1)?.status).toEqual({
+      type: "complete",
+      reason: "stop",
+    });
+  }
+);
+
+it("uses the saved terminal result after a resumed stream ends without one", async () => {
+  const saved = {
+    content: [{ type: "text", text: "Saved answer" }],
+    status: { type: "complete", reason: "stop" },
+  };
+  const loadPersistedReplay = vi.fn().mockResolvedValue(saved);
+  const result = await run(
+    [{ type: "error", content: "Intermediate error" }],
+    options("12", { resume: true, loadPersistedReplay })
+  );
+  expect(loadPersistedReplay).toHaveBeenCalledOnce();
+  expect(result).toEqual(saved);
+});
+
+it("keeps the legacy failure fallback at EOF without a terminal event", async () => {
+  const results = await collectResults([
+    { type: "error", content: "Legacy execution error" },
+  ]);
+  expect(results[0].status).toEqual({ type: "running" });
+  expect(results.at(-1)?.status).toEqual({
+    type: "incomplete",
+    reason: "error",
+  });
 });
 
 it.each(["failed", "stopped", "pending", "streaming"])(

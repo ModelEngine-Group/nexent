@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: WORKBENCH-STREAM-STATUS-20261128
+  change_type: bugfix
+  bug_id: WORKBENCH-STREAM-STATUS-20261128
+  title: Render the Workbench run status from the turn outcome
+  description: Keep message-level execution status separate from inline errors in the shared chat adapter.
+  observed_behavior: An intermediate error marks the whole response failed while the Agent is still running and can reset the clarification card.
+  expected_behavior: A live response remains running until a terminal outcome is known. Terminal failure and cancellation retain their distinct states and a replay may use the saved terminal result for the original assistant message.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing tests checked terminal outcomes and warning events, but did not inspect intermediate snapshots of a successful run that emitted an error.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AGENT-CORE-CONFIG]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Verify that an intermediate error cannot mark a Workbench creator turn failed or reset its clarification card.
+    - Verify terminal completion, failure and cancellation, and preserve fallback for legacy streams.
+    - Verify a resumed stream without a terminal event only restores the original assistant message when its persisted status is terminal.
+    reason: Controlled stream and replay tests exercise the actual adapter and resume hook without relying on a model to emit a specific event sequence.
+    test_selectors:
+    - frontend/tests/workbench/ExecutionStreamState.test.ts
+    - frontend/tests/workbench/ConversationResumeBranch.test.tsx
+  notes: >-
+    Reuses the outcome and clarification behavior in runtime-agent-core-factory AC-NA-02/03 and
+    AGENT-CORE-CONFIG-RULE-004. This change concerns the frontend projection of existing events.
+    The nearest D4 case verifies deployed creator clarification and persistence, which cannot
+    reliably generate the intermediate error sequence. The focused regression supplies that
+    sequence to the production adapter and asserts each published status.
