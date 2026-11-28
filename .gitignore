@@ -80,7 +80,7 @@ sdk/benchmark/.env
 
 .venv
 node_modules/
-/nexent-test-suite/
+nexent-test-suite/
 
 # Formal test runtime data stays on each developer/runner machine.
 test-e2e/**/secrets.env
