@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
@@ -10,10 +11,11 @@ const source = fs.readFileSync(
   "utf8"
 );
 const start = source.indexOf("const COOKIE_NAMES =");
-const end = source.indexOf("function clearAuthCookies", start);
+const end = source.indexOf("function getPreferredLocale", start);
 const now = 1234567770;
 const context = vm.createContext({
   cookie,
+  randomBytes,
   BASE_PATH: "",
   process,
   URL,
@@ -55,7 +57,10 @@ test("refresh accepts only the same browser origin and forwards the cookie crede
   const body = context.refreshBody(
     "/api/user/refresh_token",
     Buffer.from('{"refresh_token":"supplied-by-caller"}'),
-    { nexent_refresh_token: "cookie-refresh" },
+    {
+      nexent_session_scope: "a".repeat(32),
+      ["nexent_refresh_token_" + "a".repeat(32)]: "cookie-refresh",
+    },
     {}
   );
   assert.deepEqual(JSON.parse(body.toString()), {
@@ -63,7 +68,7 @@ test("refresh accepts only the same browser origin and forwards the cookie crede
   });
 });
 
-function cookiesFor(session) {
+function cookieResponse(write) {
   let headers = [];
   const res = {
     getHeader: () => headers,
@@ -72,8 +77,88 @@ function cookiesFor(session) {
       headers = values;
     },
   };
-  context.setCookies(res, session);
+  write(res);
   return Array.from(headers);
+}
+
+const cookiesFor = (session) =>
+  cookieResponse((res) => context.setCookies(res, session));
+
+for (const legacy of [false, true]) {
+  test(`delayed renewal and logout cannot overwrite a later login (legacy: ${legacy})`, () => {
+    const jar = {};
+    const apply = (headers) => {
+      for (const header of headers) {
+        const [nameValue] = header.split(";");
+        const [name, value] = nameValue.split("=");
+        if (header.includes("Max-Age=0")) delete jar[name];
+        else jar[name] = value;
+      }
+    };
+    const login = (account, priorScope, isCas = false) =>
+      cookieResponse((res) =>
+        context.startBrowserSession(
+          res,
+          {
+            access_token: account + "-access",
+            refresh_token: account + "-refresh",
+            expires_at: now + 60,
+            refresh_expires_at: now + 600,
+          },
+          priorScope,
+          isCas
+        )
+      );
+    const renew = (scope) =>
+      cookieResponse((res) =>
+        context.setCookies(
+          res,
+          {
+            access_token: "renewed-old-access",
+            refresh_token: "renewed-old-refresh",
+            expires_at: now + 120,
+            refresh_expires_at: now + 600,
+          },
+          scope
+        )
+      );
+
+    if (!legacy) apply(login("first", ""));
+    else apply(renew(""));
+    const first = context.sessionCookieScope(jar);
+    assert.ok(context.getSessionCookie(jar, "nexent_access_token"));
+    const delayedRenewal = renew(first);
+    const logout = cookieResponse((res) =>
+      context.clearAuthCookies(res, first)
+    );
+    apply(logout);
+    apply(delayedRenewal);
+    assert.equal(
+      context.getSessionCookie(jar, "nexent_access_token"),
+      undefined
+    );
+    assert.equal(
+      context.withoutLegacyAccessCookie(
+        "nexent_access_token=older; theme=light",
+        jar
+      ),
+      " theme=light"
+    );
+    apply(login("second", first));
+    const second = context.sessionCookieScope(jar);
+    apply(delayedRenewal);
+    apply(logout);
+    assert.notEqual(second, first);
+    assert.equal(context.sessionCookieScope(jar), second);
+    assert.equal(
+      context.getSessionCookie(jar, "nexent_access_token"),
+      "second-access"
+    );
+    assert.equal(
+      context.getSessionCookie(jar, "nexent_refresh_token"),
+      "second-refresh"
+    );
+  });
 }
 
 test("a session without a refresh cookie receives 204 without forwarding a credential", () => {

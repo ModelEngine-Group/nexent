@@ -2,7 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -163,6 +163,8 @@ const COOKIE_NAMES = {
   ACCESS_TOKEN: "nexent_access_token",
   REFRESH_TOKEN: "nexent_refresh_token",
   EXPIRES_AT: "nexent_token_expires_at",
+  SCOPE: "nexent_session_scope",
+  SIGNED_OUT: "nexent_signed_out",
   OAUTH_PENDING: "nexent_oauth_pending",
 };
 
@@ -183,7 +185,47 @@ function appendSetCookies(res, cookies) {
   res.setHeader("Set-Cookie", [...existingCookies, ...cookies].filter(Boolean));
 }
 
-function setAuthCookies(res, session) {
+const SESSION_SCOPE_MAX_AGE = 7 * 24 * 60 * 60;
+const CAS_SCOPE_MAX_AGE = 400 * 24 * 60 * 60;
+
+function sessionCookieScope(cookies) {
+  const value = cookies[COOKIE_NAMES.SCOPE];
+  return /^(?:cas-)?[a-f0-9]{32}$/.test(value ?? "") ? value : "";
+}
+
+function scopedCookieName(name, scope) {
+  return scope ? `${name}_${scope}` : name;
+}
+
+function getSessionCookie(cookies, name) {
+  const scope = sessionCookieScope(cookies);
+  if (cookies[scopedCookieName(COOKIE_NAMES.SIGNED_OUT, scope)]) {
+    return undefined;
+  }
+  return cookies[scopedCookieName(name, scope)];
+}
+
+// Use the already validated CAS response subject only to bind the browser write
+// to the account that sent the request. Gateway still validates all credentials.
+function sessionSubject(token) {
+  try {
+    return JSON.parse(Buffer.from(token.split(".")[1], "base64url")).sub;
+  } catch {
+    return undefined;
+  }
+}
+
+function withoutLegacyAccessCookie(header, cookies) {
+  if (!sessionCookieScope(cookies) && !cookies[COOKIE_NAMES.SIGNED_OUT]) {
+    return header;
+  }
+  return (header ?? "")
+    .split(";")
+    .filter((entry) => !entry.trimStart().startsWith(`${COOKIE_NAMES.ACCESS_TOKEN}=`))
+    .join(";");
+}
+
+function setAuthCookies(res, session, scope = "") {
   const cookies = [];
 
   const now = Math.floor(Date.now() / 1000);
@@ -196,27 +238,30 @@ function setAuthCookies(res, session) {
 
   if (session.access_token) {
     cookies.push(
-      cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, session.access_token, {
-        ...buildCookieOptions(true),
-        maxAge: expiresInSeconds, // Use backend-provided value
-      })
+      cookie.serialize(
+        scopedCookieName(COOKIE_NAMES.ACCESS_TOKEN, scope),
+        session.access_token,
+        { ...buildCookieOptions(true), maxAge: expiresInSeconds }
+      )
     );
   }
 
   const canRefresh = Boolean(session.refresh_token && refreshTokenMaxAge > 0);
   cookies.push(
-    cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, canRefresh ? session.refresh_token : "", {
-      ...buildCookieOptions(true),
-      maxAge: canRefresh ? refreshTokenMaxAge : 0,
-    })
+    cookie.serialize(
+      scopedCookieName(COOKIE_NAMES.REFRESH_TOKEN, scope),
+      canRefresh ? session.refresh_token : "",
+      { ...buildCookieOptions(true), maxAge: canRefresh ? refreshTokenMaxAge : 0 }
+    )
   );
 
   if (session.expires_at) {
     cookies.push(
-      cookie.serialize(COOKIE_NAMES.EXPIRES_AT, String(session.expires_at), {
-        ...buildCookieOptions(false), // readable by frontend JS
-        maxAge: expiresInSeconds, // Same as access token
-      })
+      cookie.serialize(
+        scopedCookieName(COOKIE_NAMES.EXPIRES_AT, scope),
+        String(session.expires_at),
+        { ...buildCookieOptions(false), maxAge: expiresInSeconds }
+      )
     );
   }
 
@@ -225,24 +270,41 @@ function setAuthCookies(res, session) {
   }
 }
 
-function clearAuthCookies(res) {
-  const expired = { ...buildCookieOptions(false), maxAge: 0 };
-  res.setHeader("Set-Cookie", [
-    cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", {
-      ...expired,
-      httpOnly: true,
-    }),
-    cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", {
-      ...expired,
-      httpOnly: true,
-    }),
-    cookie.serialize(COOKIE_NAMES.EXPIRES_AT, "", expired),
-    cookie.serialize("nexent_can_refresh", "", expired),
-    cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
-      ...expired,
-      httpOnly: true,
-    }),
-  ]);
+function expireSessionCookies(res, scope) {
+  const httpOnly = [COOKIE_NAMES.ACCESS_TOKEN, COOKIE_NAMES.REFRESH_TOKEN];
+  const expired = [...httpOnly, COOKIE_NAMES.EXPIRES_AT].map((name) =>
+    cookie.serialize(scopedCookieName(name, scope), "", {
+      ...buildCookieOptions(httpOnly.includes(name)),
+      maxAge: 0,
+    })
+  );
+  appendSetCookies(res, expired);
+}
+
+function clearAuthCookies(res, scope = "") {
+  expireSessionCookies(res, scope);
+  // A delayed renewal for this scope can no longer restore a signed-out session.
+  appendSetCookies(res, [cookie.serialize(scopedCookieName(COOKIE_NAMES.SIGNED_OUT, scope), "1", {
+    ...buildCookieOptions(false),
+    maxAge: SESSION_SCOPE_MAX_AGE,
+  })]);
+  clearPendingOAuthCookie(res);
+}
+
+function startBrowserSession(res, session, previousScope, isCas) {
+  const scope = (isCas ? "cas-" : "") + randomBytes(16).toString("hex");
+  expireSessionCookies(res, previousScope);
+  if (previousScope) {
+    appendSetCookies(res, [cookie.serialize(scopedCookieName(COOKIE_NAMES.SIGNED_OUT, previousScope), "", {
+      ...buildCookieOptions(false),
+      maxAge: 0,
+    })]);
+  }
+  appendSetCookies(res, [cookie.serialize(COOKIE_NAMES.SCOPE, scope, {
+    ...buildCookieOptions(false),
+    maxAge: isCas ? CAS_SCOPE_MAX_AGE : SESSION_SCOPE_MAX_AGE,
+  })]);
+  setAuthCookies(res, session, scope);
 }
 
 function setPendingOAuthCookie(res, pendingToken) {
@@ -276,7 +338,7 @@ const SUPER_ADMIN_ROLES = new Set(["SU", "SUPER_ADMIN"]);
 
 async function isSuperAdminRequest(req) {
   const cookies = parseCookies(req);
-  const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
+  const token = getSessionCookie(cookies, COOKIE_NAMES.ACCESS_TOKEN);
   if (!token) {
     return false;
   }
@@ -372,7 +434,11 @@ function collectRequestBody(req) {
  */
 function prepareAuthRequestBody(pathname, body, cookies, res) {
   if (pathname === "/api/user/refresh_token") {
-    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
+    const scope = sessionCookieScope(cookies);
+    const refreshToken =
+      !scope.startsWith("cas-")
+        ? getSessionCookie(cookies, COOKIE_NAMES.REFRESH_TOKEN)
+        : undefined;
     if (!refreshToken) {
       res.writeHead(204);
       res.end();
@@ -400,6 +466,7 @@ function forwardAuthRequest(req, res, targetUrl) {
   const parsedTarget = new URL(targetUrl);
   const transport = parsedTarget.protocol === "https:" ? https : http;
   const cookies = parseCookies(req);
+  const scope = sessionCookieScope(cookies);
 
   const isRefresh = req.parsedPathname === "/api/user/refresh_token";
   if (isRefresh) {
@@ -435,6 +502,10 @@ function forwardAuthRequest(req, res, targetUrl) {
       }
 
       const forwardHeaders = { ...req.headers, host: parsedTarget.host };
+      if (forwardHeaders.cookie) {
+        forwardHeaders.cookie = withoutLegacyAccessCookie(forwardHeaders.cookie, cookies);
+      }
+      const accessToken = getSessionCookie(cookies, COOKIE_NAMES.ACCESS_TOKEN);
 
       // Use only the browser's session credential for cookie-backed renewal.
       if (isRefresh) {
@@ -442,11 +513,11 @@ function forwardAuthRequest(req, res, targetUrl) {
         forwardHeaders["content-type"] = "application/json";
       }
       if (
-        cookies[COOKIE_NAMES.ACCESS_TOKEN] &&
+        accessToken &&
         !forwardHeaders["authorization"]
       ) {
         forwardHeaders["authorization"] =
-          `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`;
+          `Bearer ${accessToken}`;
       }
 
       if (
@@ -490,7 +561,7 @@ function forwardAuthRequest(req, res, targetUrl) {
               const isRevoke = req.parsedPathname === "/api/user/revoke";
 
               if (isLogout || isRevoke) {
-                clearAuthCookies(res);
+                clearAuthCookies(res, scope);
               } else if (
                 req.parsedPathname === "/api/user/oauth/callback" &&
                 data.data &&
@@ -506,14 +577,30 @@ function forwardAuthRequest(req, res, targetUrl) {
                 return;
               } else if (data.data && data.data.session) {
                 const session = data.data.session;
-                setAuthCookies(res, session);
-
                 const isOAuthCallback =
                   req.parsedPathname === "/api/user/oauth/callback";
                 const isCasCallback =
                   req.parsedPathname === "/api/user/cas/callback";
                 const isCasRenewCallback =
                   req.parsedPathname === "/api/user/cas/renew_callback";
+                if (isCasRenewCallback && scope) {
+                  const subject = sessionSubject(accessToken);
+                  if (
+                    !scope.startsWith("cas-") ||
+                    !subject ||
+                    subject !== sessionSubject(session.access_token)
+                  ) {
+                    res.writeHead(409);
+                    res.end();
+                    return;
+                  }
+                }
+                if (isRefresh || isCasRenewCallback) {
+                  // A renewal may only write cookies for the scope present on its request.
+                  setAuthCookies(res, session, scope);
+                } else {
+                  startBrowserSession(res, session, scope, isCasCallback);
+                }
                 if (isOAuthCallback) {
                   res.writeHead(302, { Location: withBasePath("/") });
                   res.end();
@@ -630,13 +717,14 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
 // ============================================================================
 proxy.on("proxyReq", (proxyReq, req) => {
   const cookies = parseCookies(req);
-  if (
-    cookies[COOKIE_NAMES.ACCESS_TOKEN] &&
-    !proxyReq.getHeader("authorization")
-  ) {
+  if (req.headers.cookie) {
+    proxyReq.setHeader("Cookie", withoutLegacyAccessCookie(req.headers.cookie, cookies));
+  }
+  const accessToken = getSessionCookie(cookies, COOKIE_NAMES.ACCESS_TOKEN);
+  if (accessToken && !proxyReq.getHeader("authorization")) {
     proxyReq.setHeader(
       "Authorization",
-      `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`
+      `Bearer ${accessToken}`
     );
   }
 });
@@ -683,6 +771,14 @@ app.prepare().then(() => {
     const { pathname } = parse(req.url);
     const internalPathname = withoutBasePath(pathname);
     if (internalPathname.startsWith("/api/voice/")) {
+      const cookies = parseCookies(req);
+      const accessToken = getSessionCookie(cookies, COOKIE_NAMES.ACCESS_TOKEN);
+      if (req.headers.cookie) {
+        req.headers.cookie = withoutLegacyAccessCookie(req.headers.cookie, cookies);
+      }
+      if (accessToken && !req.headers.authorization) {
+        req.headers.authorization = `Bearer ${accessToken}`;
+      }
       if (BASE_PATH) {
         req.url = req.url.slice(BASE_PATH.length) || "/";
       }

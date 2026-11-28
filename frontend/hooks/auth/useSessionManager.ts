@@ -12,6 +12,7 @@ import {
 import { authFlowState } from "@/lib/authFlow";
 import {
   getTokenExpiresAt,
+  getSessionScope,
   hasAuthCookies,
   checkSessionValid,
   handleSessionExpired,
@@ -46,12 +47,14 @@ export const isSessionExpiringSoon = (): boolean => {
 
 export const refreshSession = async (): Promise<boolean> => {
   const expiresAt = getTokenExpiresAt();
+  const scope = getSessionScope();
   return withLocalSessionLock(async () => {
     if (
       authFlowState.isExplicitLogoutInProgress() ||
       document.hidden ||
       !isSessionExpiringSoon() ||
-      getTokenExpiresAt() !== expiresAt
+      getTokenExpiresAt() !== expiresAt ||
+      getSessionScope() !== scope
     )
       return false;
     return Boolean(await sessionService.refreshToken());
@@ -80,6 +83,7 @@ export function useSessionManager(user?: User | null) {
   useEffect(() => {
     if (!isDeploymentReady) return;
 
+    sessionService.discardPreviousRefreshAttempt();
     if (!hasAuthCookies()) {
       return;
     }

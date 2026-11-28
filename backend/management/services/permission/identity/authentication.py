@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import EmailStr
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import select
 
 from contracts.constants.constants import (
@@ -182,7 +183,7 @@ async def signin_user(email: EmailStr, password: str):
 
 
 async def refresh_user_token(authorization, refresh_token: str, request_id: str | None = None):
-    return rotate_local_session(authorization, refresh_token, request_id)
+    return await run_in_threadpool(rotate_local_session, authorization, refresh_token, request_id)
 
 
 async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:

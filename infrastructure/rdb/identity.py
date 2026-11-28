@@ -95,7 +95,7 @@ class IdentityRepository:
         if is_local_session_id(sid):
             session_active = bool(await connection.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM nexent.user_local_session_t "
-                "WHERE session_id=$1 AND user_id=$2 AND revoked_at IS NULL "
+                "WHERE session_id=$1 AND user_id=$2 AND revoked_at IS NULL AND delete_flag='N' "
                 "AND idle_expires_at>$3 AND absolute_expires_at>$3)", sid, user_id, int(time())))
         elif sid:
             # CAS stores naive local timestamps today. Gateway and Management

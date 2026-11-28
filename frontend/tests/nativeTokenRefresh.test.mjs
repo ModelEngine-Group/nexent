@@ -27,24 +27,34 @@ function loadTypescript(relativePath, context) {
 function loadRefreshService({
   expiresAt = () => 1234,
   valid = true,
+  scope = () => "a",
+  storage = new Map(),
   fetch,
   onExpiry = () => {},
 }) {
   return loadTypescript("../services/sessionService.ts", {
     fetch,
     crypto: webcrypto,
+    sessionStorage: {
+      getItem: (key) => storage.get(key),
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key),
+    },
     require: (name) =>
-      name === "@/services/api"
-        ? {
-            API_ENDPOINTS: {
-              user: { refreshToken: "/api/user/refresh_token" },
+      name === "@/const/auth"
+        ? { STORAGE_KEYS: { REFRESH_ATTEMPT: "refresh-attempt" } }
+        : name === "@/services/api"
+          ? {
+              API_ENDPOINTS: {
+                user: { refreshToken: "/api/user/refresh_token" },
+              },
+            }
+          : {
+              checkSessionValid: () => valid,
+              getTokenExpiresAt: expiresAt,
+              getSessionScope: scope,
+              handleSessionExpired: onExpiry,
             },
-          }
-        : {
-            checkSessionValid: () => valid,
-            getTokenExpiresAt: expiresAt,
-            handleSessionExpired: onExpiry,
-          },
   }).sessionService;
 }
 
@@ -56,11 +66,11 @@ test("expired sessions make no renewal request", async () => {
   );
 });
 
-test("a 204 skips further requests for the same expiry without logging out", async () => {
+test("a 204 skips further requests for the same session without logging out", async () => {
   let requests = 0;
-  let expiration = 1234;
+  let scope = "a";
   const service = loadRefreshService({
-    expiresAt: () => expiration,
+    scope: () => scope,
     fetch: async () => {
       requests += 1;
       return { ok: true, status: 204 };
@@ -70,7 +80,7 @@ test("a 204 skips further requests for the same expiry without logging out", asy
   assert.equal(await service.refreshToken(), null);
   assert.equal(await service.refreshToken(), null);
   assert.equal(requests, 1);
-  expiration = 5678;
+  scope = "b";
   assert.equal(await service.refreshToken(), null);
   assert.equal(requests, 2);
 });
@@ -94,6 +104,52 @@ test("retry preserves the request ID and simultaneous calls share a request", as
   assert.equal((await service.refreshToken()).expires_at, 5678);
   assert.equal(requestIds.length, 2);
   assert.equal(requestIds[0], requestIds[1]);
+});
+
+test("a reload retries the same request ID only for the same login", async () => {
+  const storage = new Map();
+  const ids = [];
+  let scope = "a";
+  const config = {
+    storage,
+    scope: () => scope,
+    fetch: async (_, options) => {
+      ids.push(options.headers["X-Refresh-Request-Id"]);
+      throw new Error("response lost");
+    },
+  };
+  await assert.rejects(
+    loadRefreshService(config).refreshToken(),
+    /response lost/
+  );
+  await assert.rejects(
+    loadRefreshService(config).refreshToken(),
+    /response lost/
+  );
+  assert.equal(ids[0], ids[1]);
+  scope = "b";
+  await assert.rejects(
+    loadRefreshService(config).refreshToken(),
+    /response lost/
+  );
+  assert.notEqual(ids[1], ids[2]);
+});
+
+test("a delayed renewal rejection leaves the new login alone", async () => {
+  let respond;
+  let scope = "a";
+  const service = loadRefreshService({
+    scope: () => scope,
+    fetch: () =>
+      new Promise((resolve) => {
+        respond = resolve;
+      }),
+    onExpiry: () => assert.fail("unexpected logout"),
+  });
+  const pending = service.refreshToken();
+  scope = "b";
+  respond({ ok: false, status: 401 });
+  assert.equal(await pending, null);
 });
 
 test("a rotation conflict keeps the session and invalid credentials expire it", async () => {
@@ -140,6 +196,7 @@ test("foreground activity starts renewal only inside the 30 minute window", asyn
     "@/services/sessionService": {
       withLocalSessionLock: (callback) => callback(),
       sessionService: {
+        discardPreviousRefreshAttempt: () => {},
         refreshToken: async () => {
           requests += 1;
         },
@@ -154,6 +211,7 @@ test("foreground activity starts renewal only inside the 30 minute window", asyn
     },
     "@/lib/session": {
       getTokenExpiresAt: () => expiresAt,
+      getSessionScope: () => "a",
       checkSessionValid: () => expiresAt * 1_000 > now,
     },
     "@/lib/casHeartbeat": { getHeartbeatIntervalMs: () => 300_000 },

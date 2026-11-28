@@ -25,7 +25,7 @@ from contracts.identity import UpdatePasswordRequest, UserSignInRequest, UserSig
 from contracts.roles import has_any_role
 from management.db.identity.cas_session import revoke_cas_session_by_session_id
 from management.db.identity.local_session import revoke_local_session
-from management.services.permission.identity.local_session import RefreshConflict
+from management.services.permission.identity.local_session import InvalidRefreshRequestId, RefreshConflict
 from contracts.identity_session import is_local_session_id
 
 load_dotenv()
@@ -147,8 +147,10 @@ async def user_refresh_token(request: Request):
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except RefreshConflict as e:
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+    except InvalidRefreshRequestId:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="Invalid refresh request identifier")
     except ValueError:
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="Invalid refresh request")
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="No refresh token provided")
     except Exception as e:
         logger.error("Refresh failed (%s)", type(e).__name__)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Refresh token failed")

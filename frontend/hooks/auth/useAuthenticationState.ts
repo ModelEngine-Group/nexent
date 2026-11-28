@@ -12,6 +12,7 @@ import { forcedLoginService } from "@/services/forcedLoginService";
 import {
   getSessionFromStorage,
   removeSessionFromStorage,
+  getSessionScope,
   checkSessionValid,
   getTokenExpiresAt,
 } from "@/lib/session";
@@ -205,6 +206,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   // Logout method
   const logout = useCallback(async (options: { silent?: boolean } = {}) => {
     const { silent = false } = options;
+    const scope = getSessionScope();
 
     try {
       setIsLoading(true);
@@ -214,6 +216,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
         await authService.signOut();
       }
 
+      if (getSessionScope() !== scope) return;
       // Clear local session
       removeSessionFromStorage();
       setSession(null);
@@ -228,6 +231,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
       authEventUtils.emitLogout();
     } catch (error: any) {
       log.error("Logout failed:", error?.message || error);
+      if (getSessionScope() !== scope) return;
       // Even if API call fails, clear local session
       removeSessionFromStorage();
       setSession(null);

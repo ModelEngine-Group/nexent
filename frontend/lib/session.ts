@@ -14,6 +14,7 @@ import { Session } from "@/types/auth";
 import { User } from "@/types/auth";
 import { authEventUtils } from "@/lib/authEvents";
 import log from "@/lib/logger";
+import { BASE_PATH } from "@/lib/basePath";
 
 // Flag to prevent duplicate session expiration handling
 let isHandlingSessionExpired = false;
@@ -34,14 +35,27 @@ function getCookieValue(name: string): string | null {
  */
 function clearCookie(name: string): void {
   if (typeof document === "undefined") return;
-  document.cookie = `${name}=; path=/; max-age=0`;
+  document.cookie = `${name}=; path=${BASE_PATH || "/"}; max-age=0`;
 }
 
 /**
- * Get token expiry timestamp from the non-HttpOnly cookie
+ * Read the browser's active login scope.
  */
+export function getSessionScope(): string {
+  const value = getCookieValue(COOKIE_NAMES.SCOPE);
+  return value && /^(?:cas-)?[a-f0-9]{32}$/.test(value) ? value : "";
+}
+
+const scopedCookieName = (name: string, scope: string): string =>
+  scope ? `${name}_${scope}` : name;
+
 export const getTokenExpiresAt = (): number | null => {
-  const value = getCookieValue(COOKIE_NAMES.EXPIRES_AT);
+  const scope = getSessionScope();
+  if (getCookieValue(scopedCookieName(COOKIE_NAMES.SIGNED_OUT, scope)))
+    return null;
+  const value = getCookieValue(
+    scopedCookieName(COOKIE_NAMES.EXPIRES_AT, scope)
+  );
   if (!value) return null;
   const num = Number(value);
   return isNaN(num) ? null : num;
@@ -114,7 +128,12 @@ export const saveSessionToStorage = (session: Session): void => {
  * Remove session (clear the non-HttpOnly expires_at cookie and localStorage user info)
  */
 export const removeSessionFromStorage = (): void => {
-  clearCookie(COOKIE_NAMES.EXPIRES_AT);
+  clearCookie(scopedCookieName(COOKIE_NAMES.EXPIRES_AT, getSessionScope()));
+  try {
+    sessionStorage.removeItem(STORAGE_KEYS.REFRESH_ATTEMPT);
+  } catch {
+    // Session storage may be unavailable in private contexts.
+  }
   removeUserFromStorage();
 };
 

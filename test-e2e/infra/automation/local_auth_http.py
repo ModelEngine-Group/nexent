@@ -60,7 +60,9 @@ def native_runtime():
             cursor.execute("CREATE SCHEMA nexent")
             from shared.merged_migrations import merged_migration_sql
             cursor.execute(merged_migration_sql("v2.9.0_009_system_configuration.sql"))
-            cursor.execute((ROOT / "deploy/sql/migrations/v2.9.0_019_local_session_renewal.sql").read_text("utf-8"))
+            migrations = ROOT / "deploy/sql/migrations"
+            cursor.execute((migrations / "v2.9.0_019_local_session_renewal.sql").read_text("utf-8"))
+            cursor.execute((migrations / "v2.9.0_020_local_session_audit.sql").read_text("utf-8"))
         models.TableBase.metadata.create_all(
             db_client.engine, tables=[model.__table__ for model in tables]
         )
@@ -121,11 +123,11 @@ def runtime(native_runtime):
     return native_runtime
 
 
-def register(client):
+def register(client, email="native@example.com"):
     response = client.post(
         "/api/user/signup",
         json={
-            "email": "native@example.com",
+            "email": email,
             "password": "Password123",
             "invite_code": "NATIVE-INVITE",
             "auto_login": True,

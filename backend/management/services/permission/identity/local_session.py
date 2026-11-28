@@ -23,6 +23,10 @@ ABSOLUTE_SECONDS = 7 * 24 * 60 * 60
 RETRY_SECONDS = 60
 
 
+class InvalidRefreshRequestId(ValueError):
+    """The optional renewal request identifier does not match the wire contract."""
+
+
 class RefreshConflict(Exception):
     """The preceding generation has already been rotated."""
 
@@ -68,8 +72,8 @@ def issue_local_session(user_id: str, token_version: int | None = None) -> dict:
         db.execute(text("""
             INSERT INTO nexent.user_local_session_t
                 (session_id, user_id, refresh_digest, created_at, last_refreshed_at,
-                 idle_expires_at, absolute_expires_at)
-            VALUES (:sid, :uid, :digest, :now, :now, :idle, :absolute)
+                 idle_expires_at, absolute_expires_at, created_by, updated_by)
+            VALUES (:sid, :uid, :digest, :now, :now, :idle, :absolute, :uid, :uid)
         """), {"sid": sid, "uid": user_id, "digest": _digest(refresh), "now": now,
                "idle": idle, "absolute": now + ABSOLUTE_SECONDS})
         return _response(user_id, token_version, sid, refresh, now, min(now + JWT_EXPIRY_SECONDS, idle), idle)
@@ -93,7 +97,7 @@ def rotate_local_session(access_token: str, refresh_token: str, request_id: str 
     if not isinstance(refresh_token, str) or not 32 <= len(refresh_token) <= 128:
         raise UnauthorizedError("Invalid refresh token")
     if request_id is not None and not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", request_id):
-        raise ValueError("Invalid refresh request identifier")
+        raise InvalidRefreshRequestId("Invalid refresh request identifier")
 
     claims = _verified_claims(access_token)
     sid, uid = claims["sid"], claims["sub"]
@@ -112,7 +116,7 @@ def rotate_local_session(access_token: str, refresh_token: str, request_id: str 
 
         row = db.execute(text("""
             SELECT * FROM nexent.user_local_session_t
-            WHERE session_id = :sid AND user_id = :uid FOR UPDATE
+            WHERE session_id = :sid AND user_id = :uid AND delete_flag = 'N' FOR UPDATE
         """), {"sid": sid, "uid": uid}).mappings().one_or_none()
         now = int(time.time())
         if (claims["exp"] <= now or row is None or row["revoked_at"] is not None
@@ -142,9 +146,10 @@ def rotate_local_session(access_token: str, refresh_token: str, request_id: str 
             SET refresh_digest = :replacement, previous_refresh_digest = :previous_refresh,
                 previous_access_digest = :previous_access, request_id = :request_id,
                 retry_until = :retry_until, rotation_nonce = :nonce, last_refreshed_at = :now,
-                idle_expires_at = :idle, access_issued_at = :now, access_expires_at = :access_exp
+                idle_expires_at = :idle, access_issued_at = :now, access_expires_at = :access_exp,
+                updated_by = :uid, update_time = timezone('UTC', CURRENT_TIMESTAMP)
             WHERE session_id = :sid
         """), {"replacement": _digest(replacement), "previous_refresh": refresh_digest,
                "previous_access": access_digest, "request_id": request_id, "retry_until": now + RETRY_SECONDS,
-               "nonce": nonce, "now": now, "idle": idle, "access_exp": access_exp, "sid": sid})
+               "nonce": nonce, "now": now, "idle": idle, "access_exp": access_exp, "sid": sid, "uid": uid})
         return _response(uid, version, sid, replacement, now, access_exp, idle)

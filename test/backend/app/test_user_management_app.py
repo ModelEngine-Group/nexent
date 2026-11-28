@@ -491,7 +491,16 @@ class TestRefreshToken:
 
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
         data = response.json()
-        assert data["detail"] == "Invalid refresh request"
+        assert data["detail"] == "No refresh token provided"
+
+    def test_refresh_rejects_malformed_request_identifier(self):
+        response = client.post(
+            "/user/refresh_token",
+            headers={"Authorization": "Bearer token", "X-Refresh-Request-Id": "short"},
+            json={"refresh_token": "a" * 32},
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "Invalid refresh request identifier"
 
     def test_refresh_token_error(self):
         """Test token refresh with error"""

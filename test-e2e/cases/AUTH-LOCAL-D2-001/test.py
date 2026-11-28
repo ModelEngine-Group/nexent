@@ -147,13 +147,50 @@ def test_native_http_identity_password_and_api_keys(runtime):
 
 def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, caplog):
     from contracts.constants import environment
+    from sqlalchemy import text
+    from infrastructure.rdb.client import get_db_session
     from infrastructure.rdb.identity import IdentityRepository
 
-    client, _, helpers, _ = runtime
+    client, _, helpers, models = runtime
     original = register(client)["session"]
     second = client.post("/api/user/signin", json={"email": "native@example.com", "password": "Password123"})
     assert second.status_code == 200
     other = second.json()["data"]["session"]
+    independent = register(client, email="independent@example.com")
+    independent_session = independent["session"]
+    independent_user = independent["user"]["id"]
+
+    def session_rows(user_id):
+        with get_db_session() as session:
+            return [
+                dict(row)
+                for row in session.execute(
+                    text("SELECT * FROM nexent.user_local_session_t WHERE user_id = :user_id ORDER BY session_id"),
+                    {"user_id": user_id},
+                ).mappings()
+            ]
+
+    def account_row(user_id):
+        with get_db_session() as session:
+            account = models.UserAccount.__table__
+            return dict(session.execute(account.select().where(account.c.user_id == user_id)).mappings().one())
+
+    def claims_for(access_token):
+        return jwt.decode(access_token, options={"verify_signature": False})
+
+    owner = claims_for(original["access_token"])["sub"]
+    original_sid = claims_for(original["access_token"])["sid"]
+
+    def original_row():
+        return next(row for row in session_rows(owner) if str(row["session_id"]) == original_sid)
+
+    independent_before = session_rows(independent_user)
+    independent_account_before = account_row(independent_user)
+    assert len(independent_before) == 1
+    issued = original_row()
+    assert issued["created_by"] == issued["updated_by"] == owner
+    assert issued["create_time"] <= issued["update_time"]
+    assert issued["delete_flag"] == "N"
 
     def refresh(access, refresh_token, request_id):
         return client.post(
@@ -162,7 +199,9 @@ def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, cap
             json={"refresh_token": refresh_token},
         )
 
-    assert refresh(original["access_token"], other["refresh_token"], "other-device-request").status_code == 401
+    wrong_device = refresh(original["access_token"], other["refresh_token"], "other-device-request")
+    wrong_user = refresh(original["access_token"], independent_session["refresh_token"], "other-user-request")
+    assert wrong_device.status_code == wrong_user.status_code == 401
     ids = ["concurrent-refresh-one", "concurrent-refresh-two"]
     with ThreadPoolExecutor(max_workers=2) as pool:
         responses = list(pool.map(
@@ -173,15 +212,21 @@ def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, cap
     winner = next(i for i, response in enumerate(responses) if response.status_code == 200)
     replacement = responses[winner].json()["data"]["session"]
     assert replacement["refresh_token"] != original["refresh_token"]
+    rotated = original_row()
+    assert rotated["created_by"] == rotated["updated_by"] == owner
+    assert rotated["create_time"] == issued["create_time"]
+    assert rotated["update_time"] >= issued["update_time"]
     retry = refresh(original["access_token"], original["refresh_token"], ids[winner])
     assert retry.status_code == 200
     assert retry.json()["data"]["session"] == replacement
+    assert original_row() == rotated
     assert client.get("/api/user/current_user_id", headers=bearer(original["access_token"])).status_code == 200
 
     claims = jwt.decode(replacement["access_token"], options={"verify_signature": False})
     claims["exp"] = claims["iat"] - 1
     expired = jwt.encode(claims, helpers.JWT_SECRET, algorithm="HS256")
-    assert refresh(expired, replacement["refresh_token"], "expired-access-request").status_code == 401
+    expired_attempt = refresh(expired, replacement["refresh_token"], "expired-access-request")
+    assert expired_attempt.status_code == 401
 
     async def gateway_session_active():
         repo = await IdentityRepository.open(
@@ -199,11 +244,33 @@ def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, cap
     logout = client.post("/api/user/logout", headers=bearer(replacement["access_token"]))
     assert logout.status_code == 200
     assert client.get("/api/user/current_user_id", headers=bearer(replacement["access_token"])).status_code == 401
-    assert refresh(replacement["access_token"], replacement["refresh_token"], "revoked-access-request").status_code == 401
+    revoked_attempt = refresh(replacement["access_token"], replacement["refresh_token"], "revoked-access-request")
+    assert revoked_attempt.status_code == 401
+    revoked = original_row()
+    assert revoked["revoked_at"] is not None
+    assert revoked["updated_by"] == owner
+    assert revoked["update_time"] >= rotated["update_time"]
     assert client.get("/api/user/current_user_id", headers=bearer(other["access_token"])).status_code == 200
     assert not asyncio.run(gateway_session_active())
-    assert original["refresh_token"] not in caplog.text
-    assert replacement["refresh_token"] not in caplog.text
+    assert session_rows(independent_user) == independent_before
+    assert account_row(independent_user) == independent_account_before
+    assert client.get(
+        "/api/user/current_user_id", headers=bearer(independent_session["access_token"])
+    ).json()["data"]["user_id"] == independent_user
+
+    credentials = [expired, "Password123"]
+    credentials.extend(
+        credential_pair[key]
+        for credential_pair in (original, other, replacement, independent_session)
+        for key in ("access_token", "refresh_token")
+    )
+    credentials.append(independent_account_before["password_hash"])
+    for failure in (wrong_device, wrong_user, responses[1 - winner], expired_attempt, revoked_attempt):
+        assert "set-cookie" not in failure.headers
+        response_text = f"{failure.headers!r} {failure.text}"
+        assert all(secret not in response_text for secret in credentials)
+        assert all(field not in failure.text for field in ('"access_token"', '"refresh_token"', '"password_hash"'))
+    assert all(secret not in caplog.text for secret in credentials)
 
 
 def test_native_http_invalid_duplicate_disabled_and_refresh(runtime):
