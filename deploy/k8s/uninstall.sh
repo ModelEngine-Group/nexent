@@ -382,11 +382,11 @@ resolve_delete_pvcs() {
   [ "$COMMAND" = "uninstall" ] && [ "${#DYNAMIC_PVC_NAMES[@]}" -gt 0 ] && [ -t 0 ] || return 1
   local answer
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    read -r -p "删除所选 release 的动态 PVC？这可能删除卷中的数据。[y/N]：" answer || return 1
+    IFS= read -r -p "删除所选 release 的动态 PVC？这可能删除卷中的数据。直接回车保留，输入小写 y 删除。[y/N]：" answer || return 1
   else
-    read -r -p "Delete dynamic PVCs for the selected releases? This can delete volume data. [y/N]: " answer || return 1
+    IFS= read -r -p "Delete dynamic PVCs for the selected releases? This can delete volume data. Press Enter to keep them or type lowercase y to delete. [y/N]: " answer || return 1
   fi
-  [[ "$(sanitize_input "$answer")" =~ ^[Yy]$ ]]
+  [ "${answer%$'\r'}" = "y" ]
 }
 
 prepare_dynamic_pvcs() {
@@ -569,6 +569,7 @@ local_volume_paths() {
       "/var/lib/nexent-data/skills" \
       "/var/lib/nexent-data/logs" \
       "/var/lib/nexent-data/project-config" \
+      "/var/lib/nexent-data/nexent-ssh-keys" \
       "/var/lib/nexent-data/nexent-supabase-db" \
       "/var/lib/nexent-data/nexent-phoenix" \
       "/var/lib/nexent-data/nexent-grafana" \

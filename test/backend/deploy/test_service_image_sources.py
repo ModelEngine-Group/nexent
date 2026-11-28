@@ -17,6 +17,23 @@ def test_backend_dockerfile_does_not_declare_exposed_ports():
         assert all(not parts or parts[0].upper() != "EXPOSE" for parts in instructions)
 
 
+def test_backend_images_do_not_declare_ssh_key_volumes():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    instructions = [line.split(maxsplit=1) for line in dockerfile.replace("\\\n", " ").splitlines()]
+    volumes = [parts[1] for parts in instructions if parts and parts[0].upper() == "VOLUME"]
+
+    assert all("/opt/ssh-keys" not in volume for volume in volumes)
+    assert "RUN mkdir -p /opt/ssh-keys" in dockerfile.splitlines()
+
+
+@pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])
+def test_compose_preserves_explicit_read_only_ssh_key_bind(filename):
+    services = yaml.safe_load((ROOT / "deploy/docker/compose" / filename).read_text(encoding="utf-8"))["services"]
+
+    for service in ("nexent-config", "nexent-runtime", "nexent-mcp"):
+        assert "${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro" in services[service]["volumes"]
+
+
 @pytest.mark.parametrize("service,peer", [("management", "runtime"), ("runtime", "management")])
 def test_independent_target_installs_deployment_plugins_without_peer_sources(service, peer):
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")

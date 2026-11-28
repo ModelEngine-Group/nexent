@@ -328,3 +328,56 @@ spec:
   storageClassName: {{ $storageClassName | quote }}
   {{- end }}
 {{- end }}
+{{- if and (ne $mode "existing") (dig "deploymentComponents" "application" true $global) }}
+{{- $sshKeys := default dict $shared.sshKeys }}
+{{- $sshKeysSize := default "1Gi" $sshKeys.size }}
+{{- if eq $mode "local" }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-ssh-keys-pv
+  labels:
+    type: hostpath
+    app: nexent-ssh-keys
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  storageClassName: {{ $storageClassName | quote }}
+  capacity:
+    storage: {{ $sshKeysSize }}
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ default "/var/lib/nexent-data/nexent-ssh-keys" $sshKeys.localPath | quote }}
+    type: DirectoryOrCreate
+{{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-ssh-keys
+  namespace: {{ .Values.global.namespace }}
+  {{- if eq $mode "dynamic" }}
+  labels:
+    nexent.io/persistence-mode: dynamic
+  {{- end }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+    {{- if eq $mode "dynamic" }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+spec:
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ $sshKeysSize }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-ssh-keys-pv
+  {{- end }}
+  {{- if $storageClassName }}
+  storageClassName: {{ $storageClassName | quote }}
+  {{- end }}
+{{- end }}

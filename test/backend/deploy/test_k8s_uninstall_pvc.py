@@ -61,13 +61,14 @@ esac
         mock.write_text(f"#!/usr/bin/env bash\n{code}", encoding="utf-8")
         mock.chmod(0o700)
 
-    def run(*arguments, legacy=False, released=False, answer=None):
+    def run(*arguments, legacy=False, released=False, answer=None, ssh_keys=False):
         claims.write_text(
             f"nexent-workspace|uid-workspace|nexent|test-ns|{'dynamic' if not legacy else ''}\n"
             "nexent-redis|uid-redis|nexent-infrastructure|test-ns|dynamic\n"
             "nexent-skills|uid-local|nexent|test-ns|\n"
             "other|uid-other|other-release|test-ns|dynamic\n"
-            "wrong-namespace|uid-wrong|nexent|other-ns|dynamic\n",
+            "wrong-namespace|uid-wrong|nexent|other-ns|dynamic\n"
+            + ("nexent-ssh-keys|uid-ssh-keys|nexent|test-ns|dynamic\n" if ssh_keys else ""),
             encoding="utf-8",
         )
         if not released:
@@ -75,7 +76,9 @@ esac
                 "---\nkind: PersistentVolumeClaim\nmetadata:\n  name: nexent-workspace\n"
                 + ("" if legacy else '  annotations:\n    helm.sh/resource-policy: "keep"\n')
                 + "spec:\n  accessModes: []\n---\nkind: PersistentVolumeClaim\nmetadata:\n  name: nexent-skills\n"
-                "spec:\n  volumeName: nexent-skills-pv\n",
+                "spec:\n  volumeName: nexent-skills-pv\n"
+                + ("---\nkind: PersistentVolumeClaim\nmetadata:\n  name: nexent-ssh-keys\n"
+                   "  annotations:\n    helm.sh/resource-policy: keep\nspec:\n  accessModes: []\n" if ssh_keys else ""),
                 encoding="utf-8",
             )
             (manifests / "nexent-infrastructure").write_text(
@@ -123,11 +126,14 @@ def test_preserving_claims_also_preserves_the_namespace(uninstall, arguments):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The fixture requires a POSIX pseudo-terminal")
-@pytest.mark.parametrize("answer,deleted", [("", False), ("y", True)])
-def test_prompt_defaults_to_retention_and_accepts_explicit_yes(uninstall, answer, deleted):
-    result, calls = uninstall("--keep-namespace", answer=answer)
+@pytest.mark.parametrize("answer,deleted", [
+    ("", False), (" ", False), ("n", False), ("yes", False), ("Y", False), (" y ", False), ("y", True),
+])
+def test_prompt_only_deletes_for_literal_lowercase_y(uninstall, answer, deleted):
+    result, calls = uninstall("--remove-namespace", answer=answer)
     assert result.returncode == 0, result.stderr
     assert ("kubectl delete --raw" in calls) == deleted
+    assert ("kubectl delete namespace" in calls) == deleted
 
 
 @pytest.mark.parametrize("released", [False, True])
@@ -139,6 +145,18 @@ def test_explicit_delete_is_scoped_and_uses_the_discovered_uid(uninstall, releas
     assert deletions == ["kubectl delete --raw /api/v1/namespaces/test-ns/persistentvolumeclaims/nexent-workspace -f -"]
     assert '"preconditions":{"uid":"uid-workspace"}' in calls
     assert "helm uninstall nexent-infrastructure" not in calls
+
+
+@pytest.mark.parametrize("delete", ["false", "true"])
+def test_shared_ssh_claim_follows_dynamic_pvc_retention(uninstall, delete):
+    result, calls = uninstall("--release-scope", "nexent", "--delete-pvc", delete, ssh_keys=True)
+    assert result.returncode == 0, result.stderr
+    if delete == "true":
+        assert "persistentvolumeclaims/nexent-ssh-keys -f -" in calls
+        assert '"preconditions":{"uid":"uid-ssh-keys"}' in calls
+    else:
+        assert "Preserved dynamic PVCs: nexent-workspace nexent-ssh-keys" in result.stdout
+        assert "kubectl delete --raw" not in calls
 
 
 def test_legacy_dynamic_claims_without_keep_policy_stop_before_helm_uninstall(uninstall):

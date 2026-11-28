@@ -2,6 +2,9 @@
 {{- $sharedStorage := default dict $global.sharedStorage -}}
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 {{- $logsStorage := default dict $sharedStorage.logs -}}
+{{- $sshKeysStorage := default dict $sharedStorage.sshKeys -}}
+{{- $sshKeysClaim := ternary (default "nexent-ssh-keys" $sshKeysStorage.existingClaim) "nexent-ssh-keys" (eq $sharedStorage.mode "existing") -}}
+{{- $mountSshKeys := dig "deploymentComponents" "application" true $global -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,6 +36,12 @@ spec:
             - /bin/sh
             - -c
             - until python -c "import urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://nexent-config:5010/health/ready', timeout=3).close()" 2>/dev/null; do sleep 2; done
+{{- if $mountSshKeys }}
+          volumeMounts:
+            - name: nexent-ssh-keys
+              mountPath: /opt/ssh-keys
+              readOnly: true
+{{- end }}
       containers:
         - name: nexent-mcp
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -78,6 +87,11 @@ spec:
           volumeMounts:
             - name: nexent-workspace
               mountPath: /mnt/nexent
+{{- if $mountSshKeys }}
+            - name: nexent-ssh-keys
+              mountPath: /opt/ssh-keys
+              readOnly: true
+{{- end }}
             - name: nexent-logs
               mountPath: /mnt/nexent-data/logs
           resources:
@@ -104,6 +118,12 @@ spec:
         - name: nexent-workspace
           persistentVolumeClaim:
             claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}
+{{- if $mountSshKeys }}
+        - name: nexent-ssh-keys
+          persistentVolumeClaim:
+            claimName: {{ $sshKeysClaim | quote }}
+            readOnly: true
+{{- end }}
         - name: nexent-logs
           persistentVolumeClaim:
             claimName: {{ default "nexent-logs" $logsStorage.existingClaim }}

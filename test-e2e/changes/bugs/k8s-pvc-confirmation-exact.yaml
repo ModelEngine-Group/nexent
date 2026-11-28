@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-PVC-CONFIRMATION-EXACT-20261128
+  change_type: bugfix
+  bug_id: K8S-PVC-CONFIRMATION-EXACT-20261128
+  title: Require an exact lowercase y to confirm dynamic PVC deletion
+  description: Tighten the interactive dynamic PVC deletion prompt while preserving the explicit --delete-pvc options.
+  observed_behavior: The prompt accepted uppercase Y and whitespace-padded y, which could delete claims and their namespace.
+  expected_behavior: Accept the literal lowercase y after normalizing a terminal line ending. Keep the dynamic PVCs and their namespace for any other answer.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: The prompt regression covered Enter and lowercase y without exercising uppercase, whitespace-padded or other replies.
+  feature_contract_changed: false
+  affected_features:
+    existing: [RUNTIME-REPLICAS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Pass exact terminal replies to the uninstall entry point and check whether PVC deletion or namespace deletion is requested.
+    - Verify Enter, whitespace, uppercase Y and other answers preserve claims and their namespace even when namespace removal was requested.
+    reason: The existing pseudo-terminal test exercises the changed prompt through the actual Bash entry point, with Helm and kubectl isolated.
+    test_selectors:
+    - test/backend/deploy/test_k8s_uninstall_pvc.py::test_prompt_only_deletes_for_literal_lowercase_y
+  no_case_change_reason: RUNTIME-OFFLINE-DEPLOY-D5-001 proves real Helm retention and explicit deletion through its noninteractive paths. The current change only affects terminal input and is proved by the strengthened UT.
+  notes: >-
+    Adjacent coverage is RUNTIME-OFFLINE-DEPLOY-D5-001, routed to deployment and blocked pending an isolated Kubernetes cluster and dedicated dynamic RWX StorageClass.
+    The existing deployment guide and K8S-DYNAMIC-PVC-UNINSTALL-20261126 describe the retention contract. The sibling SPEC repository is unavailable.
