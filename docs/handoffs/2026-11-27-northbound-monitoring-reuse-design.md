@@ -83,6 +83,64 @@ session 通道的 `authenticate`（`services/permission/identity/session`）、�
 
 ### 2.1 组件视图
 
+**架构逻辑图（容器与分层）**：
+
+```mermaid
+flowchart TB
+    P[北向调用方] -- "Bearer API Key" --> GW
+    B[浏览器面板] -- "session" --> GW
+
+    subgraph GW["Gateway 容器 :5013"]
+        REG["exposure/registry.json（643 行）<br/>+ /nb/ops/v1/monitoring ×24<br/>credential_kinds=[api_key]"]
+        CRED["凭据策略：/nb/ 无旁路<br/>API Key 直查业务 PG"]
+        SIGN["sign_identity（aud=ops）"]
+    end
+
+    subgraph SHARED["共享层（不导入业务源）"]
+        CONTRACTS["contracts<br/>认证类型 / 域错误 / 常量"]
+        WEBSH["backend/http/server（本 PR 新增）<br/>路径策略 · 统一信封 · 限流 · 记账编排<br/>security_audit：[SEC_AUDIT]"]
+        RDASH["infrastructure（本 PR 新增）<br/>rdb/token_usage：账本模型+写入器"]
+    end
+
+    subgraph OPS["Ops 容器 :5016"]
+        GIM["GatewayIdentityMiddleware 验签"]
+        MOUNT["ops_router 双挂载<br/>/ops/v1/monitoring（session）<br/>/nb/ops/v1/monitoring（api_key）"]
+        PRIN["ops_principal<br/>trusted_identity → 验签身份"]
+        LOCK["ops_scoped_tenant<br/>租户锁定"]
+        ENVM["信封中间件"]
+        KERNEL["共享查询内核 ops/monitoring/*"]
+    end
+
+    subgraph MGMT["Management 容器 :5010"]
+        GATES["northbound_gates 门控（/nb/v1）"]
+        SHIM["5 处重导出 shim"]
+    end
+
+    subgraph DATA["数据层"]
+        BPG[("业务 PG<br/>user_token_info_t<br/>user_token_usage_log_t")]
+        OPG[("Ops 控制库 PG")]
+        ES[("Elasticsearch")]
+        RDS[("Redis")]
+    end
+
+    GW -- "原路径转发 + 签名身份" --> OPS
+    GW -- "/nb/v1 路由" --> MGMT
+    GIM --> PRIN --> LOCK
+    MOUNT --> PRIN
+    MOUNT --> KERNEL
+    PRIN -- "记账 control-io" --> WEBSH
+    GATES --> WEBSH
+    SHIM -. "重导出" .-> WEBSH
+    WEBSH --> RDASH
+    RDASH --> BPG
+    WEBSH --> RDS
+    KERNEL --> OPG
+    KERNEL --> ES
+    CRED --> BPG
+```
+
+**请求链路视图**：
+
 ```mermaid
 flowchart LR
     P[北向调用方 Partner] -- "Bearer API Key" --> G[Gateway :5013]
@@ -96,7 +154,7 @@ flowchart LR
         GIM[GatewayIdentityMiddleware<br/>audience=ops 验签]
         ENV["/nb 响应包装中间件<br/>成功→{message,data,requestId}<br/>错误→{code,message,status,requestId}"]
         SH["同一组内部 handler x24<br/>双挂载: /ops/v1/monitoring(session)<br/>+/nb/ops/v1/monitoring(api_key)"]
-        PA["ops_principal 路径感知<br/>/nb→API Key 身份+用量记账<br/>session→authenticate 不变"]
+        PA["ops_principal 读 trusted_identity<br/>(网关验签身份) + 共享层记账<br/>session→authenticate 不变"]
         TL["ops_scoped_tenant 路径感知<br/>/nb→租户=身份租户(锁定)<br/>session→operations_scope 不变"]
     end
     B[浏览器面板] -- "session" --> G
