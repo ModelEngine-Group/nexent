@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: DEPLOY-UNINSTALL-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: DEPLOY-UNINSTALL-D5-001
+acceptance_bindings:
+  AC-01: [test_compose_configuration_failure_preserves_host_data]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The case uses the installed Docker Compose CLI against a disposable configuration and an unused socket in its owned temporary directory. It creates no Docker resources and removes the temporary directory after the assertions.

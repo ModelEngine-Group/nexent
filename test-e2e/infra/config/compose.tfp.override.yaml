@@ -3,6 +3,7 @@ services:
   nexent-runtime:
     environment:
       AGENT_WORKSPACE_ROOT: "${NEXENT_TFP_WORKSPACE:?TFP requires an owned workspace}"
+      NEXENT_SANDBOX_DOCKER_WORKSPACE_SOURCE: "${NEXENT_TFP_WORKSPACE:?TFP requires an owned workspace}"
     volumes:
       - type: bind
         source: "${NEXENT_TFP_WORKSPACE:?TFP requires an owned workspace}"

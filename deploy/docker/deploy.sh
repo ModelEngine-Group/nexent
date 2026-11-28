@@ -1094,6 +1094,7 @@ prepare_directory_and_data() {
   create_dir_with_permission "$ROOT_DIR/minio/data" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
   create_dir_with_permission "$ROOT_DIR/memory-provider-plugins" 775
+  mkdir -p -- "$ROOT_DIR/agent-workspace" || return 1
   prepare_project_config_dir || return 1
   migrate_legacy_project_config || return 1
 

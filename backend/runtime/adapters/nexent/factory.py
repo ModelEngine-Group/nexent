@@ -32,14 +32,19 @@ def materialize_run(*, agent_config, workspace_path, workspace_root, sandbox_con
             "workspace_root": str(Path(workspace_root).resolve()),
             "workspace_path": workspace_path,
         }
-        if (
-            getattr(sandbox_config.level, "value", sandbox_config.level) == "docker"
-            and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
-            and sandbox_config.workspace_mode == "legacy"
-        ):
-            sandbox_config.extra_kwargs.update(
-                {"workspace_volume_name": environment.NEXENT_SANDBOX_WORKSPACE_VOLUME, "shared_workspace": True}
+        if getattr(sandbox_config.level, "value", sandbox_config.level) == "docker":
+            legacy_system = (
+                sandbox_config.workspace_mode == "legacy"
+                and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
             )
+            docker_workspace_source = environment.NEXENT_SANDBOX_DOCKER_WORKSPACE_SOURCE
+            if docker_workspace_source and (legacy_system or sandbox_config.workspace_mode == "bind"):
+                sandbox_config.docker_workspace_source = docker_workspace_source
+                sandbox_config.extra_kwargs["shared_workspace"] = True
+            elif legacy_system:
+                sandbox_config.extra_kwargs.update(
+                    {"workspace_volume_name": environment.NEXENT_SANDBOX_WORKSPACE_VOLUME, "shared_workspace": True}
+                )
 
     return build_run_info(
         agent_config=agent_config,

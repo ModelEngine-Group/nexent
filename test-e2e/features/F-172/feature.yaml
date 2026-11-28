@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: F-172-RULE-01
     description: Docker Compose fresh install、health、持久化、restart
+  - rule_id: F-172-RULE-02
+    description: Docker Runtime and its SYSTEM Sandbox bind the deployment's agent-workspace directory directly to their workspace path.
   required_test_stages:
   - D5
   source:

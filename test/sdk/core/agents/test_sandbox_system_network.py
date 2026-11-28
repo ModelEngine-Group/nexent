@@ -4,6 +4,7 @@
 import logging
 import sys
 from concurrent.futures import CancelledError
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -230,11 +231,17 @@ def test_system_startup_timeout_cleans_created_container(system, monkeypatch, re
     assert not system.pool._system_containers
 
 
-def test_changed_system_workspace_does_not_destroy_active_owner(system, tmp_path, monkeypatch):
-    original = sb.SandboxConfig(
-        level=sb.SandboxLevel.DOCKER, workspace_mode='bind', container_workspace_root='/mnt/old',
-        extra_kwargs={'workspace_root': str(tmp_path)},
-    )
+@pytest.mark.parametrize('deployment_bind', [False, True])
+def test_changed_system_workspace_does_not_destroy_active_owner(system, tmp_path, monkeypatch, deployment_bind):
+    if deployment_bind:
+        system.config.extra_kwargs['workspace_root'] = str(tmp_path)
+        system.config.docker_workspace_source = '/srv/nexent-data/agent-workspace'
+        original = replace(system.config, docker_workspace_source='/srv/old/agent-workspace')
+    else:
+        original = sb.SandboxConfig(
+            level=sb.SandboxLevel.DOCKER, workspace_mode='bind', container_workspace_root='/mnt/old',
+            extra_kwargs={'workspace_root': str(tmp_path)},
+        )
     owner = SimpleNamespace(_nexent_sandbox_config=original, container=system.container)
     system.pool._system_containers[system.config.docker_image] = owner
     destroy = MagicMock()

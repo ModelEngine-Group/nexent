@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 if [ -z "$BASH_VERSION" ]; then
   echo "❌ This script must be run with bash. Please use: bash uninstall.sh or ./uninstall.sh"
@@ -213,7 +214,7 @@ remove_docker_named_volumes() {
   command -v docker >/dev/null 2>&1 || return 0
 
   local volume_names
-  volume_names="$(docker volume ls --format '{{.Name}}' 2>/dev/null || true)"
+  volume_names="$(docker volume ls --format '{{.Name}}')" || return 1
   [ -n "$volume_names" ] || return 0
 
   local volumes_to_remove=()
@@ -229,7 +230,7 @@ remove_docker_named_volumes() {
 
   if [ "${#volumes_to_remove[@]}" -gt 0 ]; then
     echo "🧹 Removing Docker volumes: ${volumes_to_remove[*]}"
-    docker volume rm -f "${volumes_to_remove[@]}" >/dev/null 2>&1 || true
+    docker volume rm -f "${volumes_to_remove[@]}" >/dev/null
   fi
 }
 
@@ -263,36 +264,40 @@ monitoring_volume_names() {
 remove_docker_containers_by_name() {
   command -v docker >/dev/null 2>&1 || return 0
 
+  local container_names
+  container_names="$(docker ps -a --format '{{.Names}}')" || return 1
   local containers_to_remove=()
   local container
   while IFS= read -r container; do
     [ -n "$container" ] || continue
-    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$container"; then
+    if grep -Fxq -- "$container" <<< "$container_names"; then
       containers_to_remove+=("$container")
     fi
   done
 
   if [ "${#containers_to_remove[@]}" -gt 0 ]; then
     echo "🧹 Removing Docker containers: ${containers_to_remove[*]}"
-    docker rm -f "${containers_to_remove[@]}" >/dev/null 2>&1 || true
+    docker rm -f "${containers_to_remove[@]}" >/dev/null
   fi
 }
 
 remove_docker_volumes_by_name() {
   command -v docker >/dev/null 2>&1 || return 0
 
+  local volume_names
+  volume_names="$(docker volume ls --format '{{.Name}}')" || return 1
   local volumes_to_remove=()
   local volume
   while IFS= read -r volume; do
     [ -n "$volume" ] || continue
-    if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$volume"; then
+    if grep -Fxq -- "$volume" <<< "$volume_names"; then
       volumes_to_remove+=("$volume")
     fi
   done
 
   if [ "${#volumes_to_remove[@]}" -gt 0 ]; then
     echo "🧹 Removing Docker volumes: ${volumes_to_remove[*]}"
-    docker volume rm -f "${volumes_to_remove[@]}" >/dev/null 2>&1 || true
+    docker volume rm -f "${volumes_to_remove[@]}" >/dev/null
   fi
 }
 
@@ -316,9 +321,9 @@ docker_compose_down_file() {
   fi
 
   if [ "$use_project_name" = "true" ]; then
-    $docker_compose_command "${env_file_args[@]}" -p nexent -f "$compose_file" down --remove-orphans "${volume_args[@]}" || true
+    $docker_compose_command "${env_file_args[@]}" -p nexent -f "$compose_file" down --remove-orphans "${volume_args[@]}"
   else
-    $docker_compose_command "${env_file_args[@]}" -f "$compose_file" down --remove-orphans "${volume_args[@]}" || true
+    $docker_compose_command "${env_file_args[@]}" -f "$compose_file" down --remove-orphans "${volume_args[@]}"
   fi
 }
 
@@ -344,6 +349,7 @@ remove_nexent_data_dirs() {
     "$root_dir/volumes"
     "$root_dir/openssh-server"
     "$root_dir/project-config"
+    "$root_dir/agent-workspace"
     "$root_dir/scripts"
     "$root_dir/skills"
     "$work_dir"
@@ -360,6 +366,24 @@ remove_nexent_data_dirs() {
       rm -rf "$dir"
     fi
   done
+}
+
+remove_docker_resources() {
+  local remove_volumes="$1"
+
+  docker_compose_down_file "$COMPOSE_DIR/docker-compose-monitoring.yml" false "$remove_volumes" || return 1
+  remove_docker_containers_by_name < <(monitoring_container_names) || return 1
+  if [ "$remove_volumes" = "true" ]; then
+    remove_docker_volumes_by_name < <(monitoring_volume_names) || return 1
+  fi
+  docker_compose_down_file "$COMPOSE_DIR/docker-compose-supabase.prod.yml" true "$remove_volumes" || return 1
+  docker_compose_down_file "$COMPOSE_DIR/docker-compose-supabase.yml" true "$remove_volumes" || return 1
+  docker_compose_down_file "$COMPOSE_DIR/docker-compose.prod.yml" true "$remove_volumes" || return 1
+  docker_compose_down_file "$COMPOSE_DIR/docker-compose.yml" true "$remove_volumes" || return 1
+
+  if [ "$remove_volumes" = "true" ]; then
+    remove_docker_named_volumes || return 1
+  fi
 }
 
 main() {
@@ -389,18 +413,16 @@ main() {
     fi
   fi
 
-  docker_compose_down_file "$COMPOSE_DIR/docker-compose-monitoring.yml" false "$remove_volumes"
-  remove_docker_containers_by_name < <(monitoring_container_names)
-  if [ "$remove_volumes" = "true" ]; then
-    remove_docker_volumes_by_name < <(monitoring_volume_names)
+  if ! remove_docker_resources "$remove_volumes"; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ Docker 卸载失败，宿主机数据目录已保留。" >&2
+    else
+      echo "❌ Docker uninstall failed. Host data directories were preserved." >&2
+    fi
+    return 1
   fi
-  docker_compose_down_file "$COMPOSE_DIR/docker-compose-supabase.prod.yml" true "$remove_volumes"
-  docker_compose_down_file "$COMPOSE_DIR/docker-compose-supabase.yml" true "$remove_volumes"
-  docker_compose_down_file "$COMPOSE_DIR/docker-compose.prod.yml" true "$remove_volumes"
-  docker_compose_down_file "$COMPOSE_DIR/docker-compose.yml" true "$remove_volumes"
 
   if [ "$remove_volumes" = "true" ]; then
-    remove_docker_named_volumes
     remove_nexent_data_dirs
   fi
 
