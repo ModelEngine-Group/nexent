@@ -2,6 +2,7 @@
 
 import types
 import importlib.machinery
+import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import unittest
@@ -493,6 +494,32 @@ class TestRefreshToken:
         data = response.json()
         assert data["detail"] == "No refresh token provided"
 
+    @pytest.mark.parametrize("body", [[], "invalid", None])
+    def test_refresh_rejects_non_object_json(self, body):
+        response = client.post(
+            "/user/refresh_token",
+            content=json.dumps(body),
+            headers={"Authorization": "Bearer token", "Content-Type": "application/json"},
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        assert response.json() == {"detail": "No refresh token provided"}
+
+    @pytest.mark.parametrize(("conflict", "status"), [(False, 401), (True, 409)])
+    def test_refresh_maps_domain_rejections_and_forwards_request_id(self, conflict, status):
+        from management.services.permission.identity.local_session import RefreshConflict
+
+        detail = "Session refresh was already processed" if conflict else "Invalid or expired access token"
+        error = RefreshConflict(detail) if conflict else UnauthorizedError(detail)
+        with patch("management.api.identity.user_management.refresh_user_token", side_effect=error) as refresh:
+            response = client.post(
+                "/user/refresh_token",
+                json={"refresh_token": "fixture-refresh"},
+                headers={"Authorization": "Bearer access", "X-Refresh-Request-Id": "fixture-request-id"},
+            )
+        assert response.status_code == status
+        assert response.json() == {"detail": detail}
+        refresh.assert_awaited_once_with("access", "fixture-refresh", "fixture-request-id")
+
     def test_refresh_rejects_malformed_request_identifier(self):
         response = client.post(
             "/user/refresh_token",
@@ -526,6 +553,23 @@ class TestLogout:
         with patch("management.api.identity.user_management.get_current_user_id", side_effect=UnauthorizedError("invalid")), patch("management.api.identity.user_management.revoke_cas_session_by_session_id") as revoke:
             assert client.post("/user/logout", headers={"Authorization":"Bearer forged"}).status_code == 200
             revoke.assert_not_called()
+
+    def test_local_logout_revokes_only_the_authenticated_local_session(self):
+        base = "management.api.identity.user_management"
+        with (
+            patch(f"{base}.get_current_user_id", return_value=("user", "tenant")),
+            patch(f"{base}.extract_session_id_from_authorization", return_value="local:session"),
+            patch(f"{base}.revoke_local_session") as revoke_local,
+            patch(f"{base}.revoke_cas_session_by_session_id") as revoke_cas,
+            patch(f"{base}.build_logout_url") as cas_url,
+        ):
+            response = client.post("/user/logout", headers={"Authorization": "Bearer valid"})
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["message"] == "Logout successful"
+        revoke_local.assert_called_once_with("local:session", "user")
+        revoke_cas.assert_not_called()
+        cas_url.assert_not_called()
 
     def test_valid_cas_logout_revokes_session_and_returns_url(self):
         with patch("management.api.identity.user_management.get_current_user_id",return_value=("u","t")), patch("management.api.identity.user_management.extract_session_id_from_authorization",return_value="sid"), patch("management.api.identity.user_management.build_logout_url",return_value="https://cas.example.com/logout"), patch("management.api.identity.user_management.revoke_cas_session_by_session_id") as revoke:
