@@ -81,8 +81,16 @@ def mock_session():
 
 @pytest.fixture
 def mock_db_session(mock_session):
-    """Fixture to mock get_db_session."""
-    with patch.object(token_db, 'get_db_session', return_value=mock_session):
+    """Fixture to mock get_db_session.
+
+    log_token_usage lives in the shared storage adapter now (re-exported by
+    this module), so both the local and the shared session factory names are
+    intercepted.
+    """
+    from infrastructure.rdb import token_usage
+
+    with patch.object(token_db, 'get_db_session', return_value=mock_session), \
+            patch.object(token_usage, 'get_db_session', return_value=mock_session):
         yield mock_session
 
 

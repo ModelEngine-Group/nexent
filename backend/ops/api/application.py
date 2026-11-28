@@ -25,6 +25,10 @@ def create_app() -> FastAPI:
     application.include_router(access_router)
     application.include_router(health_router)
     application.add_middleware(GatewayIdentityMiddleware, audience="ops")
+    # Outermost: /nb responses leave this process in the published partner envelope.
+    from ops.api.northbound_envelope import NorthboundEnvelopeMiddleware
+
+    application.add_middleware(NorthboundEnvelopeMiddleware)
     application.include_router(system_configuration_router)
     if trajectory_enabled():
         from ops.api.trajectory import router as trajectory_router
@@ -40,6 +44,15 @@ def create_app() -> FastAPI:
         from ops.api.monitoring import ops_router
 
         application.include_router(ops_router)
+        # Northbound gates: hand-written /nb/v1/monitoring routes over the
+        # same handlers, identity dependency and selection contracts; the
+        # envelope middleware wraps their responses into the partner
+        # contract. Declared via @nb_exposed and registered in the gateway
+        # exposure snapshot by the offline generator.
+        from ops.api.northbound_gates import nb_capability_routers
+
+        for gate_router in nb_capability_routers():
+            application.include_router(gate_router)
     return application
 
 

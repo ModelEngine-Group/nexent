@@ -151,44 +151,11 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
     return {"user_id": user_id, "tenant_id": membership["tenant_id"], "token_id": record.get("token_id")}
 
 
-def record_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None:
-    """Account one authenticated Key call. Best effort: never blocks the request.
-
-    Accounting failures are warnings only: usage statistics must not become a
-    business availability dependency, and the credential is already verified.
-    """
-    token_id = principal.token_id or 0
-    if not token_id or token_id <= 0:
-        return
-    path = request.url.path if request is not None else ""
-    # These three legacy northbound routes account their own usage inside the
-    # business service (run_chat / stop_chat / update_conversation_title in
-    # management/services/northbound.py call log_token_usage themselves);
-    # skipping them here avoids double counting. Keep this list in sync if
-    # those routes move or new self-accounting routes are added.
-    if path == "/nb/v1/chat/run" or path.startswith("/nb/v1/chat/stop/") or (
-        path.startswith("/nb/v1/conversations/") and path.endswith("/title")
-    ):
-        return
-    try:
-        request_id = request.headers.get("X-Request-Id") if request is not None else None
-        # call_function_name is VARCHAR(100): store the stable route template
-        # (e.g. /nb/v1/file/download/{object_name:path}), never the raw object
-        # path, which can legally exceed the column. The full path stays in
-        # JSONB metadata, correlated with the response through request_id.
-        route = request.scope.get("route") if request is not None else None
-        template = getattr(route, "path", None)
-        log_token_usage(
-            token_id=token_id,
-            call_function_name=(template or path)[:100],
-            related_id=None,
-            created_by=principal.user_id,
-            metadata={"method": request.method if request is not None else None,
-                      "request_id": request_id or str(uuid.uuid4()),
-                      "path": path},
-        )
-    except Exception as exc:
-        logging.warning("Failed to log northbound API key usage: %s", exc)
+# The accounting orchestration lives in the shared Web layer
+# (backend/http/server/northbound.py) because the ops /nb mirror accounts into
+# the same ledger; re-exported here so existing management call sites keep
+# working.
+from backend.http.server.northbound import record_api_key_usage as record_api_key_usage
 
 
 def submit_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None:

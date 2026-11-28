@@ -11,6 +11,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import aliased
 
 from infrastructure.rdb.client import get_db_session
+# The usage writer lives in the shared storage adapter layer (re-exported
+# here) because northbound accounting is performed by every /nb-exposing
+# service, not only management.
+from infrastructure.rdb.token_usage import log_token_usage as log_token_usage
 from management.db.identity.models import UserTenant, UserTokenInfo, UserTokenUsageLog
 
 
@@ -282,38 +286,6 @@ def list_active_tokens_by_tenant(
             ],
             "total": total,
         }
-
-
-def log_token_usage(
-    token_id: int,
-    call_function_name: str,
-    related_id: Optional[int],
-    created_by: str,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> int:
-    """Log token usage to the database.
-
-    Args:
-        token_id: The token ID used.
-        call_function_name: The API function name being called.
-        related_id: Related resource ID (e.g., conversation_id).
-        created_by: User ID who initiated the call.
-        metadata: Optional additional metadata for this usage log entry.
-
-    Returns:
-        The created token_usage_id.
-    """
-    with get_db_session() as session:
-        usage_log = UserTokenUsageLog(
-            token_id=token_id,
-            call_function_name=call_function_name,
-            related_id=related_id,
-            created_by=created_by,
-            meta_data=metadata,
-        )
-        session.add(usage_log)
-        session.flush()
-        return usage_log.token_usage_id
 
 
 def get_latest_usage_metadata(token_id: int, related_id: int, call_function_name: str) -> Optional[Dict[str, Any]]:
