@@ -693,3 +693,41 @@ def test_record_api_key_usage_records_gate_templates_verbatim(monkeypatch):
     )
     shared.record_api_key_usage(principal, request)
     assert captured["call_function_name"] == "/nb/v1/automations"
+
+
+def test_session_lane_refresh_skips_the_rate_limit_guard(nb_client, monkeypatch):
+    """The guard is northbound-only: a session refresh is never throttled."""
+    client, _, _ = nb_client
+    client.app.dependency_overrides.pop(ops_principal, None)
+    client.app.dependency_overrides[monitoring.authenticate] = lambda: monitoring.CurrentUser(
+        "operator", "tenantA", "OPS")
+    monkeypatch.setattr(monitoring, "operations_scope",
+                        lambda user, tenant, *_: tenant or user.tenant_id)
+    try:
+        response = client.post("/ops/v1/monitoring/models/refresh",
+                               json={"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+        assert response.status_code == 202
+        # Internal contract: bare data body, no partner envelope.
+        assert response.json()["data"]["status"] == "queued"
+        assert set(response.json()) == {"data"}
+    finally:
+        client.app.dependency_overrides.pop(monitoring.authenticate, None)
+
+
+@pytest.mark.asyncio
+async def test_action_guard_throttles_only_api_key_principals(monkeypatch):
+    """Guard contract: northbound actions are throttled, session callers are not."""
+    calls = []
+
+    async def fake_limit(tenant_id):
+        calls.append(tenant_id)
+
+    monkeypatch.setattr("backend.http.server.northbound.check_and_consume_rate_limit", fake_limit)
+    session_principal = OpsPrincipal(kind="session", user=monitoring.CurrentUser("op", "t", "OPS"))
+    await monitoring.nb_action_guard(None, session_principal)
+    assert calls == []  # session lane never throttled
+
+    key_principal = OpsPrincipal(kind="api_key", identity=AuthenticatedIdentity(
+        user_id="u", tenant_id="tenantA", token_id=7, kind=CredentialKind.API_KEY))
+    await monitoring.nb_action_guard(None, key_principal)
+    assert calls == ["tenantA"]
