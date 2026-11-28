@@ -3632,6 +3632,9 @@ def _remove_scope_references(
             branch[key] = kept
             if not kept:
                 branch["mode"] = "disabled"
+        metadata_filter = branch.get("metadata_filter")
+        if isinstance(metadata_filter, dict) and not metadata_filter.get("enabled"):
+            branch.pop("metadata_filter", None)
     return updated
 
 

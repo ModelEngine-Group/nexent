@@ -26,6 +26,7 @@ import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpR
 import {
   AIDP_DETAIL_PAGE_SIZE,
   TASK_COLUMN_MIN_WIDTHS,
+  documentStatusMeta,
   formatDetailDateTime,
   formatFailureTaskDateTime,
   formatFileSize,
@@ -120,7 +121,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
       setTaskParams((current) =>
         current.keyword === keyword ? current : { ...current, keyword, page: 1 }
       );
-    }, 250);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [taskKeyword]);
 
@@ -230,7 +231,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
       dataIndex: "file_size",
       key: "file_size",
       width: 80,
-      render: (value?: number) => formatFileSize(value),
+      render: (value?: number | string) => formatFileSize(value),
     },
     {
       title: t("aidpKnowledge.detailUpdateTime"),
@@ -252,26 +253,13 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
       filterMultiple: false,
       filteredValue: [taskStatus],
       render: (status: AidpDocumentItem["status"]) => {
-        const code = statusCode(status);
-        const labelKeys: Record<number, string> = {
-          1: "aidpKnowledge.taskSuccess",
-          2: "aidpKnowledge.taskExtracting",
-          3: "aidpKnowledge.taskFailed",
-          4: "aidpKnowledge.taskQueued",
-          5: "aidpKnowledge.taskGraphFailed",
-        };
-        const dotColor =
-          code === 1
-            ? "bg-green-500"
-            : code === 3 || code === 5
-              ? "bg-red-500"
-              : code === 4
-                ? "bg-gray-400"
-                : "bg-blue-500";
+        const meta = documentStatusMeta(status);
         return (
           <span className="inline-flex items-center gap-2 whitespace-nowrap text-gray-700">
-            <i className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
-            {code && labelKeys[code] ? t(labelKeys[code]) : (status ?? UNKNOWN)}
+            <i
+              className={`h-2 w-2 shrink-0 rounded-full ${meta?.dotClass ?? "bg-gray-400"}`}
+            />
+            {meta?.labelKey ? t(meta.labelKey) : (status ?? UNKNOWN)}
           </span>
         );
       },

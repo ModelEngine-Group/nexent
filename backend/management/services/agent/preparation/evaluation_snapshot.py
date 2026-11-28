@@ -380,7 +380,8 @@ async def prepare_conversation_snapshot(
     before_message_index: int | None = None, new_conversation: bool = False,
     metadata_from_northbound: bool = False, workbench: "PreparedWorkbench | None" = None,
     native_knowledge: PreparedNativeKnowledge | None = None, owned_conversation: dict | None = None,
-    preserve_shared_reasoning: bool = False, automation_confirmation: bool = False,
+    preserve_shared_reasoning: bool = False, northbound_run: bool = False,
+    automation_confirmation: bool = False,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -506,7 +507,8 @@ async def prepare_conversation_snapshot(
         requested_output_tokens=request.requested_output_tokens, tool_params=request.tool_params,
         conversation_id=reference.conversation_id, context_policy=request.context_policy,
         enable_automation_tool=request.enable_automation_tool, enable_planning=bool(request.enable_plan),
-        prepared_conversation=scope, memory_query_deadline=memory_query_deadline, **compile_options,
+        prepared_conversation=scope, northbound_run=northbound_run,
+        memory_query_deadline=memory_query_deadline, **compile_options,
     )
     if snapshot is not None and metadata_from_northbound and request.metadata is not None:
         from management.services.agent.mcp_passthrough import prepare_bound_mcp_header_metadata
@@ -686,7 +688,7 @@ def _export_memory_search(agent, allow_memory):
 def _export_resource(
     agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
     allow_debug_planning=False, workbench_skills=(), workbench_knowledge_tools=None, allow_sandbox_policy=False,
-    user_id=None, allow_workbench_default_aidp=False,
+    user_id=None, northbound_run=False, allow_workbench_default_aidp=False,
 ):
     allow_workbench_default_aidp = allow_workbench_default_aidp and agent.origin == "SYSTEM"
     if agent.sandbox_policy and not allow_sandbox_policy:
@@ -828,13 +830,14 @@ def _export_resource(
         max_steps=agent.max_steps, tools=tools, skill_refs=skill_refs, model_alias=agent.model_name,
         workbench_skill_refs=refs if workbench_skills else [],
         invocation_name=agent.invocation_name, runtime_ref=agent.runtime_ref, origin=agent.origin,
+        northbound_run=northbound_run,
         memory_search=memory_search,
         sandbox_policy=agent.sandbox_policy or None,
         evaluation_options=EvaluationAgentOptions(**profile),
         subagents=[
             _export_resource(
                 child, aliases, tenant_id, language, read_servers, tool_servers, allow_memory=allow_memory, user_id=user_id,
-                allow_sandbox_policy=allow_sandbox_policy,
+                allow_sandbox_policy=allow_sandbox_policy, northbound_run=northbound_run,
             )
             for child in agent.worker_agents
         ],
@@ -920,7 +923,7 @@ def compile_snapshot(
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
     root_generation=None, turn_generation=None, source_model_alias=None, workbench_skills=(),
     allow_debug_planning=False, workbench_knowledge_tools=None, catalog_model_versions=None,
-    model_parameter_preferences=None,
+    model_parameter_preferences=None, northbound_run=False,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -935,6 +938,7 @@ def compile_snapshot(
             workbench_skills=workbench_skills,
             workbench_knowledge_tools=workbench_knowledge_tools,
             allow_sandbox_policy=True, user_id=user_id,
+            northbound_run=northbound_run,
             allow_workbench_default_aidp=(
                 prepared_conversation is not None and prepared_conversation.workbench_config_version is not None
             ),

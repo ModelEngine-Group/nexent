@@ -39,6 +39,7 @@ export type AidpDetailSetting =
   | "chunk_overlap_percent"
   | "topk"
   | "vlm"
+  | "summary"
   | "graph_llm"
   | "graph_hop"
   | "graph_thinking"
@@ -54,9 +55,12 @@ interface AidpKnowledgeDetailInformationProps {
   embeddingModelLabel?: string;
   llmModelLabel?: string;
   vlmModelLabel?: string;
+  summaryModelLabel?: string;
   formatDateTime: (value: unknown) => string;
   onEditSetting: (setting: AidpDetailSetting) => void;
   onEditPermissions: () => void;
+  /** Opens the single-switch security guardrail dialog. */
+  onEditGuardrail: () => void;
   /** Opens the permanent-disable confirmation for the knowledge graph. */
   onDisableGraph: () => void;
 }
@@ -72,9 +76,11 @@ const AidpKnowledgeDetailInformation = ({
   embeddingModelLabel,
   llmModelLabel,
   vlmModelLabel,
+  summaryModelLabel,
   formatDateTime,
   onEditSetting,
   onEditPermissions,
+  onEditGuardrail,
   onDisableGraph,
 }: AidpKnowledgeDetailInformationProps) => {
   const { t } = useTranslation();
@@ -185,6 +191,64 @@ const AidpKnowledgeDetailInformation = ({
           <AidpDetailField label={t("aidpKnowledge.detailVectorTopK")}>
             <span>{displayValue(detail.topk)}</span>
             {editButton("topk", t("aidpKnowledge.detailEditTopK"))}
+          </AidpDetailField>
+          <AidpDetailField label={t("aidpKnowledge.sensitiveIntercept")}>
+            <Tag
+              color={
+                detail.sensitive_intercept_enable === 1 ? "green" : "default"
+              }
+            >
+              {detail.sensitive_intercept_enable === 1
+                ? t("common.enabled")
+                : t("common.disabled")}
+            </Tag>
+            {canEdit && (
+              <Tooltip title={t("aidpSensitiveWords.guardrailEdit")}>
+                <Button
+                  className="ml-2"
+                  type="text"
+                  size="small"
+                  aria-label={t("aidpSensitiveWords.guardrailEdit")}
+                  icon={<EditOutlined />}
+                  onClick={onEditGuardrail}
+                />
+              </Tooltip>
+            )}
+          </AidpDetailField>
+        </dl>
+      </section>
+
+      <section className="py-6">
+        <div className="mb-5 flex items-center gap-2">
+          <h2 className="text-lg font-semibold leading-7 text-gray-800">
+            {t("aidpKnowledge.createSectionSummary")}
+          </h2>
+          {canEdit && (
+            <Tooltip title={t("aidpKnowledge.detailEditSummary")}>
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("aidpKnowledge.detailEditSummary")}
+                icon={<EditOutlined />}
+                onClick={() => onEditSetting("summary")}
+              />
+            </Tooltip>
+          )}
+        </div>
+        <dl className={FIELD_GRID}>
+          <AidpDetailField label={t("aidpKnowledge.createSummaryModel")}>
+            {detail.summary_enable === true ? (
+              <>
+                <Tag color="green">{t("common.enabled")}</Tag>
+                <span className="ml-2">
+                  {summaryModelLabel ||
+                    detail.summary_model ||
+                    AIDP_UNKNOWN_VALUE}
+                </span>
+              </>
+            ) : (
+              <Tag color="default">{t("common.disabled")}</Tag>
+            )}
           </AidpDetailField>
         </dl>
       </section>

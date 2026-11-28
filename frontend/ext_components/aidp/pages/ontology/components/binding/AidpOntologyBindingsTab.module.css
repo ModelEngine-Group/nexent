@@ -1,0 +1,26 @@
+.confirmBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.confirmBody p {
+  margin: 0;
+}
+
+.confirmNames {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  padding: 8px 12px;
+  overflow-y: auto;
+  border-radius: 6px;
+  background: #fafafa;
+  color: #595959;
+  font-size: 13px;
+  line-height: 20px;
+}

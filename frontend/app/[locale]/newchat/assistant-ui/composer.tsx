@@ -595,10 +595,19 @@ export const Composer: FC<ComposerProps> = ({
     const display_names = remaining.map((item) => item.name);
     const mode = ids.length > 0 ? "override" : "disabled";
     const local = knowledgeSource === "local";
+    const existingFilter = knowledgeScope.aidp.metadata_filter;
     const nextScope: ConversationKnowledgeScope = {
       ...knowledgeScope,
       local: local ? { mode, knowledge_ids: ids } : knowledgeScope.local,
-      aidp: local ? knowledgeScope.aidp : { mode, kds_ids: ids },
+      aidp: local
+        ? knowledgeScope.aidp
+        : {
+            mode,
+            kds_ids: ids,
+            ...(mode !== "disabled" && existingFilter
+              ? { metadata_filter: existingFilter }
+              : {}),
+          },
     };
     return onKnowledgeScopeChange(nextScope, {
       local: local

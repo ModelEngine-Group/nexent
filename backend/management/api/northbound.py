@@ -10,6 +10,7 @@ import re
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Literal, Optional
 from urllib.parse import unquote, urlparse
+from uuid import UUID
 
 import httpx
 from contracts.constants.environment import MINIO_ENDPOINT
@@ -105,6 +106,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/nb/v1", tags=["northbound"])
 
 __all__ = ["router", "_get_northbound_context"]
+
+# The legacy Northbound contract tests stub the environment module without AIDP
+# constants; resolve them only when the download handler actually runs.
+def _aidp_file_credentials() -> tuple[str, str]:
+    from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
+
+    return AIDP_SERVER_URL, AIDP_API_KEY
+
+
+def _require_aidp_permission(**kwargs):
+    """Keep AIDP permission imports out of the legacy Northbound test stubs."""
+    from ext_components.aidp.services.aidp_permission_service import require_permission
+
+    return require_permission(**kwargs)
+
+
+async def _stream_aidp_doc(server_url, api_key, kds_id, file_uuid):
+    from ext_components.aidp.services.aidp_service import stream_aidp_doc_impl
+
+    return await stream_aidp_doc_impl(server_url, api_key, kds_id, file_uuid)
 
 
 def _resolve_proxy_download_filename(presigned_url: str, content_disposition: str) -> str:
@@ -580,6 +601,111 @@ async def get_agent_knowledge_bases(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Internal Server Error",
         ) from exc
+
+
+@router.get(
+    "/knowledge-bases/{kds_id}/files/{file_uuid}/download",
+    tags=["northbound-knowledge"],
+    summary="Download one AIDP original file with an API key",
+    description=(
+        "Returns the current version of one AIDP knowledge-base file. The "
+        "caller must authenticate with a northbound API key and hold READ "
+        "permission on the target knowledge base. The URL carries only the "
+        "knowledge-base and file identifiers; the API key travels in the "
+        "Authorization header and is never embedded in the link."
+    ),
+)
+async def download_knowledge_base_file(
+    request: Request,
+    kds_id: Annotated[str, Path(description="AIDP knowledge base ID")],
+    file_uuid: Annotated[UUID, Path(description="AIDP file UUID")],
+):
+    from ext_components.aidp.consts.aidp_exceptions import (
+        AidpKbNotFoundError,
+        AidpKbPermissionDeniedError,
+    )
+    from starlette.background import BackgroundTask
+
+    ctx: NorthboundContext = await _get_northbound_context(request)
+    try:
+        _require_aidp_permission(
+            kb_id=kds_id,
+            user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+            required="READ",
+        )
+    except AidpKbNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="AIDP knowledge base not found",
+        ) from exc
+    except AidpKbPermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="No read permission for this AIDP knowledge base",
+        ) from exc
+
+    server_url, api_key = _aidp_file_credentials()
+    try:
+        aidp_response = await _stream_aidp_doc(
+            server_url,
+            api_key,
+            kds_id,
+            file_uuid.hex,
+        )
+    except AppException as exc:
+        # AIDP's KB-scoped download endpoint rejects a file that does not
+        # belong to the requested knowledge base. Keep that boundary explicit
+        # and never forward AIDP credentials or upstream bodies to the caller.
+        upstream_status = (exc.details or {}).get("upstream_status")
+        upstream_code = (exc.details or {}).get("upstream_code")
+        logger.warning(
+            "Northbound AIDP file download failed: kds_id=%s file_uuid=%s "
+            "user_id=%s upstream_status=%s upstream_code=%s",
+            kds_id,
+            file_uuid,
+            ctx.user_id,
+            upstream_status,
+            upstream_code,
+        )
+        if upstream_status == HTTPStatus.NOT_FOUND:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="Original file not found in the AIDP knowledge base",
+            ) from exc
+        raise HTTPException(
+            status_code=exc.http_status,
+            detail="Failed to fetch the original file from AIDP",
+        ) from exc
+    except Exception:
+        logger.exception(
+            "Northbound AIDP file download failed: kds_id=%s file_uuid=%s "
+            "user_id=%s",
+            kds_id,
+            file_uuid,
+            ctx.user_id,
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail="Failed to fetch the original file from AIDP",
+        ) from exc
+
+    response_headers: Dict[str, str] = {}
+    content_disposition = aidp_response.headers.get("Content-Disposition")
+    if content_disposition:
+        response_headers["Content-Disposition"] = content_disposition
+    file_size = aidp_response.headers.get("X-File-Size")
+    if file_size:
+        response_headers["X-File-Size"] = file_size
+    content_type = aidp_response.headers.get(
+        "Content-Type", "application/octet-stream"
+    )
+    return StreamingResponse(
+        aidp_response.aiter_bytes(),
+        media_type=content_type,
+        headers=response_headers,
+        background=BackgroundTask(aidp_response.aclose),
+    )
 
 
 @router.get("/conversations")

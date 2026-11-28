@@ -1,0 +1,137 @@
+.page {
+  --aidp-primary: #0067d1;
+  --aidp-outline: rgba(201, 201, 201, 0.4);
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.guardrailHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-shrink: 0;
+}
+
+.guardrailTitleRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.guardrailTitle {
+  margin: 0;
+  color: #191919;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.helpContent {
+  max-width: 360px;
+  color: #595959;
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.searchInput {
+  width: 320px;
+  max-width: 100%;
+  min-width: 220px;
+}
+
+.toolbarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.tableArea {
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+/* Keep the header filter trigger next to its label instead of at the far
+   right edge of a wide column, matching common data-grid headers. */
+.tableArea :global(.ant-table-thead .ant-table-filter-column) {
+  justify-content: flex-start;
+}
+
+.tableArea
+  :global(.ant-table-thead .ant-table-filter-column .ant-table-column-title) {
+  flex: 0 0 auto;
+}
+
+.tableArea :global(.ant-table-thead .ant-table-filter-trigger) {
+  margin-inline-start: 2px;
+}
+
+.wordCell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.wordText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.emptyState {
+  display: flex;
+  min-height: 208px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  color: #8c8c8c;
+  font-size: 14px;
+  text-align: center;
+}
+
+.batchFailures {
+  margin: 0;
+  padding-left: 18px;
+  color: #595959;
+  font-size: 13px;
+  line-height: 22px;
+  word-break: break-word;
+}
+
+.drawerForm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.drawerFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -397,8 +397,10 @@ def filter_accessible_kds(
     kds_ids: Sequence[str],
     user_id: str,
     tenant_id: str,
+    *,
+    required: str = REQUIRE_READ,
 ) -> list[str]:
-    """Preserve ``kds_ids`` order while dropping IDs the user cannot read."""
+    """Preserve ``kds_ids`` order while dropping IDs below ``required``."""
     if not kds_ids:
         return []
     user_groups = _get_user_groups(user_id, tenant_id)
@@ -410,7 +412,7 @@ def filter_accessible_kds(
         if record is None:
             continue
         decision = _resolve_permission(record, user_id, tenant_id, user_groups, role)
-        if _decision_meets(decision, REQUIRE_READ):
+        if _decision_meets(decision, required):
             allowed.append(kds_id)
     return allowed
 

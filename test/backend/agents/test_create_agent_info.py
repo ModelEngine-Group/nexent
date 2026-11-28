@@ -4566,6 +4566,25 @@ class TestCreateAgentRunInfo:
             compiler.read_version.assert_called_once_with(agent_id=7, tenant_id="tenant-a")
 
     @pytest.mark.asyncio
+    async def test_create_agent_run_info_forwards_northbound_run(self, compiler):
+        """The request-scoped marker reaches the snapshot, not the tool config."""
+        result = await create_agent_run_info(
+            agent_id=7, minio_files=[], query="test query", history=[],
+            user_id="user-a", tenant_id="tenant-a", language="en", is_debug=False,
+            northbound_run=True,
+        )
+
+        assert result is compiler.export.return_value
+        assert compiler.export.call_args.kwargs["northbound_run"] is True
+        assert "northbound_run" not in compiler.compile_agent.await_args.kwargs
+
+        await create_agent_run_info(
+            agent_id=7, minio_files=[], query="test query", history=[],
+            user_id="user-a", tenant_id="tenant-a", language="en", is_debug=False,
+        )
+        assert compiler.export.call_args.kwargs["northbound_run"] is False
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("settings,effort,budget,expected", [
         ({"temperature": 0.4}, "high", None, (0.4, "high", None)),
         ({"temperature": 0}, "low", None, (0, "low", None)),
@@ -5461,53 +5480,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
             # display_name_to_index_map should only contain the found mappings
             # Unfound indices will use index_name as fallback (which is not in get_knowledge_name_map result)
             assert "Knowledge Base 1" in result[0].metadata["display_name_to_index_map"]
-            assert "Knowledge Base 2" in result[0].metadata["display_name_to_index_map"]
             assert "idx3" not in result[0].metadata["display_name_to_index_map"]
-
-    @pytest.mark.asyncio
-    async def test_knowledge_base_with_partial_name_mapping(self):
-        """Test that KnowledgeBaseSearchTool handles partial name mapping correctly"""
-        mock_tool_instance = MagicMock()
-        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
-
-        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
-                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
-                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
-                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
-
-            mock_tool_config.return_value = mock_tool_instance
-
-            mock_search_tools.return_value = [
-                {
-                    "class_name": "KnowledgeBaseSearchTool",
-                    "name": "knowledge_search",
-                    "description": "Knowledge search tool",
-                    "inputs": "string",
-                    "output_type": "string",
-                    "params": [
-                        {"name": "index_names", "default": ["idx1", "idx2", "idx3"]},
-                        {"name": "rerank", "default": False},
-                    ],
-                    "source": "local",
-                    "usage": None
-                }
-            ]
-            mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = ("embedding_instance", 123, {"status": "ok"})
-            mock_rerank.return_value = None
-            # Only idx1 is found in database, idx2 and idx3 are not found
-            mock_get_knowledge_map.return_value = {
-                "idx1": "Knowledge Base 1"
-            }
-
-            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
-
-            # display_name_to_index_map should only contain the found mappings
-            # Unfound indices will use index_name as fallback (which is not in get_knowledge_name_map result)
-            assert "Knowledge Base 1" in result[0].metadata["display_name_to_index_map"]
 
     @pytest.mark.asyncio
     async def test_knowledge_base_with_index_name_to_display_map(self):

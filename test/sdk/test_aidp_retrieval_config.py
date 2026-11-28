@@ -148,3 +148,84 @@ def test_partial_submission_checks_relations_against_trusted_inheritance():
     with pytest.raises(ValueError, match="vector_candidates"):
         prepare_config({"vector_candidates": 5}, inherited)
     assert prepare_config({"vector_candidates": 10}, inherited) == {"vector_candidates": 10}
+
+
+@pytest.mark.parametrize("entity,rule", [
+    (False, False), (True, False), (False, True), (True, True),
+])
+def test_ontology_enhancement_payload_sends_only_enabled_flags(entity, rule):
+    payload = build_payload(
+        validate_config({
+            "ontology_enhance_enable": entity,
+            "rule_enable": rule,
+        }),
+        "q",
+        ["kb"],
+    )
+    assert ("ontology_enhance_enable" in payload) is entity
+    assert ("rule_enable" in payload) is rule
+    if entity:
+        assert payload["ontology_enhance_enable"] is True
+    if rule:
+        assert payload["rule_enable"] is True
+
+
+def test_ontology_enhancement_old_config_defaults_off_without_payload_fields():
+    resolved = resolve_config({"top_k": 10})
+    assert resolved["ontology_enhance_enable"] is False
+    assert resolved["rule_enable"] is False
+    payload = build_payload(validate_config({}), "q", ["kb"])
+    assert "ontology_enhance_enable" not in payload
+    assert "rule_enable" not in payload
+
+
+def test_entity_enhancement_conflicts_only_with_effective_jargon():
+    with pytest.raises(ValueError, match="ontology_enhance_enable"):
+        validate_config({
+            "ontology_enhance_enable": True,
+            "reranking_mode": "jargon_coverage",
+        })
+    validate_config({
+        "ontology_enhance_enable": True,
+        "reranking_enable": False,
+        "reranking_mode": "jargon_coverage",
+    })
+    validate_config({
+        "rule_enable": True,
+        "reranking_mode": "jargon_coverage",
+    })
+
+
+@pytest.mark.parametrize("patch", [
+    {"ontology_enhance_enable": 1},
+    {"rule_enable": "true"},
+])
+def test_ontology_enhancement_flags_require_boolean(patch):
+    with pytest.raises(ValueError, match=next(iter(patch))):
+        validate_config(patch)
+
+
+def test_prepare_config_keeps_ontology_flags_sparse():
+    assert prepare_config({"rule_enable": True}, {}) == {"rule_enable": True}
+    assert prepare_config({}, {"rule_enable": True}) == {}
+
+
+def test_payload_rejects_entity_enhancement_with_effective_jargon():
+    with pytest.raises(ValueError, match="ontology_enhance_enable"):
+        build_payload(
+            resolve_config({
+                "ontology_enhance_enable": True,
+                "reranking_enable": True,
+                "reranking_mode": "jargon_coverage",
+            }),
+            "q",
+            ["kb"],
+        )
+
+
+def test_prepare_config_rejects_entity_enhancement_with_inherited_jargon():
+    with pytest.raises(ValueError, match="ontology_enhance_enable"):
+        prepare_config(
+            {"ontology_enhance_enable": True},
+            {"reranking_enable": True, "reranking_mode": "jargon_coverage"},
+        )

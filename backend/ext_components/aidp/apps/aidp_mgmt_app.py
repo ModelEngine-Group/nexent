@@ -20,22 +20,51 @@ import json
 import logging
 import time
 from http import HTTPStatus
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Any, List, Literal, Optional
 from urllib.parse import quote
-from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from nexent.core.concurrency import run_blocking
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
-import management.services.permission.identity.session as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, UnauthorizedError
+from contracts.errors.exceptions import AppException
 from contracts.roles import has_any_role
+from ext_components.aidp.apps.aidp_chunk_routes import aidp_chunk_router
+from ext_components.aidp.apps.aidp_folder_routes import aidp_folder_router
+from ext_components.aidp.apps.aidp_mgmt_common import (
+    AIDP_FILE_UUID_PATTERN,
+    AidpFileUuid,
+    FolderPath,
+    _auth,
+    _credentials,
+    _relative_path_to_directory,
+)
+from ext_components.aidp.apps.aidp_sensitive_word_routes import (
+    aidp_sensitive_word_router,
+)
+from ext_components.aidp.apps.aidp_summary_routes import aidp_summary_router
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbNotFoundError,
@@ -76,14 +105,19 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from management.services.knowledge_base.providers.shared_aidp import delete_aidp_kb_impl, get_bound_agents
-import management.services.permission.identity.session as auth_utils_module
 from management.db.identity.user_tenant import get_user_role_by_tenant
+from management.services.knowledge_base.providers.shared_aidp import (
+    delete_aidp_kb_impl,
+    get_bound_agents,
+)
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.services.tag.library import TagManagementService
-from nexent.core.concurrency import run_blocking
+
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
+aidp_mgmt_router.include_router(aidp_folder_router)
+aidp_mgmt_router.include_router(aidp_sensitive_word_router)
+aidp_mgmt_router.include_router(aidp_chunk_router)
+aidp_mgmt_router.include_router(aidp_summary_router)
 logger = logging.getLogger("aidp_mgmt_app")
 
 AIDP_MAX_UPLOAD_FILE_COUNT = 50
@@ -145,7 +179,10 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
     user_id: str,
 ) -> None:
     """Keep document assignment usage in sync after AIDP confirms knowledge-base deletion."""
-
+    # Imported lazily: the tag service pulls in the MCP container stack, which
+    # is unnecessary for the rest of the AIDP router and makes test collection
+    # depend on Docker/paramiko being importable.
+    from management.services.tag.library import TagManagementService
 
     TagManagementService.cleanup_document_assignments_for_knowledge_base(
         tenant_id, "aidp", knowledge_base_id, user_id
@@ -157,19 +194,29 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
 # ---------------------------------------------------------------------------
 
 
+KbName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+KbDescription = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+]
+EmbeddingModelName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1)
+]
+
+
 class CreateKbRequest(BaseModel):
     """Request body for creating a knowledge base."""
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(..., description="Knowledge base name (required)")
-    description: str = Field(
-        ...,
-        min_length=1,
-        max_length=255,
-        description="Knowledge base description (required)",
+    name: str = Field(
+        ..., description="Knowledge base name; empty defers to AIDP's name"
     )
-    embedding_model: str = Field(..., min_length=1, description="Embedding model identifier")
+    description: KbDescription = Field(
+        ..., description="Knowledge base description (required)"
+    )
+    embedding_model: EmbeddingModelName = Field(
+        ..., description="Embedding model identifier"
+    )
     chunk_token_num: int = Field(512, ge=256, le=4096, strict=True, description="Chunk size in tokens")
     chunk_overlap_num: int = Field(51, ge=0, strict=True, description="Chunk overlap in tokens")
     vlm_model: str = Field("", description="VLM model identifier for caption generation")
@@ -177,6 +224,13 @@ class CreateKbRequest(BaseModel):
     topk: int = Field(10, ge=1, le=100, strict=True, description="Top-K retrieval count")
     similarity: float = Field(0.0, ge=0, le=1, description="Similarity score threshold")
     caption_enable: int = Field(0, ge=0, le=1, strict=True, description="Caption generation toggle, int 0 or 1")
+    sensitive_intercept_enable: int = Field(
+        0,
+        ge=0,
+        le=1,
+        strict=True,
+        description="Sensitive word interception toggle for future files, int 0 or 1",
+    )
     chunk_mode: int = Field(
         0, ge=0, le=1, strict=True, description="Chunking mode: 0 smart splitting, 1 legal clauses"
     )
@@ -190,8 +244,23 @@ class CreateKbRequest(BaseModel):
             "AIDP graph_config string; it is omitted entirely when the graph is disabled."
         ),
     )
+    summary_enable: bool = Field(
+        False,
+        description="Whether AIDP generates a file summary for each ingested file",
+    )
+    summary_model: Optional[str] = Field(
+        None,
+        description="AIDP LLM model_name used for summaries; required when summary_enable is true",
+    )
+    summary_preview: Optional[bool] = Field(
+        None,
+        description=(
+            "Whether the generated summary is previewable. The service mirrors "
+            "summary_enable onto this hidden field and never accepts a mismatch."
+        ),
+    )
     # Nexent-side permission payload. Never forwarded to AIDP.
-    ingroup_permission: Optional[str] = Field(
+    ingroup_permission: Literal["EDIT", "READ_ONLY", "PRIVATE"] | None = Field(
         "READ_ONLY",
         description="Permission level for authorised groups: EDIT / READ_ONLY / PRIVATE",
     )
@@ -200,18 +269,10 @@ class CreateKbRequest(BaseModel):
         description="Group IDs granted the in-group permission. Empty/ignored when PRIVATE.",
     )
 
-
-    @field_validator("description", mode="before")
+    @field_validator("summary_model")
     @classmethod
-    def trim_description(cls, value):
+    def trim_summary_model(cls, value):
         return value.strip() if isinstance(value, str) else value
-
-    @field_validator("embedding_model")
-    @classmethod
-    def require_embedding_model(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Embedding model is required")
-        return value
 
     @model_validator(mode="after")
     def validate_creation_settings(self):
@@ -219,6 +280,13 @@ class CreateKbRequest(BaseModel):
             raise ValueError("chunk_overlap_num must not exceed half of chunk_token_num")
         if self.caption_enable and not self.vlm_model.strip():
             raise ValueError("VLM model is required when caption generation is enabled")
+        # The hidden preview flag mirrors the single user-facing summary switch.
+        self.summary_preview = self.summary_enable
+        if self.summary_enable:
+            if not (self.summary_model or "").strip():
+                raise ValueError("summary_model is required when summary_enable is true")
+        else:
+            self.summary_model = None
         return self
 
 
@@ -238,6 +306,12 @@ class UpdateKbRequest(BaseModel):
     caption_enable: Optional[int] = Field(
         None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
     )
+    sensitive_intercept_enable: Optional[int] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Sensitive word interception toggle, int 0 or 1",
+    )
     vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
     is_exist_graph: Optional[bool] = Field(
         None,
@@ -256,6 +330,20 @@ class UpdateKbRequest(BaseModel):
             "graph_config string; requires the graph to be enabled."
         ),
     )
+    summary_enable: Optional[bool] = Field(
+        None, description="File summary switch; same field as on creation"
+    )
+    summary_model: Optional[str] = Field(
+        None, description="AIDP LLM model_name; required when summary_enable is true"
+    )
+    summary_preview: Optional[bool] = Field(
+        None, description="Hidden mirror of summary_enable; always forced to match"
+    )
+
+    @field_validator("summary_model")
+    @classmethod
+    def trim_summary_model(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def validate_chunk_settings(self):
@@ -265,59 +353,82 @@ class UpdateKbRequest(BaseModel):
             and self.chunk_overlap_num > self.chunk_token_num / 2
         ):
             raise ValueError("chunk_overlap_num must not exceed half of chunk_token_num")
+        _validate_summary_update(self)
         return self
 
 
 class SetPermissionRequest(BaseModel):
     """Save permissions and optionally synchronize explicitly changed metadata."""
 
-    name: Optional[str] = Field(None, min_length=1, description="Changed KB name; omit when unchanged")
+    name: KbName | None = Field(None, description="Changed KB name; omit when unchanged")
     description: Optional[str] = Field(None, description="Changed description; omit when unchanged")
-    ingroup_permission: str = Field(..., description="EDIT / READ_ONLY / PRIVATE")
+    ingroup_permission: Literal["EDIT", "READ_ONLY", "PRIVATE"] = Field(
+        ..., description="EDIT / READ_ONLY / PRIVATE"
+    )
     group_ids: Optional[List[int]] = Field(
         None,
         description="Group IDs granted the in-group permission. Ignored when PRIVATE.",
     )
+    summary_enable: Optional[bool] = Field(
+        None, description="File summary switch; same field as on creation"
+    )
+    summary_model: Optional[str] = Field(
+        None, description="AIDP LLM model_name; required when summary_enable is true"
+    )
+    summary_preview: Optional[bool] = Field(
+        None, description="Hidden mirror of summary_enable; always forced to match"
+    )
+
+    @field_validator("summary_model")
+    @classmethod
+    def trim_summary_model(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def validate_summary_update(self):
+        _validate_summary_update(self)
+        return self
 
 
 class RemoveAidpDocumentsRequest(BaseModel):
 
-    file_uuids: List[UUID] = Field(..., min_length=1, description="AIDP file UUIDs")
+    file_uuids: List[AidpFileUuid] = Field(..., min_length=1, description="AIDP file UUIDs")
 
 
 class RetryAidpDocumentsRequest(BaseModel):
     """AIDP accepts one or more failed file UUIDs in a single retry request."""
 
-    file_uuids: List[UUID] = Field(..., min_length=1)
+    file_uuids: List[AidpFileUuid] = Field(..., min_length=1)
 
 
 class DownloadAidpDocumentRequest(BaseModel):
     """AIDP file selected for download."""
 
-    file_uuid: UUID = Field(..., description="AIDP file UUID")
+    file_uuid: AidpFileUuid = Field(..., description="AIDP file UUID")
 
 
-# ---------------------------------------------------------------------------
-# Auth helpers
-# ---------------------------------------------------------------------------
+def _validate_summary_update(model) -> None:
+    """Validate summary fields on an existing knowledge base.
 
-
-async def _auth(request: Request) -> tuple[str, str]:
-    """Resolve ``(user_id, tenant_id)`` from the Authorization header.
-
-    Raises 401 for missing/invalid tokens or empty tenant contexts so the
-    caller never has to defend against partially-authenticated state.
+    The edit path accepts the same three fields as creation. When the switch is
+    present it is authoritative: enabling requires a model and forces the
+    hidden preview flag on; disabling forces both false. Supplying only the
+    model/preview without the switch is ambiguous for a partial PATCH and is
+    rejected instead of guessed.
     """
-    auth = request.headers.get("Authorization")
-    if not auth:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Missing Authorization header")
-    try:
-        user_id, tenant_id = auth_utils_module.get_current_user_id(auth)
-    except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
-    if not tenant_id:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="No tenant context")
-    return user_id, tenant_id
+    if model.summary_enable is None:
+        if model.summary_model is not None or model.summary_preview is not None:
+            raise ValueError(
+                "summary_enable is required when summary fields are provided"
+            )
+        return
+    if model.summary_enable:
+        if not (model.summary_model or "").strip():
+            raise ValueError("summary_model is required when summary_enable is true")
+        model.summary_model = model.summary_model.strip()
+    else:
+        model.summary_model = None
+    model.summary_preview = bool(model.summary_enable)
 
 
 def _infer_is_multimodal(detail: dict) -> bool:
@@ -342,6 +453,36 @@ def _infer_is_multimodal(detail: dict) -> bool:
         return False
     caption = detail.get("caption_enable")
     return caption in (1, "1", True)
+
+
+def _coerce_optional_bool(value) -> bool | None:
+    """Read a boolean AIDP may spell as bool, number, or text."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "是"}:
+            return True
+        if normalized in {"false", "0", "no", "否", ""}:
+            return False
+    return None
+
+
+def _normalize_int_toggle(value: Any, default: int = 0) -> int:
+    """Normalize an AIDP 0/1 toggle without hiding an explicit enabled value."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return 1 if value else 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "是"}:
+            return 1
+        if normalized in {"0", "false", "no", "否", ""}:
+            return 0
+    return default
 
 
 def _normalize_kb_config_fields(detail: dict) -> dict:
@@ -380,6 +521,27 @@ def _normalize_kb_config_fields(detail: dict) -> dict:
     # Derive is_multimodal from caption_enable when not already present.
     if "is_multimodal" not in detail or detail["is_multimodal"] is None:
         detail["is_multimodal"] = _infer_is_multimodal(detail)
+
+    # Summary configuration: a historical KB may not report these fields at
+    # all, which means summaries are off. The hidden preview flag mirrors the
+    # switch when AIDP omits it; an explicit `false` reported alongside
+    # `summary_enable=true` is preserved so the page can show "not previewable".
+    summary_enable = _coerce_optional_bool(detail.get("summary_enable"))
+    detail["summary_enable"] = bool(summary_enable)
+    summary_preview = _coerce_optional_bool(detail.get("summary_preview"))
+    detail["summary_preview"] = (
+        detail["summary_enable"] if summary_preview is None else summary_preview
+    )
+    summary_model = detail.get("summary_model")
+    detail["summary_model"] = (
+        summary_model.strip() if isinstance(summary_model, str) else ""
+    )
+
+    # Historical KBs predate the sensitive-word toggle; treat a missing value
+    # as disabled while keeping an explicit upstream 1 intact.
+    detail["sensitive_intercept_enable"] = _normalize_int_toggle(
+        detail.get("sensitive_intercept_enable"), 0
+    )
 
     # Normalize the graph configuration for the frontend. AIDP serializes the
     # three graph toggles as "是"/"否" and the hop count as a string, while the
@@ -422,10 +584,6 @@ def _raise_aidp_conflict(exc: IntegrityError) -> None:
         status_code=HTTPStatus.CONFLICT,
         detail="Knowledge base already exists for this tenant",
     )
-
-
-def _credentials() -> tuple[str, str]:
-    return AIDP_SERVER_URL, AIDP_API_KEY
 
 
 def _is_user_role(user_id: str, tenant_id: str) -> bool:
@@ -614,7 +772,11 @@ async def list_knowledge_bases(
     detail_semaphore = asyncio.Semaphore(5)
 
     async def resolve_detail(row: dict) -> tuple[dict, str]:
-        if _has_kb_card_metadata(row):
+        if (
+            _has_kb_card_metadata(row)
+            and "bind_lib_type" in row
+            and "bind_lib_id" in row
+        ):
             return {}, "ACTIVE"
         kb_id = row["kb_id"]
         async with detail_semaphore:
@@ -660,6 +822,19 @@ async def list_knowledge_bases(
             "is_multimodal": _infer_is_multimodal(detail or row),
             "vlm_model": detail.get("vlm_model") or row.get("vlm_model") or "",
             "caption_enable": detail.get("caption_enable", row.get("caption_enable", 0)),
+            "sensitive_intercept_enable": _normalize_int_toggle(
+                detail.get("sensitive_intercept_enable")
+                if detail.get("sensitive_intercept_enable") is not None
+                else row.get("sensitive_intercept_enable"),
+                0,
+            ),
+            "bind_lib_id": detail.get("bind_lib_id", row.get("bind_lib_id")),
+            "bind_lib_type": detail.get(
+                "bind_lib_type", row.get("bind_lib_type")
+            ),
+            "bind_lib_name": detail.get(
+                "bind_lib_name", row.get("bind_lib_name")
+            ),
             "created_at": _timestamp_to_iso(row.get("create_time")),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),
@@ -726,12 +901,6 @@ async def create_knowledge_base(
         # shared AIDP KB by sending EDIT/READ_ONLY and group_ids.
         ingroup = PRIVATE
         valid_group_ids: list[int] = []
-    elif ingroup not in {EDIT, READ_ONLY, PRIVATE}:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=f"Unsupported ingroup_permission: {ingroup!r}",
-        )
-
     elif ingroup != PRIVATE:
         if not body.group_ids:
             raise HTTPException(
@@ -825,6 +994,93 @@ async def create_knowledge_base(
     aidp_result = dict(aidp_result or {})
     aidp_result["permission"] = EDIT
     return JSONResponse(status_code=HTTPStatus.OK, content=aidp_result)
+
+
+class KnowledgeBaseBatchReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kds_ids: list[str] = Field(..., min_length=1, max_length=100)
+
+    @field_validator("kds_ids")
+    @classmethod
+    def normalize_ids(cls, values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for value in values:
+            stripped = value.strip()
+            if stripped and stripped not in deduped:
+                deduped.append(stripped)
+        if not deduped:
+            raise ValueError("kds_ids must contain at least one non-empty id")
+        return deduped
+
+
+@aidp_mgmt_router.post("/knowledge-bases/batch-read")
+async def batch_read_knowledge_bases(
+    request: Request,
+    body: KnowledgeBaseBatchReadRequest,
+) -> JSONResponse:
+    """Resolve KB names/descriptions for a bounded list of ids.
+
+    AIDP's own KB list has no ids filter, so this Nexent-side proxy intersects
+    the caller's accessible catalog with the requested ids and reuses the same
+    permission-aware detail loader as the normal list. It is a batch query for
+    Nexent callers, not a claim that upstream AIDP provides one.
+    """
+    user_id, tenant_id = await _auth(request)
+    server_url, api_key = _credentials()
+    rows = await run_blocking(
+        "aidp-kb-batch-access",
+        _current_accessible_rows,
+        user_id,
+        tenant_id,
+        lane="control-io",
+        owner="config",
+    )
+    row_map = {row["kb_id"]: row for row in rows}
+    semaphore = asyncio.Semaphore(5)
+
+    async def resolve(kb_id: str) -> dict | None:
+        row = row_map.get(kb_id)
+        if row is None:
+            return None
+        detail: dict = {}
+        resource_status = "ACTIVE"
+        if not _has_kb_card_metadata(row):
+            async with semaphore:
+                try:
+                    detail = await run_blocking(
+                        "aidp-kb-batch-detail",
+                        _load_cached_kb_detail,
+                        server_url,
+                        api_key,
+                        kb_id,
+                        lane="control-io",
+                        owner="config",
+                    )
+                except AppException as exc:
+                    logger.warning(
+                        "AIDP batch KB detail failed for %s: %s", kb_id, exc
+                    )
+                    resource_status = "UNAVAILABLE"
+        return {
+            "kds_id": kb_id,
+            "kds_name": detail.get("kds_name")
+            or detail.get("name")
+            or row.get("kds_name")
+            or row.get("name")
+            or "",
+            "description": detail.get("description")
+            or row.get("description")
+            or "",
+            "created_at": _timestamp_to_iso(row.get("create_time")),
+            "resource_status": resource_status,
+        }
+
+    results = await asyncio.gather(*(resolve(kb_id) for kb_id in body.kds_ids))
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={"value": [item for item in results if item is not None]},
+    )
 
 
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}")
@@ -1003,11 +1259,52 @@ async def upload_documents(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     files: List[UploadFile] = File(..., description="Files to upload"),
+    target_folder: Annotated[
+        FolderPath | None,
+        Form(description="Destination folder path; root is '/'"),
+    ] = None,
+    relative_paths: Annotated[
+        Optional[List[str]],
+        Form(description="One relative path per file, preserving directory levels"),
+    ] = None,
 ) -> JSONResponse:
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
+    normalized_target = target_folder
+    normalized_relative_paths: list[str] | None = None
+
+    if relative_paths is not None:
+        if target_folder is None:
+            raise HTTPException(
+                status_code=422,
+                detail="relative_paths requires target_folder",
+            )
+        if len(relative_paths) != len(files):
+            raise HTTPException(
+                status_code=422,
+                detail="relative_paths must have one entry per uploaded file",
+            )
+        try:
+            normalized_relative_paths = [
+                _relative_path_to_directory(path) for path in relative_paths
+            ]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     valid_files, validation_failures = _validate_upload_files(files)
+    # Validation drops files, so the relative paths have to follow the original
+    # upload order instead of being zipped with the shortened list.
+    valid_file_ids = {id(file) for file in valid_files}
+    valid_relative_paths = (
+        [
+            path
+            for file, path in zip(files, normalized_relative_paths)
+            if id(file) in valid_file_ids
+        ]
+        if normalized_relative_paths is not None
+        else None
+    )
     server_url, api_key = _credentials()
     if valid_files:
         result = await run_blocking(
@@ -1017,6 +1314,8 @@ async def upload_documents(
             api_key,
             kds_id,
             valid_files,
+            normalized_target,
+            valid_relative_paths,
             lane="control-io",
             owner="config",
         )
@@ -1061,7 +1360,7 @@ async def remove_documents(
         server_url,
         api_key,
         kds_id,
-        [str(file_uuid) for file_uuid in body.file_uuids],
+        list(body.file_uuids),
         lane="control-io",
         owner="config",
     )
@@ -1088,7 +1387,7 @@ async def download_document(
         server_url,
         api_key,
         kds_id,
-        str(body.file_uuid),
+        body.file_uuid,
     )
     response_headers = {
         "Content-Disposition": aidp_response.headers["Content-Disposition"],
@@ -1157,7 +1456,7 @@ def _stream_aidp_preview(aidp_response: httpx.Response) -> StreamingResponse:
 async def preview_document(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_uuid: Annotated[UUID, Path(description="AIDP file UUID")],
+    file_uuid: Annotated[str, Path(pattern=AIDP_FILE_UUID_PATTERN, description="AIDP file UUID")],
 ) -> StreamingResponse:
     """Stream one AIDP document inline so the browser can render it.
 
@@ -1174,7 +1473,7 @@ async def preview_document(
         server_url,
         api_key,
         kds_id,
-        str(file_uuid),
+        file_uuid,
     )
     return _stream_aidp_preview(aidp_response)
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}/files")
@@ -1351,7 +1650,7 @@ async def retry_upload_tasks(
     """Retry selected failed tasks; the upstream request always carries a UUID array."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-    file_uuids = list(dict.fromkeys(str(file_uuid) for file_uuid in body.file_uuids))
+    file_uuids = list(dict.fromkeys(body.file_uuids))
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-retry-upload-tasks",
@@ -1384,12 +1683,6 @@ async def set_permission(
             detail="USER role can only manage PRIVATE personal knowledge bases",
         )
 
-    if body.ingroup_permission not in {EDIT, READ_ONLY, PRIVATE}:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=f"Unsupported ingroup_permission: {body.ingroup_permission!r}",
-        )
-
     if body.ingroup_permission == PRIVATE:
         final_group_ids: list[int] = []
     else:
@@ -1406,11 +1699,10 @@ async def set_permission(
                 detail=str(exc),
             )
 
-    metadata = body.model_dump(include={"name", "description"}, exclude_none=True)
-    if "name" in metadata:
-        metadata["name"] = metadata["name"].strip()
-        if not metadata["name"]:
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Name must not be blank")
+    metadata = body.model_dump(
+        include={"name", "description", "summary_enable", "summary_model", "summary_preview"},
+        exclude_none=True,
+    )
     result = await asyncio.to_thread(
         save_kb_settings,
         kb_id=kds_id,

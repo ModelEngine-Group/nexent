@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import i18n from "i18next";
+
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { withBasePath } from "@/lib/basePath";
@@ -499,11 +501,21 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(id)}/bound_agents`,
     knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
     kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbBatchRead: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/batch-read`,
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
     kbFiles: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files`,
+    /** One folder level: direct folders + server-paginated files. */
+    kbFolderTree: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders/tree`,
+    kbFolders: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders`,
+    kbFolderMove: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders/move`,
+    kbFileMove: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files/move`,
     kbUploadTasks: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks`,
     retryKbUploadTasks: (id: string) =>
@@ -522,6 +534,69 @@ export const API_ENDPOINTS = {
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
+    /** Semantic chunks of one ingested file: list, add, read, edit, remove. */
+    kbChunks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks`,
+    /** FusionSearch-backed chunk content search scoped to one file. */
+    kbChunkSearch: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/search`,
+    kbChunkDetail: (id: string, chunkId: number | string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/${encodeURIComponent(String(chunkId))}`,
+    /** Image chunk's picture bytes via AIDP ViewImage (READ). */
+    kbChunkImage: (id: string, fileId: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/images/${encodeURIComponent(fileId)}`,
+    /** DELETE with a `chunk_ids` JSON body; AIDP answers 204 No Content. */
+    removeKbChunks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks`,
+    /** Batch user-metadata/tag edit; sync caps chunk_id_list at 300 ids. */
+    batchUpdateKbChunks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/batch-metadata`,
+    /** One file's AIDP summary (READ). */
+    kbFileSummary: (id: string, fileUuid: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/summary`,
+    ontology: {
+      domains: `${API_BASE_URL}/aidp-mgmt/ontology/domains`,
+      domain: (id: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(id)}`,
+      entities: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/entities`,
+      entity: (domainId: string, entityId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/entities/${encodeURIComponent(entityId)}`,
+      bindings: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings`,
+      // AIDP has no BindingId: a row is addressed by (domain_id, kds_id).
+      unbind: (domainId: string, kdsId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings/${encodeURIComponent(kdsId)}`,
+      tasks: `${API_BASE_URL}/aidp-mgmt/ontology/tasks`,
+      metadataFields: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields`,
+      metadataField: (domainId: string, fieldRef: string | number) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields/${encodeURIComponent(fieldRef)}`,
+      metadataBatchUnbind: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields/batch-unbind`,
+      metadataBatchUnbindSync: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata/batch-unbind-sync`,
+      chunkMetadataExport: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/chunks/metadata/export`,
+      chunkMetadataImport: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/chunks/metadata/import`,
+      tagSync: `${API_BASE_URL}/aidp-mgmt/ontology/tags/sync`,
+      rules: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules`,
+      ruleCount: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/count`,
+      rule: (domainId: string, ruleId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/${encodeURIComponent(ruleId)}`,
+      export: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/export`,
+      import: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/import`,
+    },
+    /** Shared AIDP sensitive word dictionary, fixed to the upstream `aidp` namespace. */
+    sensitiveWords: (kdsId: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(kdsId)}/sensitive-words`,
+    sensitiveWord: (kdsId: string, id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(kdsId)}/sensitive-words/${encodeURIComponent(id)}`,
   },
   config: {
     frontend: `${API_BASE_URL}/frontend-config`,
@@ -982,7 +1057,11 @@ export const fetchWithErrorHandling = async (
   options: RequestInit = {}
 ) => {
   try {
-    const response = await fetch(url, options);
+    const headers = new Headers(options.headers);
+    if (!headers.has("Accept-Language")) {
+      headers.set("Accept-Language", i18n.language || "zh-CN");
+    }
+    const response = await fetch(url, { ...options, headers });
 
     // Handle HTTP errors
     if (!response.ok) {

@@ -5,7 +5,7 @@
 import pytest
 from pydantic import ValidationError
 
-from contracts.knowledge import AidpKnowledgeScopeRequest, ConversationKnowledgeScopeRequest, ConversationKnowledgeScopeUpdateRequest, LocalKnowledgeScopeRequest
+from contracts.knowledge import AidpKnowledgeScopeRequest, AidpMetadataFilterRequest, ConversationKnowledgeScopeRequest, ConversationKnowledgeScopeUpdateRequest, LocalKnowledgeScopeRequest
 
 
 def test_local_defaults_to_inherit_with_no_ids():
@@ -115,4 +115,116 @@ def test_aidp_disabled_mode_without_ids():
 
 def test_conversation_scope_rejects_wrong_version():
     with pytest.raises(ValidationError):
-        ConversationKnowledgeScopeRequest.parse_obj({"schema_version": 2})
+        ConversationKnowledgeScopeRequest.parse_obj({"schema_version": 4})
+
+
+def test_conversation_scope_accepts_metadata_filter():
+    scope = ConversationKnowledgeScopeRequest.parse_obj(
+        {
+            "schema_version": 1,
+            "aidp": {
+                "mode": "inherit",
+                "metadata_filter": {
+                    "enabled": True,
+                    "match": "any",
+                    "conditions": [
+                        {"operator": "contains", "value": "合同"},
+                        {"operator": "is", "value": "预算.xlsx"},
+                    ],
+                },
+            },
+        }
+    )
+
+    assert scope.schema_version == 1
+    assert scope.aidp.metadata_filter.enabled is True
+    assert scope.aidp.metadata_filter.match == "any"
+    assert [item.value for item in scope.aidp.metadata_filter.conditions] == [
+        "合同",
+        "预算.xlsx",
+    ]
+
+
+def test_metadata_filter_rejects_disabled_or_empty_mode():
+    with pytest.raises(ValidationError):
+        AidpKnowledgeScopeRequest.parse_obj(
+            {
+                "mode": "disabled",
+                "metadata_filter": {
+                    "enabled": True,
+                    "conditions": [
+                        {"operator": "contains", "value": "合同"}
+                    ],
+                },
+            }
+        )
+    with pytest.raises(ValidationError):
+        AidpKnowledgeScopeRequest.parse_obj(
+            {"metadata_filter": {"enabled": True}}
+        )
+
+
+def test_metadata_filter_trims_conditions_and_deduplicates():
+    filter_value = AidpMetadataFilterRequest.parse_obj(
+        {
+            "enabled": True,
+            "conditions": [
+                {"operator": "contains", "value": " 合同 "},
+                {"operator": "contains", "value": "合同"},
+                {"operator": "starts_with", "value": "预算"},
+                {"operator": "ends_with", "value": "xlsx"},
+            ],
+        }
+    )
+
+    assert [item.value for item in filter_value.conditions] == [
+        "合同",
+        "预算",
+        "xlsx",
+    ]
+    assert [item.operator for item in filter_value.conditions] == [
+        "contains",
+        "starts_with",
+        "ends_with",
+    ]
+
+
+def test_metadata_filter_clears_conditions_when_disabled():
+    filter_value = AidpMetadataFilterRequest.parse_obj(
+        {
+            "enabled": False,
+            "conditions": [{"operator": "contains", "value": "合同"}],
+        }
+    )
+
+    assert filter_value.conditions == []
+
+
+def test_metadata_filter_rejects_too_many_conditions_or_long_values():
+    with pytest.raises(ValidationError):
+        AidpMetadataFilterRequest.parse_obj(
+            {
+                "enabled": True,
+                "conditions": [
+                    {"operator": "contains", "value": f"file-{index}"}
+                    for index in range(21)
+                ],
+            }
+        )
+    with pytest.raises(ValidationError):
+        AidpMetadataFilterRequest.parse_obj(
+            {
+                "enabled": True,
+                "conditions": [{"operator": "contains", "value": "x" * 257}],
+            }
+        )
+
+
+def test_metadata_filter_rejects_unknown_operator():
+    with pytest.raises(ValidationError):
+        AidpMetadataFilterRequest.parse_obj(
+            {
+                "enabled": True,
+                "conditions": [{"operator": "matches", "value": "合同"}],
+            }
+        )

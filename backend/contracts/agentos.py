@@ -421,12 +421,28 @@ class SkillDerivedLocalToolBinding(LocalToolBinding):
     tool_id: PositiveInt
 
 
+class ScopedSharedAidpFileNameCondition(RunSpecModel):
+    operator: Literal["contains", "is", "starts_with", "ends_with"] = "contains"
+    value: str = Field(min_length=1, max_length=256)
+
+
+class ScopedSharedAidpMetadataFilter(RunSpecModel):
+    enabled: bool = False
+    match: Literal["all", "any"] = "all"
+    conditions: list[ScopedSharedAidpFileNameCondition] = Field(
+        default_factory=list, max_length=20
+    )
+
+
 # AgentOS validates signed retrieval options independently of the execution SDK.
 _SCOPED_AIDP_CHANNELS = frozenset({"vector_search", "full_text_search", "graph_search"})
 
 
 class ScopedSharedAidpOptions(RunSpecModel):
+    """Scope, conversation filter and validated retrieval options AgentOS signs."""
+
     kds_list: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(max_length=10)
+    metadata_filter: ScopedSharedAidpMetadataFilter | None = None
     search_method: str | None = None
     reranking_enable: bool | None = None
     reranking_mode: Literal["performance", "high_accuracy", "jargon_coverage"] | None = None
@@ -571,6 +587,9 @@ class AgentResource(RunSpecModel):
     invocation_name: str | None = Field(default=None, min_length=1)
     runtime_ref: str | None = Field(default=None, min_length=1)
     origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
+    # Request-scoped provenance installed by the internal Northbound entry.
+    # Ordinary page runs keep the default and never expose download links.
+    northbound_run: bool = False
     tools: list[ToolBinding] = Field(default_factory=list)
     skill_refs: list[SkillExecutionBinding] = Field(default_factory=list)
     workbench_skill_refs: list[WorkbenchSkillBinding] = Field(default_factory=list)

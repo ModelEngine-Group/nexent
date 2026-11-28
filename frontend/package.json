@@ -85,7 +85,8 @@
     "unified": "^11.0.0",
     "unist-util-visit": "^5.0.0",
     "uuid": "^11.1.0",
-    "zustand": "^5.0.9"
+    "zustand": "^5.0.9",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

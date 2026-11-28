@@ -514,6 +514,8 @@ export interface ResourceDrawerProps {
   children: ReactNode;
   /** Fixed controls above the scrollable resource content. */
   controlsContent?: ReactNode;
+  /** Fixed content between the pagination row and the footer, e.g. advanced filter. */
+  filterContent?: ReactNode;
   contentClassName?: string;
   paginationContent?: ReactNode;
   /** Use the same drawer shell with an existing resource controller's filters. */
@@ -576,6 +578,7 @@ export function ResourceDrawer({
   selectedTrailing,
   children,
   controlsContent,
+  filterContent,
   contentClassName,
   paginationContent,
   searchContent,
@@ -724,6 +727,12 @@ export function ResourceDrawer({
                 onPageChange={onPageChange ?? (() => {})}
               />
             )}
+          </div>
+        )}
+
+        {filterContent !== undefined && (
+          <div data-picker-part="filter" className="shrink-0">
+            {filterContent}
           </div>
         )}
       </fieldset>

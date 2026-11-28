@@ -20,6 +20,7 @@ import {
   ConfigProvider,
   Form,
   Space,
+  Steps,
 } from "antd";
 
 import type { AidpGraphConfig } from "@/ext_components/aidp/shared/types/management";
@@ -31,6 +32,7 @@ import {
   isAidpDuplicateError,
 } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
+import { scrollToFirstAidpFormError } from "@/ext_components/aidp/shared/utils/aidpFormErrors";
 import {
   useAidpModels,
   useAidpGraphTemplate,
@@ -50,6 +52,8 @@ import {
 } from "@/ext_components/aidp/shared/utils/aidpChunking";
 
 import AidpCreateKbSections from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections";
+import AidpCreateOntologyStep from "@/ext_components/aidp/pages/knowledge-create/AidpCreateOntologyStep";
+import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import styles from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections.module.css";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import { aidpKnowledgeTypographyTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
@@ -70,7 +74,9 @@ const AIDP_CREATE_DEFAULTS = {
   topk: AIDP_DEFAULT_TOPK,
   similarity: AIDP_DEFAULT_SIMILARITY,
   caption_enable: 0,
+  summary_enable: false,
   is_exist_graph: false,
+  sensitive_intercept_enable: false,
   graph_domain: "常规" as const,
   graph_hop: 2,
   /** UI switch; the submitted `no_think_mode` is its inverse. */
@@ -98,6 +104,8 @@ const AidpCreateKbPage: React.FC = () => {
   const [form] = Form.useForm();
   const [validating, setValidating] = useState(false);
   const [invalidFields, setInvalidFields] = useState<string[]>([]);
+  const [step, setStep] = useState(0);
+  const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
   const createMutation = useCreateAidpKnowledgeBase();
   const loading = validating || createMutation.isPending;
   /** Guards against a second create while one submission is in flight. */
@@ -212,7 +220,10 @@ const AidpCreateKbPage: React.FC = () => {
       topk: AIDP_CREATE_DEFAULTS.topk,
       similarity: AIDP_CREATE_DEFAULTS.similarity,
       caption_enable: AIDP_CREATE_DEFAULTS.caption_enable === 1,
+      summary_enable: AIDP_CREATE_DEFAULTS.summary_enable,
       is_exist_graph: AIDP_CREATE_DEFAULTS.is_exist_graph,
+      sensitive_intercept_enable:
+        AIDP_CREATE_DEFAULTS.sensitive_intercept_enable,
       graph_domain: AIDP_CREATE_DEFAULTS.graph_domain,
       graph_hop: AIDP_CREATE_DEFAULTS.graph_hop,
       graph_thinking: AIDP_CREATE_DEFAULTS.graph_thinking,
@@ -232,12 +243,27 @@ const AidpCreateKbPage: React.FC = () => {
     router.push(`/${locale}/knowledges/detail?kb=${encodeURIComponent(kbId)}`);
   };
 
+  const goNext = async () => {
+    if (step === 0) {
+      try {
+        await form.validateFields(["name", "description"]);
+      } catch (error) {
+        scrollToFirstAidpFormError(form, error);
+        return;
+      }
+    }
+    setStep((previous) => Math.min(previous + 1, 1));
+  };
+
   const handleSubmit = async () => {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setValidating(true);
     try {
-      const values = await form.validateFields();
+      // Step 0 fields are unmounted on step 1. Its values were validated by
+      // goNext() before leaving step 0, so read the preserved store directly
+      // instead of validating fields that are no longer mounted.
+      const values = form.getFieldsValue(true);
       const permission = isUser
         ? "PRIVATE"
         : values.ingroup_permission || "READ_ONLY";
@@ -278,8 +304,8 @@ const AidpCreateKbPage: React.FC = () => {
 
       setValidating(false);
       const created = await createMutation.mutateAsync({
-        name: values.name.trim(),
-        description: values.description.trim(),
+        name: (values.name ?? "").trim(),
+        description: (values.description ?? "").trim(),
         chunk_token_num: chunkTokens,
         chunk_overlap_num: overlapTokens,
         chunk_mode: values.chunk_mode ?? AIDP_CREATE_DEFAULTS.chunk_mode,
@@ -289,6 +315,12 @@ const AidpCreateKbPage: React.FC = () => {
         is_personal: AIDP_CREATE_DEFAULTS.is_personal,
         caption_enable: values.caption_enable ? 1 : 0,
         vlm_model: values.caption_enable ? values.vlm_model || "" : "",
+        summary_enable: values.summary_enable === true,
+        summary_preview: values.summary_enable === true,
+        summary_model: values.summary_enable
+          ? values.summary_model || undefined
+          : undefined,
+        sensitive_intercept_enable: values.sensitive_intercept_enable ? 1 : 0,
         is_exist_graph: !!values.is_exist_graph,
         graph_config: graphConfig,
         ingroup_permission: permission,
@@ -297,20 +329,19 @@ const AidpCreateKbPage: React.FC = () => {
 
       message.success(t("aidpKnowledge.createKbSuccess"));
       const createdId = String(created.kds_id || "");
+      if (createdId && selectedDomainId) {
+        try {
+          await aidpOntologyService.createBinding(selectedDomainId, createdId);
+        } catch {
+          message.warning(t("aidpKnowledge.createBindingFailed"), 8);
+        }
+      }
       if (createdId) openCreatedKb(createdId);
     } catch (error) {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "errorFields" in error
-      ) {
-        const fields = (error as { errorFields: { name: string[] }[] })
+      if (scrollToFirstAidpFormError(form, error, { defer: true })) {
+        const fields = (error as { errorFields: { name: (string | number)[] }[] })
           .errorFields;
-        const names = fields.map((field) => field.name[0]);
-        setInvalidFields(names);
-        window.requestAnimationFrame(() => {
-          if (fields[0]) form.scrollToField(fields[0].name, { focus: true });
-        });
+        setInvalidFields(fields.map((field) => String(field.name[0])));
         return;
       }
       handleError(error, {
@@ -359,6 +390,14 @@ const AidpCreateKbPage: React.FC = () => {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
+        <Steps
+          className="mb-5"
+          current={step}
+          items={[
+            { title: t("aidpKnowledge.createStepConfig") },
+            { title: t("aidpKnowledge.createStepOntology") },
+          ]}
+        />
         {(modelsQuery.isError || (graphEnabled && templateQuery.isError)) && (
           <Alert
             type="error"
@@ -401,24 +440,32 @@ const AidpCreateKbPage: React.FC = () => {
             title={t("aidpKnowledge.createEmbeddingUnavailable")}
           />
         )}
-        <AidpCreateKbSections
-          form={form}
-          invalidFields={invalidFields}
-          groupsLoading={groupsLoading}
-          groupsUnavailable={!!groupsError || !canReadGroups}
-          t={t}
-          canConfigureGroupPermissions={canConfigureGroupPermissions}
-          groupOptions={groupOptions}
-          ingroupPermission={ingroupPermission}
-          llmModelOptions={llmModelOptions}
-          llmModelsLoading={modelsQuery.isLoading}
-          vlmModelOptions={vlmModelOptions}
-          vlmModelsLoading={modelsQuery.isLoading}
-          embeddingModelOptions={embeddingModelOptions}
-          embeddingModelsLoading={modelsQuery.isLoading}
-          graphTemplate={templateQuery.data}
-          onRestorePrompt={restoreDefaultPrompt}
-        />
+        {step === 0 && (
+          <AidpCreateKbSections
+            form={form}
+            invalidFields={invalidFields}
+            groupsLoading={groupsLoading}
+            groupsUnavailable={!!groupsError || !canReadGroups}
+            t={t}
+            canConfigureGroupPermissions={canConfigureGroupPermissions}
+            groupOptions={groupOptions}
+            ingroupPermission={ingroupPermission}
+            llmModelOptions={llmModelOptions}
+            llmModelsLoading={modelsQuery.isLoading}
+            vlmModelOptions={vlmModelOptions}
+            vlmModelsLoading={modelsQuery.isLoading}
+            embeddingModelOptions={embeddingModelOptions}
+            embeddingModelsLoading={modelsQuery.isLoading}
+            graphTemplate={templateQuery.data}
+            onRestorePrompt={restoreDefaultPrompt}
+          />
+        )}
+        {step === 1 && (
+          <AidpCreateOntologyStep
+            selectedDomainId={selectedDomainId}
+            onSelect={setSelectedDomainId}
+          />
+        )}
       </div>
 
       <footer className={styles.createFooter}>
@@ -427,6 +474,19 @@ const AidpCreateKbPage: React.FC = () => {
           <Button onClick={goBackToList} disabled={loading}>
             {t("common.cancel")}
           </Button>
+          {step > 0 && (
+            <Button
+              disabled={loading}
+              onClick={() => setStep((previous) => Math.max(previous - 1, 0))}
+            >
+              {t("aidpKnowledge.createPrevious")}
+            </Button>
+          )}
+          {step < 1 && (
+            <Button disabled={loading} onClick={() => void goNext()}>
+              {t("aidpKnowledge.createNext")}
+            </Button>
+          )}
           <Button
             type="primary"
             loading={loading}

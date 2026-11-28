@@ -9,7 +9,7 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from pydantic import Field
 from pydantic.fields import FieldInfo
@@ -32,9 +32,11 @@ from .retrieval_config import (
     ALL_CHANNELS,
     CONFIG_KEYS,
     DEFAULTS,
+    active_channels,
     build_payload,
     validate_config,
 )
+from . import metadata_filter as metadata_filter_rules
 
 
 logger = logging.getLogger("aidp_search_tool")
@@ -62,6 +64,29 @@ def _parse_kds_list(kds_list: str) -> List[str]:
     if not isinstance(parsed_kds, list) or len(parsed_kds) > _MAX_KDS:
         raise ValueError(f"kds_list must be a list of 0-{_MAX_KDS} knowledge base IDs")
     return [str(k) for k in parsed_kds]
+
+
+def _normalize_identity_value(value: Any) -> str:
+    """Return a non-empty string identifier, or ``""`` for a missing value."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def extract_aidp_file_identity(metadata: Any) -> tuple[str, str]:
+    """Read the AIDP original-file locator from one hit's ``metadata``.
+
+    AIDP returns both identifiers in ``metadata``; either one missing means the
+    hit cannot address an original file, and nothing may be inferred from the
+    filename, ``file_url`` or chunk id.
+    """
+    if not isinstance(metadata, dict):
+        return "", ""
+    kds_id = _normalize_identity_value(metadata.get("kds_id"))
+    file_uuid = _normalize_identity_value(metadata.get("file_uuid"))
+    if not kds_id or not file_uuid:
+        return "", ""
+    return kds_id, file_uuid
 
 
 class AidpSearchTool(Tool):
@@ -149,6 +174,14 @@ class AidpSearchTool(Tool):
         "graph_score_threshold": {"description_zh": "图谱检索分数阈值，范围 0–1"},
         "graph_reranking_enable": {"description_zh": "图谱是否参与统一重排；固定布尔值"},
         "query_expansion_enable": {"description_zh": "是否启用查询扩展"},
+        "ontology_enhance_enable": {
+            "description": "Use the bound ontology's entities and relations to enhance retrieval",
+            "description_zh": "使用已关联本体库的实体及同义、上位、下位关系增强检索",
+        },
+        "rule_enable": {
+            "description": "Use enabled ontology rules to adjust candidate scores",
+            "description_zh": "使用本体库中已启用的规则调整候选结果分数",
+        },
     }
 
     output_type = "string"
@@ -183,6 +216,13 @@ class AidpSearchTool(Tool):
         graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
         graph_reranking_enable: bool = Field(default=True, description="Include graph results in unified reranking"),
         query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
+        ontology_enhance_enable: bool = Field(default=False, description="Enable ontology entity enhancement"),
+        rule_enable: bool = Field(default=False, description="Enable ontology rule enhancement"),
+        metadata_filter: dict = Field(
+            default_factory=dict,
+            exclude=True,
+            description="Server-installed conversation metadata filter: {enabled, match, conditions}",
+        ),
         observer: MessageObserver = Field(default=None, exclude=True),
         **kwargs,
     ):
@@ -218,6 +258,8 @@ class AidpSearchTool(Tool):
             "graph_score_threshold": graph_score_threshold,
             "graph_reranking_enable": graph_reranking_enable,
             "query_expansion_enable": query_expansion_enable,
+            "ontology_enhance_enable": ontology_enhance_enable,
+            "rule_enable": rule_enable,
         }
         config = {key: _resolve_field_default(value, DEFAULTS[key]) for key, value in config.items()}
         if not config.get("reranking_enable", DEFAULTS["reranking_enable"]):
@@ -230,6 +272,9 @@ class AidpSearchTool(Tool):
         resolved = validate_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
+        self.metadata_filter = metadata_filter_rules.normalize_metadata_filter(
+            unwrap_field_info(metadata_filter)
+        )
         self.observer = _resolve_field_default(observer, None)
         # Runtime whitelist populated by the backend (create_agent_info).
         # When the whitelist has been explicitly installed (even as an empty
@@ -258,14 +303,54 @@ class AidpSearchTool(Tool):
             verify_ssl=False,
         )
 
+        # Request-scoped northbound download link settings. Only the runtime's
+        # internal northbound entrypoint may install these through tool
+        # configuration; the default page-created tool never exposes the field.
+        self._northbound_download_base_url: str = ""
+
         self.record_ops = 1
+
+    def set_northbound_download(
+        self, external_url: Optional[str] = None
+    ) -> None:
+        """Enable original-file download links for a northbound run.
+
+        ``external_url`` is the configured Nexent northbound base URL. It is
+        deliberately supplied by the backend instead of being read from the
+        environment here. Passing an empty or non-HTTP value disables the
+        field again so a misconfigured run degrades to the page contract.
+        """
+        normalized = str(external_url or "").strip().rstrip("/")
+        if not normalized.lower().startswith(("http://", "https://")):
+            self._northbound_download_base_url = ""
+            return
+        self._northbound_download_base_url = normalized
+
+    def _build_northbound_download_url(self, kds_id: str, file_uuid: str) -> str:
+        """Build the API-key protected download URL for one original file."""
+        if not self._northbound_download_base_url:
+            return ""
+        return (
+            f"{self._northbound_download_base_url}/nb/v1/knowledge-bases/"
+            f"{quote(kds_id, safe='')}/files/{quote(file_uuid, safe='')}/download"
+        )
 
     def _build_retrieve_url(self) -> str:
         path = f"/KnowledgeBase/Tenants/{self.tenant_id}/Retrieval/FusionSearch"
         return urljoin(self.base_url, path)
 
-    def _build_retrieve_payload(self, query: str, kds_list: List[str]) -> Dict[str, Any]:
-        return build_payload({key: getattr(self, key) for key in CONFIG_KEYS}, query, kds_list)
+    def _build_retrieve_payload(
+        self,
+        query: str,
+        kds_list: List[str],
+        metadata_condition: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return build_payload(
+            {key: getattr(self, key) for key in CONFIG_KEYS},
+            query,
+            kds_list,
+            metadata_condition,
+        )
 
     def _emit_running_prompt(self, query: str) -> None:
         """Push the running prompt + query card to the observer if any."""
@@ -286,6 +371,21 @@ class AidpSearchTool(Tool):
         score = chunk.get("score")
         pages = chunk.get("pages", [])
         metadata = chunk.get("metadata", {})
+        score_details = {
+            "chunk_id": chunk_id,
+            "chunk_type": chunk_type,
+            "pages": pages,
+            "file_url": file_url,
+            "metadata": metadata,
+            "retrieval_source": chunk.get("retrieval_source"),
+        }
+        kds_id, file_uuid = extract_aidp_file_identity(metadata)
+        if kds_id and file_uuid:
+            # Structured technical locator for the page source card. It is
+            # never written to ``url`` and never inferred from the file name,
+            # image URL or chunk id.
+            score_details["kds_id"] = kds_id
+            score_details["file_uuid"] = file_uuid
         return SearchResultTextMessage(
             title=title,
             text=text,
@@ -294,14 +394,7 @@ class AidpSearchTool(Tool):
             filename=title,
             published_date="",
             score=str(score) if score is not None else None,
-            score_details={
-                "chunk_id": chunk_id,
-                "chunk_type": chunk_type,
-                "pages": pages,
-                "file_url": file_url,
-                "metadata": metadata,
-                "retrieval_source": chunk.get("retrieval_source"),
-            },
+            score_details=score_details,
             cite_index=(self.record_ops if citation_start is None else citation_start) + idx,
             search_type=self.name,
             tool_sign=self.tool_sign,
@@ -355,6 +448,15 @@ class AidpSearchTool(Tool):
                     f"Image marker: {image_marker}. Copy this marker unchanged into "
                     "the final answer immediately after the paragraph that this image illustrates."
                 )
+            kds_id, file_uuid = extract_aidp_file_identity(chunk.get("metadata"))
+            if kds_id and file_uuid:
+                northbound_url = self._build_northbound_download_url(
+                    kds_id, file_uuid
+                )
+                if northbound_url:
+                    # Model-facing only: the page source card keeps the
+                    # structured locator and never receives this API-key URL.
+                    result["northbound_api_download_url"] = northbound_url
             search_results_return.append(result)
 
         return search_results_json, search_results_return, images_url
@@ -385,11 +487,16 @@ class AidpSearchTool(Tool):
                 json.dumps({"images_url": images_url}, ensure_ascii=False),
             )
 
-    def _execute_request(self, query: str, kds_list: List[str]):
+    def _execute_request(
+        self,
+        query: str,
+        kds_list: List[str],
+        metadata_condition: Optional[Dict[str, Any]] = None,
+    ):
         """Retrieve records through the shared transport and response boundary."""
         return post_retrieval(
             self._http_client, self._build_retrieve_url(), self.api_key,
-            self._build_retrieve_payload(query.strip(), kds_list),
+            self._build_retrieve_payload(query.strip(), kds_list, metadata_condition),
         )
 
     def _build_image_url(self, file_url: str) -> str:
@@ -538,8 +645,6 @@ class AidpSearchTool(Tool):
         scope = self._resolve_search_scope(kds_list)
         search_kds_list = scope.used_scope
 
-        self._emit_running_prompt(query)
-
         logger.info(
             "AidpSearchTool called query='%s' kds_list=%s method=%s top_k=%d",
             query,
@@ -561,7 +666,24 @@ class AidpSearchTool(Tool):
                 scope.scope_was_specified,
             )
 
-        records = self._execute_request(query, search_kds_list)
+        metadata_condition = None
+        if self.metadata_filter.get("enabled"):
+            if "graph_search" in active_channels(self.search_method):
+                # Graph retrieval does not consume metadata_condition. The
+                # conversation filter is ignored for graph-enabled methods so
+                # the retrieval still runs; the assistant UI hides the filter
+                # entry for these Agents.
+                logger.info(
+                    "AIDP metadata filter ignored because graph retrieval is enabled"
+                )
+            else:
+                metadata_condition = metadata_filter_rules.build_metadata_condition(
+                    self.metadata_filter
+                )
+
+        self._emit_running_prompt(query)
+
+        records = self._execute_request(query, search_kds_list, metadata_condition)
 
         if not records:
             logger.info(

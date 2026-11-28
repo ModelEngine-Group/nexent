@@ -112,6 +112,7 @@ async def reject_unstaged_turn(payload, user_id, tenant_id):
 
 async def start_turn(
     payload, request, user_id, tenant_id, client, *, include_journal_controls=True, metadata_from_northbound=False,
+    northbound_run: bool = False,
     saved_user: store.SavedUserTurn | None = None,
     omitted_user: bool = False,
     complete_answer: bool = False,
@@ -165,6 +166,8 @@ async def start_turn(
                 options["owned_conversation"] = native_conversation
         if metadata_from_northbound:
             options["metadata_from_northbound"] = True
+        if northbound_run:
+            options["northbound_run"] = True
         if workbench is not None:
             options["workbench"] = workbench
         if native_knowledge is not None:

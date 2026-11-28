@@ -1,0 +1,33 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import React, { useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
+
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import AidpOntologyCreatePage from "@/ext_components/aidp/pages/ontology/AidpOntologyCreatePage";
+
+export default function AidpOntologyCreateRoute() {
+  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
+  const router = useRouter();
+  const params = useParams();
+  const locale = (params?.locale as string) || "zh";
+
+  useEffect(() => {
+    if (isDeploymentReady && !enableAidpKnowledge) {
+      router.replace(`/${locale}/knowledges`);
+    }
+  }, [enableAidpKnowledge, isDeploymentReady, locale, router]);
+
+  if (!isDeploymentReady) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
+        Loading...
+      </div>
+    );
+  }
+  if (!enableAidpKnowledge) return null;
+
+  return <AidpOntologyCreatePage />;
+}

@@ -1,0 +1,66 @@
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: #eaf3ff;
+  color: #191919;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.banner :global(.anticon) {
+  color: #0067d1;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.search {
+  width: 280px;
+  max-width: 100%;
+}
+
+.tableArea {
+  min-height: 320px;
+}
+
+.nameLink {
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #0067d1;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nameLink:hover {
+  text-decoration: underline;
+}
+
+.empty {
+  margin: 32px auto;
+}
+
+.errorText {
+  padding: 24px;
+  color: #e02128;
+  font-size: 14px;
+  line-height: 22px;
+}

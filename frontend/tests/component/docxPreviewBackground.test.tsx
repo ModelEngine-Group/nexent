@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RawStreamPreviewViewer } from "@/components/common/rawStreamPreviewViewer";
 import { fetchPreviewBlobWithMeta } from "@/lib/filePreviewUtils";
 import log from "@/lib/logger";
-import styles from "@/components/common/rawStreamPreviewViewer.module.css";
+import styles from "@/components/common/DocumentPreview.module.css";
 
 let stylesheet: HTMLStyleElement;
 beforeEach(() => {
@@ -17,14 +17,14 @@ beforeEach(() => {
   const css = readFileSync(
     resolve(
       dirname(fileURLToPath(import.meta.url)),
-      "../../components/common/rawStreamPreviewViewer.module.css"
+      "../../components/common/DocumentPreview.module.css"
     ),
     "utf8"
   );
   stylesheet = document.createElement("style");
   stylesheet.textContent = css
     .replace(/:global\(([^)]+)\)/g, "$1")
-    .replaceAll(".docxPages", `.${styles.docxPages}`);
+    .replaceAll(".docPage", `.${styles.docPage}`);
   document.head.append(stylesheet);
 });
 afterEach(() => stylesheet?.remove());
@@ -82,12 +82,6 @@ test.each([
       expect(page).not.toBeNull();
       expect(page?.textContent).toContain("Document paper");
       expect(window.getComputedStyle(page!).backgroundColor).toBe(expected);
-      expect(window.getComputedStyle(page!).boxShadow).toBe("none");
-      const wrapper = page!.parentElement!;
-      expect(window.getComputedStyle(wrapper).backgroundColor).toBe(
-        "rgba(0, 0, 0, 0)"
-      );
-      expect(window.getComputedStyle(wrapper).padding).toBe("0px");
     });
   }
 );

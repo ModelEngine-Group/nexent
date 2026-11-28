@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Domain exceptions raised by the AIDP permission subsystem.
 
 These map to HTTP status codes in ``aidp_mgmt_app`` so the rest of the
@@ -85,10 +87,32 @@ class AidpGroupValidationError(Exception):
         )
 
 
+class AidpSensitiveWordError(Exception):
+    """AIDP rejected a sensitive word request with a business error body.
+
+    AIDP may report the same business failure with different HTTP statuses
+    (for example ``error.code=1022`` for a duplicate word arrives with HTTP
+    500). The caller maps the preserved ``upstream_code`` to the response so
+    the UI can recognise the failure without guessing from the status.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        upstream_code: str | None = None,
+        upstream_status: int | None = None,
+    ) -> None:
+        self.upstream_code = upstream_code
+        self.upstream_status = upstream_status
+        super().__init__(message)
+
+
 __all__ = [
+    "AidpGroupValidationError",
+    "AidpKbConflictError",
     "AidpKbNotFoundError",
     "AidpKbPermissionDeniedError",
-    "AidpKbConflictError",
     "AidpKbSyncError",
-    "AidpGroupValidationError",
+    "AidpSensitiveWordError",
 ]

@@ -153,7 +153,9 @@ async def forward_a2a_run(agent_request: AgentRequest, user_id: str, tenant_id: 
 async def forward_northbound_run(
     agent_request: AgentRequest, user_id: str, tenant_id: str, *, final_answer_mode: str = "complete",
 ):
-    payload = CompatibilityConversationRun(request=agent_request.model_dump(mode="json"))
+    payload = CompatibilityConversationRun(
+        request=agent_request.model_dump(mode="json"),
+    )
     try:
         response = await forward_conversation_run(
             payload, user_id, tenant_id, northbound=True, complete_answer=final_answer_mode == "complete",
@@ -241,6 +243,7 @@ async def forward_conversation_run(
             response = await prepared_turn.start_turn(
                 claimed, request, owner, tenant, client, include_journal_controls=not northbound or request.stream_cursor,
                 metadata_from_northbound=northbound and request.metadata is not None,
+                northbound_run=northbound,
                 **presentation_options,
             )
             if response is not None:

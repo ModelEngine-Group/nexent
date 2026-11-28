@@ -511,6 +511,7 @@ async def test_northbound_dispatch_never_falls_back_to_legacy_execution(mocker, 
 
     assert start.await_count == 1
     assert start.await_args.kwargs.get("metadata_from_northbound", False) == metadata_request
+    assert start.await_args.kwargs.get("northbound_run") is True
     assert release.await_count == 0
     fallback.assert_not_awaited()
 
@@ -613,10 +614,15 @@ async def test_prepared_turn_stages_metadata_and_keeps_the_snapshot_version_head
     operations, compile_snapshot, client, _ = flow
     request = AgentRequest.model_validate({**PAYLOAD.request, "metadata": {}})
 
-    response = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client, metadata_from_northbound=northbound)
+    response = await prepared_turn.start_turn(
+        PAYLOAD, request, *ACTOR, client,
+        metadata_from_northbound=northbound,
+        northbound_run=northbound,
+    )
 
     assert operations == ["stage", "start", "confirm"]
     assert compile_snapshot.await_args.kwargs.get("metadata_from_northbound", False) is northbound
+    assert compile_snapshot.await_args.kwargs.get("northbound_run", False) is northbound
     assert prepared_turn.store.stage_turn.call_args.args[5]["metadata_update"] == {
         "expected_version": 1, "value": {},
     }

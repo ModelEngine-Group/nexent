@@ -1,0 +1,63 @@
+.drawer :global(.ant-drawer-header) {
+  min-height: 64px;
+  padding: 18px 24px;
+}
+
+.drawer :global(.ant-drawer-title) {
+  color: #1f1f1f;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+}
+
+.drawer :global(.ant-drawer-body) {
+  padding: 20px 24px;
+}
+
+.drawer :global(.ant-drawer-footer) {
+  min-height: 72px;
+  padding: 20px 24px;
+}
+
+.form :global(.ant-form-item) {
+  margin-bottom: 20px;
+}
+
+.form :global(.ant-form-item-label) {
+  padding-bottom: 4px;
+}
+
+.form :global(.ant-form-item-label > label) {
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.form :global(.ant-form-item-extra) {
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.footer :global(.ant-btn) {
+  height: 32px;
+}
+
+.error {
+  color: #e02128;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+@media (max-width: 767px) {
+  .drawer :global(.ant-drawer-content-wrapper) {
+    width: 100vw !important;
+  }
+}

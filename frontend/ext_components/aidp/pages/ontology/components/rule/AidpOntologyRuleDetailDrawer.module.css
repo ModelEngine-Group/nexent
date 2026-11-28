@@ -1,0 +1,29 @@
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.conditionList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conditionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.conditionField {
+  font-weight: 500;
+}
+
+.conditionValue {
+  color: #595959;
+  word-break: break-all;
+}

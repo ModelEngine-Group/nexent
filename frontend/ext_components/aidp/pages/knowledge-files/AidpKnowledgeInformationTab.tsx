@@ -4,6 +4,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useConfirmModal } from "@/ext_components/aidp/shared/hooks/useConfirmModal";
 import { useQuery } from "@tanstack/react-query";
 
 import { App, Form, Modal, Select, Skeleton, Switch, Tooltip } from "antd";
@@ -22,6 +23,7 @@ import {
 import log from "@/lib/logger";
 import AidpChunkModeChoices from "@/ext_components/aidp/shared/components/AidpChunkModeChoices";
 import AidpSliderNumberField from "@/ext_components/aidp/pages/knowledge-create/AidpSliderNumberField";
+import AidpGuardrailSettingsModal from "@/ext_components/aidp/shared/components/AidpGuardrailSettingsModal";
 import {
   AIDP_CHUNK_TOKEN_MAX,
   AIDP_CHUNK_TOKEN_MIN,
@@ -47,6 +49,7 @@ const SETTING_MODAL_TITLE_KEYS: Record<AidpDetailSetting, string> = {
   chunk_overlap_percent: "aidpKnowledge.detailEditChunkOverlapPercent",
   topk: "aidpKnowledge.detailEditTopK",
   vlm: "aidpKnowledge.detailEditVlm",
+  summary: "aidpKnowledge.detailEditSummary",
   graph_llm: "aidpKnowledge.detailEditGraphModel",
   graph_hop: "aidpKnowledge.detailEditGraphHop",
   graph_thinking: "aidpKnowledge.detailEditGraphThinking",
@@ -134,7 +137,8 @@ const AidpKnowledgeInformationTab: React.FC<
   onRefreshDetail,
 }) => {
   const { t } = useTranslation();
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
+  const confirm = useConfirmModal();
   const canEdit = detail.permission === "EDIT";
   const graphConfig = useMemo(() => graphConfigOf(detail), [detail]);
   const graphLlmModelName =
@@ -146,11 +150,18 @@ const AidpKnowledgeInformationTab: React.FC<
   const [settingModal, setSettingModal] = useState<AidpDetailSetting | null>(
     null
   );
+  const [guardrailOpen, setGuardrailOpen] = useState(false);
+  const [guardrailEnabled, setGuardrailEnabled] = useState(false);
+  const [savingGuardrail, setSavingGuardrail] = useState(false);
   const [settingForm] = Form.useForm<{ value: number }>();
   const [graphForm] = Form.useForm<{ value: string | number | boolean }>();
   const [vlmForm] = Form.useForm<{
     caption_enable: boolean;
     vlm_model?: string;
+  }>();
+  const [summaryForm] = Form.useForm<{
+    summary_enable: boolean;
+    summary_model?: string;
   }>();
 
   // ---- VLM model options for the caption (VLM) edit dialog ----
@@ -164,6 +175,7 @@ const AidpKnowledgeInformationTab: React.FC<
     return aidpModelOptions(vlmModelsData?.models);
   }, [vlmModelsData]);
   const captionEditEnabled = Form.useWatch("caption_enable", vlmForm);
+  const summaryEditEnabled = Form.useWatch("summary_enable", summaryForm);
 
   // ---- LLM model options for the graph model edit dialog ----
   const { data: llmModelsData, isLoading: llmModelsLoading } = useQuery({
@@ -175,6 +187,26 @@ const AidpKnowledgeInformationTab: React.FC<
   const llmModelOptions = useMemo(() => {
     return aidpModelOptions(llmModelsData?.models);
   }, [llmModelsData]);
+
+  // ---- LLM-only model options for the summary edit dialog ----
+  // Mirrors the create page: list all KnowledgeBase models, then keep only
+  // ``model_type === "llm"`` because AIDP treats the service filter as
+  // advisory.
+  const { data: summaryModelsData, isLoading: summaryModelsLoading } = useQuery(
+    {
+      queryKey: ["aidp-models", "summary-llm", "KnowledgeBase"],
+      queryFn: () => aidpKnowledgeService.listModels("", "KnowledgeBase"),
+      staleTime: 5 * 60 * 1000,
+      enabled: canEdit || Boolean(detail.summary_model),
+    }
+  );
+  const summaryModelOptions = useMemo(() => {
+    return aidpModelOptions(
+      (summaryModelsData?.models ?? []).filter(
+        (model) => model.model_type === "llm"
+      )
+    );
+  }, [summaryModelsData]);
 
   // Detail fields and selectors use ModelService labels for every model type.
   const { data: embeddingModelsData } = useQuery({
@@ -193,6 +225,10 @@ const AidpKnowledgeInformationTab: React.FC<
     llmModelsData?.models
   );
   const vlmModelLabel = aidpModelLabel(detail.vlm_model, vlmModelsData?.models);
+  const summaryModelLabel = aidpModelLabel(
+    detail.summary_model,
+    summaryModelsData?.models
+  );
 
   useEffect(() => {
     if (!settingModal) return;
@@ -201,6 +237,13 @@ const AidpKnowledgeInformationTab: React.FC<
         caption_enable:
           detail.is_multimodal === true || detail.caption_enable === 1,
         vlm_model: detail.vlm_model || undefined,
+      });
+      return;
+    }
+    if (settingModal === "summary") {
+      summaryForm.setFieldsValue({
+        summary_enable: detail.summary_enable === true,
+        summary_model: detail.summary_model || undefined,
       });
       return;
     }
@@ -240,7 +283,15 @@ const AidpKnowledgeInformationTab: React.FC<
           ? (detail.chunk_mode ?? 0)
           : (detail.topk ?? 10),
     });
-  }, [detail, graphConfig, graphForm, settingForm, settingModal, vlmForm]);
+  }, [
+    detail,
+    graphConfig,
+    graphForm,
+    settingForm,
+    settingModal,
+    summaryForm,
+    vlmForm,
+  ]);
 
   const saveSetting = async () => {
     if (!settingModal) return;
@@ -312,6 +363,40 @@ const AidpKnowledgeInformationTab: React.FC<
         log.error("Failed to save AIDP knowledge setting:", {
           id: detail.kds_id,
           setting: settingModal,
+          error,
+        });
+        message.error(
+          getAidpErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.detailSettingSaveFailed")
+          )
+        );
+      } finally {
+        setSavingSetting(false);
+      }
+      return;
+    }
+    if (settingModal === "summary") {
+      // Same fields as creation: enabling requires an LLM model, while
+      // disabling clears the model upstream. The backend forces the hidden
+      // preview flag to match the switch.
+      const values = await summaryForm.validateFields();
+      const summaryEnabled = values.summary_enable === true;
+      setSavingSetting(true);
+      try {
+        await aidpKnowledgeService.updateKb(detail.kds_id, {
+          summary_enable: summaryEnabled,
+          ...(summaryEnabled
+            ? { summary_model: (values.summary_model || "").trim() }
+            : {}),
+        });
+        setSettingModal(null);
+        await onRefreshDetail();
+        message.success(t("aidpKnowledge.detailSettingSaved"));
+      } catch (error) {
+        log.error("Failed to save AIDP summary setting:", {
+          id: detail.kds_id,
           error,
         });
         message.error(
@@ -406,7 +491,7 @@ const AidpKnowledgeInformationTab: React.FC<
     // modal.confirm returns a thenable without .catch; consume it so a failed
     // confirmation stays in the dialog instead of an unhandled rejection.
     void Promise.resolve(
-      modal.confirm({
+      confirm({
         title: t("aidpKnowledge.detailGraphDisableTitle"),
         content: (
           <div className="whitespace-pre-wrap">
@@ -443,6 +528,37 @@ const AidpKnowledgeInformationTab: React.FC<
     );
   };
 
+  const openGuardrail = () => {
+    setGuardrailEnabled(detail.sensitive_intercept_enable === 1);
+    setGuardrailOpen(true);
+  };
+
+  const saveGuardrail = async () => {
+    setSavingGuardrail(true);
+    try {
+      await aidpKnowledgeService.updateKb(detail.kds_id, {
+        sensitive_intercept_enable: guardrailEnabled ? 1 : 0,
+      });
+      message.success(t("aidpSensitiveWords.guardrailSaveSuccess"));
+      setGuardrailOpen(false);
+      await onRefreshDetail();
+    } catch (error) {
+      log.error("Failed to update AIDP security guardrails:", {
+        id: detail.kds_id,
+        error,
+      });
+      message.error(
+        getAidpErrorMessage(
+          error,
+          t,
+          t("aidpSensitiveWords.guardrailSaveFailed")
+        )
+      );
+    } finally {
+      setSavingGuardrail(false);
+    }
+  };
+
   return (
     <>
       {detailFetching ? (
@@ -456,8 +572,10 @@ const AidpKnowledgeInformationTab: React.FC<
           embeddingModelLabel={embeddingModelLabel}
           llmModelLabel={llmModelLabel}
           vlmModelLabel={vlmModelLabel}
+          summaryModelLabel={summaryModelLabel}
           formatDateTime={formatDetailDateTime}
           onEditPermissions={onEditPermissions}
+          onEditGuardrail={openGuardrail}
           onEditSetting={setSettingModal}
           onDisableGraph={disableGraph}
         />
@@ -526,6 +644,43 @@ const AidpKnowledgeInformationTab: React.FC<
                 </Form.Item>
               )}
             </Form.Item>
+          </Form>
+        ) : settingModal === "summary" ? (
+          <Form form={summaryForm} layout="vertical">
+            <div className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+              <Form.Item
+                name="summary_enable"
+                label={t("aidpKnowledge.createSummaryEnable")}
+                valuePropName="checked"
+              >
+                <Switch aria-label={t("aidpKnowledge.createSummaryEnable")} />
+              </Form.Item>
+              <Form.Item
+                name="summary_model"
+                label={t("aidpKnowledge.createSummaryModel")}
+                rules={[
+                  {
+                    required: summaryEditEnabled === true,
+                    message: t("aidpKnowledge.createSummaryModelRequired"),
+                  },
+                ]}
+              >
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  allowClear
+                  disabled={summaryEditEnabled !== true}
+                  loading={summaryModelsLoading}
+                  notFoundContent={
+                    summaryModelsLoading
+                      ? t("aidpKnowledge.createModelLoading")
+                      : t("aidpKnowledge.createModelNone")
+                  }
+                  placeholder={t("aidpKnowledge.createModelSearch")}
+                  options={summaryModelOptions}
+                />
+              </Form.Item>
+            </div>
           </Form>
         ) : settingModal && isGraphSetting(settingModal) ? (
           <Form form={graphForm} layout="vertical">
@@ -670,6 +825,18 @@ const AidpKnowledgeInformationTab: React.FC<
           </Form>
         ) : null}
       </Modal>
+
+      <AidpGuardrailSettingsModal
+        open={guardrailOpen}
+        enabled={guardrailEnabled}
+        loading={detailFetching}
+        saving={savingGuardrail}
+        onToggle={setGuardrailEnabled}
+        onSave={() => void saveGuardrail()}
+        onCancel={() => {
+          if (!savingGuardrail) setGuardrailOpen(false);
+        }}
+      />
     </>
   );
 };

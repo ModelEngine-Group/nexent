@@ -540,6 +540,90 @@ class TestAidpBuildImageUrl:
         assert images_url == []
 
 
+class TestAidpFileIdentityAndNorthboundDownload:
+    """Original-file identity and the northbound-only model download link."""
+
+    FILE_UUID = "11111111-2222-4333-8444-555555555555"
+
+    @classmethod
+    def _records(cls):
+        identity = {"kds_id": "kb-42", "file_uuid": cls.FILE_UUID}
+        return [
+            {
+                "id": "chunk-1",
+                "chunk_type": "text",
+                "title": "Manual.pdf",
+                "text": "first chunk",
+                "file_url": "",
+                "metadata": dict(identity),
+            },
+            {
+                "id": "chunk-2",
+                "chunk_type": "text",
+                "title": "Manual.pdf",
+                "text": "second chunk of the same file",
+                "file_url": "",
+                "metadata": dict(identity),
+            },
+            {
+                "id": "chunk-3",
+                "chunk_type": "text",
+                "title": "No identity.pdf",
+                "text": "the metadata has no locator",
+                "file_url": "kb-42/data/picture.png",
+                "metadata": {"source": "doc"},
+            },
+        ]
+
+    def test_identity_is_projected_to_the_page_reference_only(self, aidp_tool):
+        aidp_tool.top_k = 3
+        ui_results, model_results, _ = aidp_tool._process_records(self._records())
+
+        assert ui_results[0]["score_details"]["kds_id"] == "kb-42"
+        assert ui_results[0]["score_details"]["file_uuid"] == self.FILE_UUID
+        assert "kds_id" not in ui_results[2]["score_details"]
+        assert "file_uuid" not in ui_results[2]["score_details"]
+        assert all("northbound_api_download_url" not in item for item in model_results)
+        assert all("northbound_api_download_url" not in item for item in ui_results)
+
+    def test_northbound_link_is_model_only_and_stable_per_file(self, aidp_tool):
+        aidp_tool.top_k = 3
+        aidp_tool.set_northbound_download("https://api.example.com/api/")
+        ui_results, model_results, _ = aidp_tool._process_records(self._records())
+
+        expected = (
+            "https://api.example.com/api/nb/v1/knowledge-bases/kb-42/files/"
+            f"{self.FILE_UUID}/download"
+        )
+        assert model_results[0]["northbound_api_download_url"] == expected
+        assert model_results[1]["northbound_api_download_url"] == expected
+        assert "northbound_api_download_url" not in model_results[2]
+        assert all("northbound_api_download_url" not in item for item in ui_results)
+
+    def test_invalid_northbound_base_degrades_to_no_link(self, aidp_tool):
+        aidp_tool.set_northbound_download("not-a-url")
+        _, model_results, _ = aidp_tool._process_records(self._records())
+
+        assert all("northbound_api_download_url" not in item for item in model_results)
+
+    def test_path_segments_are_encoded(self, aidp_tool):
+        aidp_tool.set_northbound_download("https://api.example.com")
+        _, model_results, _ = aidp_tool._process_records(
+            [
+                {
+                    "id": "chunk-1",
+                    "title": "x",
+                    "text": "x",
+                    "metadata": {"kds_id": "kb/42", "file_uuid": "uuid 1"},
+                }
+            ]
+        )
+
+        assert model_results[0]["northbound_api_download_url"].endswith(
+            "/knowledge-bases/kb%2F42/files/uuid%201/download"
+        )
+
+
 class TestAidpSearchToolWhitelist:
     """Tests for the v7.1 whitelist mechanism (_whitelist_installed /
     _allowed_kds_set / set_allowed_kds / _filter_by_whitelist) and its

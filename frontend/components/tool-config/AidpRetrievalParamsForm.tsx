@@ -13,7 +13,6 @@ import { useTranslation } from "react-i18next";
 import {
   aidpAllChannels,
   aidpChannels,
-  aidpDefaults,
   aidpErrors,
   aidpMethods,
   resolveAidpConfig,
@@ -26,6 +25,11 @@ const ENHANCEMENT_KEYS = [
   "query_expansion_enable",
   "related_search_enable",
   "multi_modal",
+] as const;
+
+const ONTOLOGY_ENHANCEMENT_KEYS = [
+  "ontology_enhance_enable",
+  "rule_enable",
 ] as const;
 
 const CANDIDATE_KEYS = {
@@ -55,7 +59,10 @@ function HelpTip({ helpKey, label }: { helpKey: string; label: string }) {
     top: number;
   } | null>(null);
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setMounted(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current || !popoverRef.current) return;
@@ -353,6 +360,7 @@ export function AidpRetrievalParamsForm({
   const [combinationOpen, setCombinationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [enhancementOpen, setEnhancementOpen] = useState(false);
+  const [ontologyEnhancementOpen, setOntologyEnhancementOpen] = useState(false);
   const topKBeforeClear = useRef(c.top_k);
   const detailsHasError = [
     "hybrid_top_k",
@@ -390,6 +398,10 @@ export function AidpRetrievalParamsForm({
   const enhancementCount = ENHANCEMENT_KEYS.filter((key) =>
     Boolean(c[key])
   ).length;
+  const ontologyEnhancementCount = ONTOLOGY_ENHANCEMENT_KEYS.filter((key) =>
+    Boolean(c[key])
+  ).length;
+  const jargonConflict = Boolean(errors.ontology_enhance_enable);
 
   const fieldLabel = (key: string): string => {
     if (key === "search_method") return t("aidpRetrieval.fields.search_method");
@@ -498,13 +510,6 @@ export function AidpRetrievalParamsForm({
       }
     />
   );
-
-  const reset = () => {
-    setCombinationOpen(false);
-    setDetailsOpen(false);
-    setEnhancementOpen(false);
-    onChange({ ...aidpDefaults });
-  };
 
   return (
     <div className={styles.form} data-testid="aidp-retrieval-form">
@@ -764,6 +769,54 @@ export function AidpRetrievalParamsForm({
               onChange={(checked) => onChange({ [key]: checked })}
             />
           ))}
+        </div>
+      </Section>
+
+      <Section
+        title={t("aidpRetrieval.ontologyEnhancement")}
+        summary={t("aidpRetrieval.ontologyEnhancementCount", {
+          count: ontologyEnhancementCount,
+        })}
+        open={ontologyEnhancementOpen}
+        onToggle={() => setOntologyEnhancementOpen((current) => !current)}
+      >
+        <p className={styles.inlineNote}>
+          {t("aidpRetrieval.ontologyScopeHint")}
+        </p>
+        <p className={styles.inlineNote}>
+          {t("aidpRetrieval.ontologyBackendDependency")}
+        </p>
+        <div className={styles.fields}>
+          <SwitchControl
+            label={t("aidpRetrieval.fields.ontology_enhance_enable")}
+            helpKey="ontology_enhance_enable"
+            checked={Boolean(c.ontology_enhance_enable)}
+            disabled={disabled}
+            stateText={switchState(Boolean(c.ontology_enhance_enable))}
+            onChange={(checked) =>
+              onChange({ ontology_enhance_enable: checked })
+            }
+            note={
+              jargonConflict ? (
+                <p className={styles.inlineError}>
+                  {t("aidpRetrieval.errors.jargon_conflict")}
+                </p>
+              ) : undefined
+            }
+          />
+          <SwitchControl
+            label={t("aidpRetrieval.fields.rule_enable")}
+            helpKey="rule_enable"
+            checked={Boolean(c.rule_enable)}
+            disabled={disabled}
+            stateText={switchState(Boolean(c.rule_enable))}
+            onChange={(checked) => onChange({ rule_enable: checked })}
+            note={
+              <p className={styles.inlineNote}>
+                {t("aidpRetrieval.ruleEnhancementHint")}
+              </p>
+            }
+          />
         </div>
       </Section>
 

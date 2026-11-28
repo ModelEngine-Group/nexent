@@ -21,6 +21,7 @@ import type {
   AidpDocumentItem,
   AidpKbDetail,
 } from "@/ext_components/aidp/shared/types/management";
+import { UploadCenterProvider } from "@/components/upload-center/UploadCenterProvider";
 
 const context = vi.hoisted(() => ({
   user: { id: "owner-a", tenantId: "tenant-a", role: "USER" } as {
@@ -157,6 +158,7 @@ export const file: AidpDocumentItem = {
   file_name: "guide.txt",
   file_type: "txt",
   file_size: 1024,
+  status: 1,
   created_at: "2026-10-01T10:00:00Z",
   updated_at: "2026-10-01T10:00:00Z",
 };
@@ -171,6 +173,20 @@ export const filesResponse = (items = [file], total = items.length) => ({
   total_count: total,
   total_reliable: true,
   has_more: false,
+});
+export const folderTreeResponse = (
+  folders: Array<{
+    folder_name: string;
+    folder_id?: number;
+    has_child_folders?: boolean;
+  }> = [],
+  items = [file],
+  total = items.length,
+  pageSize = 10,
+) => ({
+  folder_path: "/",
+  folders,
+  files: { page: 1, page_size: pageSize, total, value: items },
 });
 export const uploadTasksResponse = () => ({
   value: [],
@@ -227,7 +243,9 @@ export function mount(
         theme={{ token: { motion: false } }}
       >
         <App>
-          <QueryClientProvider client={client}>{child}</QueryClientProvider>
+          <QueryClientProvider client={client}>
+            <UploadCenterProvider>{child}</UploadCenterProvider>
+          </QueryClientProvider>
         </App>
       </ConfigProvider>
     </I18nextProvider>
@@ -355,10 +373,10 @@ beforeEach(() => {
       return reply(listResponse());
     if (request.url.pathname === base + "/kb-a") return reply(kb);
     if (
-      request.url.pathname === base + "/kb-a/files" &&
+      request.url.pathname === base + "/kb-a/folders/tree" &&
       request.method === "GET"
     )
-      return reply(filesResponse());
+      return reply(folderTreeResponse());
     if (
       request.url.pathname === base + "/kb-a/upload-tasks" &&
       request.method === "GET"

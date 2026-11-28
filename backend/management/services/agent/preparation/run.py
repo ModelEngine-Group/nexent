@@ -125,6 +125,7 @@ async def create_agent_run_info(
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
     metadata: Optional[Dict[str, Any]] = None,
     user_query: str | None = None,
+    northbound_run: bool = False,
     memory_query_deadline: float | None = None,
 ):
     if override_model_id is not None:
@@ -359,6 +360,7 @@ async def create_agent_run_info(
         agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
         catalog_model_versions=model_versions,
         model_parameter_preferences=model_parameter_preferences,
+        northbound_run=northbound_run,
         **export_options,
     )
 

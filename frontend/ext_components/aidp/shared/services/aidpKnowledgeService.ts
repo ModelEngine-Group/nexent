@@ -23,7 +23,6 @@ import { ErrorCode, isSessionExpired } from "@/const/errorCode";
 import { parseAidpUploadError } from "@/ext_components/aidp/shared/services/aidpUploadUtils";
 import type {
   AidpKbDetail,
-  AidpDocumentListResponse,
   AidpUploadResponse,
   AidpDocumentRemoveResponse,
   AidpUploadTaskListResponse,
@@ -32,7 +31,21 @@ import type {
   AidpSetPermissionPayload,
   AidpSaveSettingsResult,
   AidpUpdateKbPayload,
+  AidpFolderTreeResponse,
+  AidpFolderOperationResult,
+  AidpFileMoveResponse,
+  AidpFileRenameResponse,
+  AidpDocumentItem,
+  AidpIngestedFileListResponse,
 } from "../types/management";
+import type {
+  AidpChunk,
+  AidpChunkCreatePayload,
+  AidpChunkCreateResponse,
+  AidpChunkListResponse,
+  AidpChunkUpdatePayload,
+} from "../types/chunks";
+import type { AidpFileSummaryResponse } from "../types/summary";
 
 function buildUrl(
   base: string,
@@ -66,6 +79,29 @@ class AidpKnowledgeService {
       log.warn("Knowledge base deletion preview unavailable:", error);
       return null;
     }
+  }
+
+  async batchGetKbs(kdsIds: string[]): Promise<{
+    value: Array<{
+      kds_id: string;
+      kds_name: string;
+      description: string;
+      created_at: string | null;
+      resource_status: string;
+    }>;
+  }> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbBatchRead,
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ kds_ids: kdsIds }),
+      }
+    );
+    return response.json();
   }
 
   /**
@@ -147,11 +183,23 @@ class AidpKnowledgeService {
     id: string,
     files: File[],
     onProgress: (loaded: number, total: number) => void,
-    signal: AbortSignal
+    signal: AbortSignal,
+    options: {
+      targetFolder?: string;
+      relativePaths?: string[];
+    } = {}
   ): Promise<AidpUploadResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {});
     const formData = new FormData();
     for (const file of files) formData.append("files", file);
+    if (options.targetFolder !== undefined) {
+      formData.append("target_folder", options.targetFolder);
+      const relativePaths =
+        options.relativePaths ?? files.map((file) => file.name);
+      for (const relativePath of relativePaths) {
+        formData.append("relative_paths", relativePath);
+      }
+    }
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -297,16 +345,192 @@ class AidpKnowledgeService {
   }
 
   /**
-   * List only files AIDP confirms as ingested; upload history stays separate.
-   * Backed by the /files endpoint (not the legacy /documents view).
+   * Read one folder level: direct subfolders plus the current folder's
+   * server-side paginated files.
    */
-  async listIngestedFiles(
+  async getFolderTree(
+    id: string,
+    folderPath: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = "",
+    includeFiles: boolean = true,
+    signal?: AbortSignal
+  ): Promise<AidpFolderTreeResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFolderTree(id), {
+      folder_path: folderPath,
+      page,
+      page_size: pageSize,
+      include_files: includeFiles ? "true" : "false",
+      keyword: keyword.trim() || undefined,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      folder_id:
+        typeof result.folder_id === "number" ? result.folder_id : undefined,
+      folder_path:
+        typeof result.folder_path === "string"
+          ? result.folder_path
+          : folderPath,
+      folders: Array.isArray(result.folders) ? result.folders : [],
+      files: {
+        page: Number(result.files?.page) || page,
+        page_size: Number(result.files?.page_size) || pageSize,
+        total: Number(result.files?.total) || 0,
+        value: Array.isArray(result.files?.value) ? result.files.value : [],
+      },
+    };
+  }
+
+  async createFolder(
+    id: string,
+    parentFolder: string,
+    folderName: string
+  ): Promise<AidpFolderOperationResult> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFolders(id), {}),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          parent_folder: parentFolder,
+          folder_name: folderName,
+        }),
+      }
+    );
+    return response.json();
+  }
+
+  async renameFolder(
+    id: string,
+    parentFolder: string,
+    oldFolderName: string,
+    newFolderName: string
+  ): Promise<AidpFolderOperationResult> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFolders(id), {}),
+      {
+        method: "PATCH",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          parent_folder: parentFolder,
+          old_folder_name: oldFolderName,
+          new_folder_name: newFolderName,
+        }),
+      }
+    );
+    return response.json();
+  }
+
+  /** Delete one folder. AIDP only allows deleting empty folders. */
+  async deleteFolder(id: string, folderPath: string): Promise<void> {
+    await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFolders(id), {
+        folder_path: folderPath,
+      }),
+      {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      }
+    );
+  }
+
+  async moveFolder(
+    id: string,
+    parentFolder: string,
+    folderName: string,
+    targetFolder: string,
+    mergeOnConflict: boolean = false
+  ): Promise<AidpFolderOperationResult> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFolderMove(id), {}),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          parent_folder: parentFolder,
+          folder_name: folderName,
+          target_folder: targetFolder,
+          merge_on_conflict: mergeOnConflict,
+        }),
+      }
+    );
+    return response.json();
+  }
+
+  /** Move files into a folder; AIDP reports per-file outcomes. */
+  async moveFiles(
+    id: string,
+    fileUuids: string[],
+    targetFolder: string
+  ): Promise<AidpFileMoveResponse> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFileMove(id), {}),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          file_uuids: fileUuids,
+          target_folder: targetFolder,
+        }),
+      }
+    );
+    return response.json();
+  }
+
+  async renameFile(
+    id: string,
+    fileUuid: string,
+    newFileName: string
+  ): Promise<AidpFileRenameResponse> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {}),
+      {
+        method: "PATCH",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          file_uuid: fileUuid,
+          new_file_name: newFileName,
+        }),
+      }
+    );
+    if (response.status === 204) return {};
+    const text = await response.text();
+    return text ? (JSON.parse(text) as AidpFileRenameResponse) : {};
+  }
+
+  /**
+   * Full-tree keyword search with the pagination metadata the table needs.
+   * The existing listIngestedFiles helper returns only the rows for callers
+   * that do not page through the results.
+   */
+  async listIngestedFilePage(
     id: string,
     page: number = 1,
     pageSize: number = 10,
     keyword: string = "",
     signal?: AbortSignal
-  ): Promise<AidpDocumentListResponse> {
+  ): Promise<AidpIngestedFileListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
       page,
       page_size: pageSize,
@@ -320,12 +544,35 @@ class AidpKnowledgeService {
     const result = await response.json();
     return {
       value: Array.isArray(result.value) ? result.value : [],
-      total_count:
-        typeof result.total_count === "number" ? result.total_count : 0,
-      has_more:
-        typeof result.has_more === "boolean" ? result.has_more : undefined,
-      total_reliable: result.total_reliable !== false,
+      total_count: Number(result.total_count ?? 0),
+      has_more: Boolean(result.has_more),
+      total_reliable: Boolean(result.total_reliable),
     };
+  }
+
+  /**
+   * List only files AIDP confirms as ingested; upload history stays separate.
+   * Backed by the /files endpoint (not the legacy /documents view).
+   */
+  async listIngestedFiles(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = "",
+    signal?: AbortSignal
+  ): Promise<AidpDocumentItem[]> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return Array.isArray(result.value) ? result.value : [];
   }
 
   /**
@@ -399,7 +646,7 @@ class AidpKnowledgeService {
 
   /**
    * Remove multiple documents from an AIDP knowledge base in one request.
-   * AIDP reports per-file outcomes via summary/success_list/failed_list.
+   * AIDP reports per-file outcomes via partial_success_list/failed_list.
    */
   async removeDocs(
     id: string,
@@ -415,6 +662,268 @@ class AidpKnowledgeService {
       body: JSON.stringify({ file_uuids: fileUuids }),
     });
     return response.json();
+  }
+
+  /**
+   * List the semantic chunks AIDP generated for one file.
+   *
+   * The upstream contract filters by `file_uuid` only (no keyword search) and
+   * reports a global `total_count`; when the backend could not obtain one it
+   * marks the total unreliable so the page falls back to `has_more`.
+   */
+  async listChunks(
+    id: string,
+    fileUuid: string,
+    page: number = 1,
+    pageSize: number = 20,
+    signal?: AbortSignal
+  ): Promise<AidpChunkListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbChunks(id), {
+      file_uuid: fileUuid,
+      page,
+      page_size: pageSize,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count:
+        typeof result.total_count === "number" ? result.total_count : 0,
+      has_more: result.has_more === true,
+      total_reliable: result.total_reliable !== false,
+    };
+  }
+
+  /**
+   * Search chunk content in one file through the Nexent backend's dedicated
+   * FusionSearch proxy. The backend applies the AIDP file-name condition; the
+   * page does not call the model-facing aidp_search tool.
+   */
+  async searchChunks(
+    id: string,
+    fileUuid: string,
+    fileName: string,
+    query: string,
+    topk: number = 20,
+    signal?: AbortSignal
+  ): Promise<AidpChunkListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbChunkSearch(id), {
+      file_uuid: fileUuid,
+      file_name: fileName,
+      query,
+      topk,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count:
+        typeof result.total_count === "number" ? result.total_count : 0,
+      has_more: false,
+      total_reliable: true,
+    };
+  }
+
+  /** Read one chunk's full text and read-only metadata. */
+  async getChunk(
+    id: string,
+    chunkId: number | string,
+    signal?: AbortSignal
+  ): Promise<AidpChunk> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunkDetail(id, chunkId),
+      { method: "GET", headers: getAuthHeaders(), signal }
+    );
+    return (await response.json()) as AidpChunk;
+  }
+
+  /**
+   * Fetch an image chunk's picture as a binary response.
+   *
+   * The caller turns the body into an object URL; an `<img>` tag cannot carry
+   * the Authorization header, so the image goes through an authenticated
+   * fetch like the document download/preview paths.
+   */
+  async fetchChunkImage(
+    id: string,
+    fileId: string,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    return fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunkImage(id, fileId),
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+        signal,
+      }
+    );
+  }
+
+  /** Add one chunk; AIDP answers with the new chunk id. */
+  async createChunk(
+    id: string,
+    payload: AidpChunkCreatePayload
+  ): Promise<AidpChunkCreateResponse> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunks(id),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    return (await response.json()) as AidpChunkCreateResponse;
+  }
+
+  /**
+   * Update one chunk's text; no other field is writable upstream.
+   *
+   * AIDP regenerates the chunk vector and answers with the full updated chunk,
+   * which the page uses to refresh the detail's text/page_ids/metadata.
+   */
+  async updateChunk(
+    id: string,
+    chunkId: number | string,
+    payload: AidpChunkUpdatePayload
+  ): Promise<AidpChunk> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunkDetail(id, chunkId),
+      {
+        method: "PATCH",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    return (await response.json()) as AidpChunk;
+  }
+
+  /**
+   * Remove the selected chunks in one AIDP request (1-2000 ids).
+   *
+   * The upstream contract is a DELETE with a JSON body and a 204 empty reply;
+   * the response is deliberately not parsed.
+   */
+  async removeChunks(id: string, chunkIds: number[]): Promise<void> {
+    await fetchWithErrorHandling(API_ENDPOINTS.aidpMgmt.removeKbChunks(id), {
+      method: "DELETE",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chunk_ids: chunkIds }),
+    });
+  }
+
+  /**
+   * Apply user metadata and/or entity tags to chunks in one call.
+   *
+   * The sync route caps `chunk_id_list` at 300; address a whole file through
+   * `file_uuid_list` (AIDP applies the values to every chunk of those files).
+   */
+  async batchUpdateChunkMetadata(
+    id: string,
+    payload: {
+      od_id: number;
+      metadata_json?: Record<string, string | null>;
+      tag?: string[];
+      chunk_id_list?: number[];
+      file_uuid_list?: string[];
+    },
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.batchUpdateKbChunks(id),
+      {
+        method: "PATCH",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal,
+      }
+    );
+    return response.json();
+  }
+
+  /** Export one chunk's user metadata through its ontology domain. */
+  async exportChunkMetadata(
+    domainId: string,
+    kdsId: string,
+    chunkId: number,
+    signal?: AbortSignal
+  ): Promise<{ metadata_json?: Record<string, unknown> }> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.ontology.chunkMetadataExport(domainId),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ kds_id: kdsId, chunk_id: chunkId }),
+        signal,
+      }
+    );
+    return response.json();
+  }
+
+  /** Import user metadata onto chunks through the ontology domain. */
+  async importChunkMetadata(
+    domainId: string,
+    payload: {
+      kds_id: string;
+      metadata_json: Record<string, string>;
+      chunk_id_list: number[];
+    },
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.ontology.chunkMetadataImport(domainId),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal,
+      }
+    );
+    return response.json();
+  }
+
+  /** Read one file's AIDP summary (READ permission). */
+  async getFileSummary(
+    id: string,
+    fileUuid: string,
+    signal?: AbortSignal
+  ): Promise<AidpFileSummaryResponse> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbFileSummary(id, fileUuid),
+      { method: "GET", headers: getAuthHeaders(), signal }
+    );
+    const result = await response.json();
+    return {
+      result:
+        result && typeof result.result === "object" && result.result !== null
+          ? result.result
+          : {},
+    };
   }
 
   /**

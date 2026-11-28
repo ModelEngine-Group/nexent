@@ -252,6 +252,7 @@
   line-height: 18px;
 }
 
+.inlineError,
 .fieldError {
   margin: 6px 0 0;
   color: #c83e3e;

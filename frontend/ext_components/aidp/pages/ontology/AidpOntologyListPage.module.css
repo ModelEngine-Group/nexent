@@ -1,0 +1,289 @@
+.page {
+  --aidp-primary: #0067d1;
+  --aidp-text: #191919;
+  --aidp-secondary: #595959;
+  --aidp-muted: #8c8c8c;
+  --aidp-outline: #dfdfdf;
+  container-type: inline-size;
+  padding-bottom: 24px;
+}
+
+.headerRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.headerRow h1 {
+  margin: 0;
+  min-width: 0;
+}
+
+.headerRow :global(.ant-btn) {
+  height: 32px;
+  padding-inline: 16px;
+  box-shadow: none;
+}
+
+.guideToggle {
+  padding-inline: 0;
+  color: var(--aidp-secondary);
+  font-size: 14px;
+}
+
+.panel {
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--aidp-outline);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  padding-bottom: 16px;
+}
+
+.toolbarSearch {
+  width: 280px;
+  max-width: 100%;
+}
+
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.toolbarSearch :global(.ant-input-prefix) {
+  margin-inline-end: 4px;
+  color: var(--aidp-muted);
+}
+
+.toolbarActions :global(.ant-btn) {
+  height: 32px;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  align-content: start;
+  gap: 16px;
+  padding-bottom: 4px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 164px;
+  padding: 16px;
+  border: 1px solid var(--aidp-outline);
+  border-radius: 12px;
+  background: #ffffff;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.card:hover {
+  border-color: var(--aidp-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--aidp-primary);
+  outline-offset: 2px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cardIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #e6f2fd;
+  color: var(--aidp-primary);
+  font-size: 18px;
+}
+
+.cardTitle {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--aidp-text);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardMore {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: var(--aidp-muted);
+}
+
+.cardDescription {
+  display: -webkit-box;
+  min-height: 44px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--aidp-secondary);
+  font-size: 14px;
+  line-height: 22px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  word-break: break-word;
+}
+
+.cardFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: auto;
+  color: var(--aidp-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+/* Keep the clock icon and the update time visually separated. */
+.cardUpdated {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nameLink {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--aidp-primary);
+  font-size: 14px;
+  line-height: 22px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nameLink:hover {
+  color: #0052a8;
+}
+
+.nameLink:focus-visible {
+  outline: 2px solid var(--aidp-primary);
+  outline-offset: 2px;
+}
+
+.ellipsis {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.rowActions :global(.ant-btn) {
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.stateBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 280px;
+  padding: 24px;
+  text-align: center;
+}
+
+.errorText {
+  color: #e02128;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.inlineError {
+  margin-bottom: 12px;
+  color: #e02128;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.emptyState {
+  margin: 40px auto;
+}
+
+.paginationRow {
+  flex-shrink: 0;
+  padding-top: 16px;
+}
+
+@media (max-width: 767px) {
+  .panel {
+    padding: 16px;
+  }
+
+  .headerRow {
+    align-items: flex-start;
+  }
+
+  .toolbar {
+    align-items: flex-start;
+  }
+
+  .toolbarSearch {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .toolbarActions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .cardGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

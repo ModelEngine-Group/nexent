@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useEffect, useRef } from "react";
@@ -76,15 +78,15 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
     submittingRef.current = true;
     setValidating(true);
     try {
-      const values = await form.validateFields();
+      const values = form.getFieldsValue();
 
       const name =
         mode === "metadata"
-          ? values.name.trim()
+          ? (values.name || "").trim()
           : knowledgeBase.kds_name.trim();
       const description =
         mode === "metadata"
-          ? values.description?.trim() || ""
+          ? (values.description || "").trim()
           : (knowledgeBase.description || "").trim();
       const nameChanged =
         mode === "metadata" && name !== knowledgeBase.kds_name.trim();
@@ -113,6 +115,7 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
         : [];
       const normalizedNewGroupIds =
         newPermission === "PRIVATE" ? [] : newGroupIds;
+
       const permissionChanged =
         newPermission !== originalPermission ||
         normalizedNewGroupIds.length !== originalGroupIds.length ||
@@ -121,11 +124,27 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           .some(
             (id, idx) => id !== [...originalGroupIds].sort((a, b) => a - b)[idx]
           );
+      const settingsChanged =
+        nameChanged || descriptionChanged || permissionChanged;
 
-      if (!nameChanged && !descriptionChanged && !permissionChanged) {
+      if (!settingsChanged) {
         form.resetFields();
         onSuccess(knowledgeBase);
         return;
+      }
+
+      // Validate only fields the user actually changed. Historical KB names
+      // may not match today's naming rule; an unrelated permission edit must
+      // not be blocked by re-validating the untouched name.
+      const fieldsToValidate: string[] = [];
+      if (mode === "metadata") {
+        if (nameChanged) fieldsToValidate.push("name");
+        if (descriptionChanged) fieldsToValidate.push("description");
+      }
+      if (permissionChanged)
+        fieldsToValidate.push("ingroup_permission", "group_ids");
+      if (fieldsToValidate.length) {
+        await form.validateFields(fieldsToValidate);
       }
 
       // Omitted metadata fields must never trigger an upstream AIDP request.
