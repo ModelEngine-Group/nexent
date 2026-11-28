@@ -219,4 +219,4 @@ Frontmatter 用于运行时校验，`SKILL.md` 正文用于指导智能体选择
 - [官方技能](./official-skills.md)
 - [Skill 仓库](./skill-repository.md)
 - [技能系统概览](/zh/backend/skills/overview)
-- [智能体配置](../agent-development/agent-configuration.md)
+- [智能体配置](../agent-configuration.md)

@@ -225,7 +225,7 @@ A badge on the tab shows the number of pending items, so administrators can hand
 
 After managing your MCP services in the MCP Repository, you can:
 
-1. Configure MCP tools for your agents in **[Agent Configuration](../agent-development/agent-configuration)**
+1. Configure MCP tools for your agents in **[Agent Configuration](../agent-configuration)**
 2. Experience agents calling MCP tools in **[Agent Chat](../start-chat)**
 3. Continue browsing **[Skill Space](./skill-repository)** to learn how skills and MCP work together
 

@@ -22,7 +22,7 @@ Regular users can view **Personal Knowledge Base Capacity** at the bottom of the
 4. Once files are uploaded, the knowledge base is created and processing begins automatically
 
 
-![Create Knowledge Base](../assets/knowledge-base/create-knowledge-base.png)
+![Create Knowledge Base](./assets/knowledge-base/create-knowledge-base.png)
 
 ## 📁 Upload Files
 
@@ -34,12 +34,12 @@ Regular users can view **Personal Knowledge Base Capacity** at the bottom of the
 4. Track the processing status in the document list
 
 :::tip File Size Limit
-The default upload limit for a single knowledge-base file is **100 MB**. The actual limit is controlled by the `MAX_KNOWLEDGE_FILE_SIZE_MB` system parameter and can be changed under [System Configuration → System Parameters](../operations/configuration#file-upload). If the deployment gateway or reverse proxy has a lower limit, adjust that component as well.
+The default upload limit for a single knowledge-base file is **100 MB**. The actual limit is controlled by the `MAX_KNOWLEDGE_FILE_SIZE_MB` system parameter and can be changed under [System Configuration → System Parameters](./operations/configuration#file-upload). If the deployment gateway or reverse proxy has a lower limit, adjust that component as well.
 :::
 
 Before upload, shared knowledge bases are checked against tenant capacity and their own quota. Private knowledge-base uploads also check the uploader's personal knowledge-base capacity. If the page reports insufficient capacity, delete files you no longer need or ask an administrator to adjust the relevant quota.
 
-For management entries, precedence, and warning rules for platform, tenant, personal, and individual knowledge-base quotas, see [Knowledge Base Capacity and Quotas](../resource-management#44-knowledge-base-capacity-and-quotas). Reaching a limit never automatically deletes historical content. Delete files you no longer need to release capacity, or ask an administrator to adjust the quota before the next upload.
+For management entries, precedence, and warning rules for platform, tenant, personal, and individual knowledge-base quotas, see [Knowledge Base Capacity and Quotas](./resource-management#44-knowledge-base-capacity-and-quotas). Reaching a limit never automatically deletes historical content. Delete files you no longer need to release capacity, or ask an administrator to adjust the quota before the next upload.
 
 ### Document Processing Status
 
@@ -88,7 +88,7 @@ Give every knowledge base a clear summary so agents can pick the right source du
 3. Edit the generated text to improve accuracy
 4. Click **Save** to store your changes
 
-![Content Summary](../assets/knowledge-base/summary-knowledge-base.png)
+![Content Summary](./assets/knowledge-base/summary-knowledge-base.png)
 
 ### Scheduled Auto-Summary
 
@@ -132,7 +132,7 @@ Use the search box on the Chunk Details page to search for chunks. The system pe
 Chunk edit and create operations depend on embedding model consistency. If the model configuration has changed, these operations may be automatically disabled to prevent incompatible vector data from being written.
 :::
 
-![Chunk Management](../assets/knowledge-base/chunk_management.png)
+![Chunk Management](./assets/knowledge-base/chunk_management.png)
 
 
 
@@ -151,9 +151,9 @@ Nexent supports binding knowledge bases to agents. When creating an agent, enabl
 
 For Nexent-native knowledge bases, enable the **knowledge_base_search** tool:
 
-![Tool 1](../assets/knowledge-base/knowledge-tool1.png)
+![Tool 1](./assets/knowledge-base/knowledge-tool1.png)
 
-![Tool 2](../assets/knowledge-base/knowledge-tool2.png)
+![Tool 2](./assets/knowledge-base/knowledge-tool2.png)
 
 Inside the tool configuration modal, you will see the list of bound knowledge bases with search and multi-select support. Each knowledge base displays its embedding model name so you can confirm compatibility before binding.
 
@@ -185,7 +185,7 @@ Inside the tool configuration modal, you will see the list of bound knowledge ba
 
 > Click **Edit** to manage the knowledge base name, visible user groups, and in-group permissions
 
-<img src="../assets/knowledge-base/knowledge-base-permission.png" alt="Knowledge Base Permissions" style="width:50%;">
+<img src="./assets/knowledge-base/knowledge-base-permission.png" alt="Knowledge Base Permissions" style="width:50%;">
 
 ### Edit Knowledge Bases
 
@@ -201,7 +201,7 @@ Inside the tool configuration modal, you will see the list of bound knowledge ba
 
 After completing knowledge base configuration, we recommend you continue with:
 
-1. **[Agent Development](../agent-development)** – Create and configure agents
-2. **[Start Chat](../start-chat)** – Interact with your agent
+1. **[Agent Development](./agent-configuration)** – Create and configure agents
+2. **[Start Chat](./start-chat)** – Interact with your agent
 
-Need help? Check the **[FAQ](../../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

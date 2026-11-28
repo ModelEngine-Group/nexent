@@ -62,7 +62,7 @@ Nexent 平台提供双向资源整合能力，让您既能充分利用外部生�
 
 ## 🔗 相关资源
 
-- [智能体开发](../user-guide/agent-development) — 了解如何在 Nexent 中创建和配置智能体
+- [智能体开发](../user-guide/agent-configuration) — 了解如何在 Nexent 中创建和配置智能体
 - [MCP 生态系统](../mcp-ecosystem/overview) — 了解更多 MCP 生态相关内容
 
 ## 💬 获取帮助

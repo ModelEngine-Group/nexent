@@ -16,7 +16,7 @@ Nexent 的记忆功能用于保留跨轮次、跨会话仍有价值的信息。�
 
 记忆检索失败时，系统会跳过记忆并继续当前任务，避免记忆服务异常中断整个问答。
 
-![记忆检索工具](./../assets/memory-management/memory-search-tool.png)
+![记忆检索工具](./assets/memory-management/memory-search-tool.png)
 
 > 💡 **说明**：智能体调试模式不会检索或写入记忆，避免测试数据影响正式记忆。请在“开始问答”中验证跨会话效果。
 
@@ -36,7 +36,7 @@ Nexent 的记忆功能用于保留跨轮次、跨会话仍有价值的信息。�
 
 开关修改后会立即保存。如果保存失败，页面会恢复到修改前的状态并显示提示。
 
-![记忆设置页面](./../assets/memory-management/memory-settings.png)
+![记忆设置页面](./assets/memory-management/memory-settings.png)
 
 基础设置页还提供 Dreaming 的执行计划和高级参数，详见下文。
 
@@ -82,7 +82,7 @@ Dreaming 会分析当前用户积累的 Agent 短期记忆，筛选反复被召�
 
 Dreaming 依次完成短期信号收集、稳定模式识别、候选筛选和长期记忆生成。执行依赖专用后台 worker；若长时间停留在排队状态，请联系管理员检查对应服务。
 
-![Dreaming基础设置](./../assets/memory-management/dreaming-run-and-schedule.png)
+![Dreaming基础设置](./assets/memory-management/dreaming-run-and-schedule.png)
 
 
 ### 高级参数
@@ -100,7 +100,7 @@ Dreaming 依次完成短期信号收集、稳定模式识别、候选筛选和�
 
 调低前三项会更快生成长期记忆，但可能纳入尚未稳定的信息；调高会更保守。增加单次记忆数、输出上限或总结重试次数，通常也会增加执行时间和模型成本。
 
-![Dreaming高级设置](./../assets/memory-management/dreaming-advanced-settings.png)
+![Dreaming高级设置](./assets/memory-management/dreaming-advanced-settings.png)
 
 ## 🗂️ 查看和筛选记忆
 
@@ -112,7 +112,7 @@ Agent 页签以表格展示短期记忆，包括内容、状态、智能体、�
 - 分页浏览，每页显示 10、20 或 50 条记录
 - 点击来源对话标题返回产生该记忆的历史对话
 
-![Agent 记忆](./../assets/memory-management/agent-memory.png)
+![Agent 记忆](./assets/memory-management/agent-memory.png)
 
 ### 记忆状态
 
@@ -158,9 +158,9 @@ Agent 短期记忆的生成和检索依赖租户当前配置的向量模型。�
 
 切换向量模型后，旧模型生成的 Agent 记忆可能与当前索引不兼容。页面会将不兼容记录标记为“已停用”；切回兼容模型后，记录会重新变为“生效中”。
 
-<img src="./../assets/memory-management/embedding-missing-warn.png" alt="缺少向量模型提示" style="zoom:50%;" />
+<img src="./assets/memory-management/embedding-missing-warn.png" alt="缺少向量模型提示" style="zoom:50%;" />
 
-![已停用的记忆](./../assets/memory-management/disabled-memory.png)
+![已停用的记忆](./assets/memory-management/disabled-memory.png)
 
 ## 💡 使用建议
 
@@ -184,8 +184,8 @@ Agent 短期记忆的生成和检索依赖租户当前配置的向量模型。�
 
 配置好记忆后，您可以：
 
-1. 在 **[开始问答](../start-chat)** 中使用同一智能体发起多次对话，验证跨会话效果。
+1. 在 **[开始问答](./start-chat)** 中使用同一智能体发起多次对话，验证跨会话效果。
 2. 在 **[模型配置](./model-configuration.md)** 中检查向量模型配置。
 3. 在 **[智能体配置](./agent-configuration.md)** 中继续创建和调整智能体。
 
-如果使用过程中遇到问题，请参考 **[常见问题](../../quick-start/faq.md)**，或前往 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 获取支持。
+如果使用过程中遇到问题，请参考 **[常见问题](../quick-start/faq.md)**，或前往 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 获取支持。

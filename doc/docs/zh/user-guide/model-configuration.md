@@ -2,7 +2,7 @@
 
 在 Nexent 左侧导航选择 **智能体开发 → 模型配置**。进入「模型设置」后，上方的 **默认配置** 用于指定平台在未单独配置模型时使用的模型，下方的 **模型库** 用于添加和管理模型。首次配置时，先在模型库添加模型，再回到默认配置选择要使用的模型。
 
-![模型设置页面中的默认配置和模型库](../assets/model-management/model-settings-overview.png)
+![模型设置页面中的默认配置和模型库](./assets/model-management/model-settings-overview.png)
 
 ## 🤖 模型配置
 
@@ -14,7 +14,7 @@
 4. 添加大语言模型时，页面会尝试匹配 **模型档案**。核对匹配结果，必要时手动选择档案。档案可为模型参数预填参考值，保存前可按服务商的实际能力调整。其他类型的模型可按需使用表单提供的 **高级设置**，例如配置嵌入模型的切片参数。
 5. 点击 **检测连通性**，查看模型能否访问。确认配置后，点击 **添加模型**，在模型库中查看新模型。
 
-![单个添加大语言模型的表单和匹配的模型档案](../assets/model-management/add-single-model.png)
+![单个添加大语言模型的表单和匹配的模型档案](./assets/model-management/add-single-model.png)
 
 ### 批量添加模型
 
@@ -25,7 +25,7 @@
 
 启用 ModelEngine 集成后，可通过 **同步ModelEngine模型** 直接打开 **批量添加**。
 
-![获取模型列表后勾选三个模型的批量添加页面](../assets/model-management/batch-add-models.png)
+![获取模型列表后勾选三个模型的批量添加页面](./assets/model-management/batch-add-models.png)
 
 ### 设置默认模型
 
@@ -47,14 +47,14 @@
 
 如果账号只有查看权限，修改默认配置和管理模型的控件不可用。
 
-![模型库的搜索、筛选、批量管理和行内操作](../assets/model-management/model-library.png)
+![模型库的搜索、筛选、批量管理和行内操作](./assets/model-management/model-library.png)
 
 ### 检查模型连通性
 
 - **检查默认模型**。在 **默认配置** 右上角点击 **检查模型连通性**，检查已选的默认模型。等待检测完成，模型名称旁的圆点变绿表示已连通。检测失败时，可查看失败详情并重试。
 - **检查单个模型**。在 **模型库** 找到该模型，在对应行点击 **检测连通性**。如果检测失败，检查 **Base URL**、模型 ID 或名称、凭据及服务商权限，修改后重新检测。
 
-![默认大语言模型检测成功，模型名称旁显示绿色圆点](../assets/model-management/model-connectivity.png)
+![默认大语言模型检测成功，模型名称旁显示绿色圆点](./assets/model-management/model-connectivity.png)
 
 ### 🤖 支持的模型提供商
 
@@ -125,4 +125,4 @@
 1. **[知识库](./knowledge-configuration)** - 创建和管理知识库。
 2. **[智能体配置](./agent-configuration)** - 创建和配置智能体。
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

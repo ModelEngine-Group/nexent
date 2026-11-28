@@ -196,5 +196,5 @@ result = run_skill_script(
 
 ## 🔗 相关资源
 
-- [智能体配置](../../user-guide/agent-development/agent-configuration) — 在智能体中使用 Skill
+- [智能体配置](../../user-guide/agent-configuration) — 在智能体中使用 Skill
 - [技能系统概览](../../backend/skills/overview) — 深入了解 Skill 机制

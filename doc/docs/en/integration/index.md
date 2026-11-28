@@ -64,7 +64,7 @@ Third-Party Integration
 
 ## Related Resources
 
-- [Agent Development](../user-guide/agent-development) — Learn how to create and configure Agents in Nexent
+- [Agent Development](../user-guide/agent-configuration) — Learn how to create and configure Agents in Nexent
 - [MCP Ecosystem](../mcp-ecosystem/overview) — Learn more about MCP ecosystem
 
 ## Getting Help

@@ -2,17 +2,6 @@
 
 Nexent supports integrating third-party Agents through the **A2A (Agent-to-Agent) protocol**, letting agents from different platforms work together. This page explains how to add and manage external A2A agents.
 
-## 🤝 Sources of Collaborative Agents
-
-In the **Collaborative Agents** area of the **Agent Configuration** page, you can add two kinds of collaborative agents:
-
-- **Internal Agents**: agents published on the platform
-- **External A2A Agents**: third-party agents discovered through the A2A protocol
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/set-collaboration.jpg" style="width: 50%; height: auto;" />
-</div>
-
 ## 🌐 Add External A2A Agents
 
 Nexent provides two ways to discover external A2A agents: **URL discovery** and **Nacos discovery**.
@@ -22,7 +11,7 @@ Nexent provides two ways to discover external A2A agents: **URL discovery** and 
 If you know the Agent Card address of the target agent, use the URL discovery method.
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-url-discovery.jpg" style="width: 80%; height: auto;" />
+  <img src="./assets/agent-development/a2a-url-discovery.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. In the **Collaborative Agents** tab, click **Add External Agent**
@@ -42,7 +31,7 @@ If you know the Agent Card address of the target agent, use the URL discovery me
 If your agents are registered in the Nacos service discovery platform, use Nacos discovery to integrate them in batches.
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-nacos-discovery.jpg" style="width: 80%; height: auto;" />
+  <img src="./assets/agent-development/a2a-nacos-discovery.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. In the **Collaborative Agents** tab, click **Add External Agent**
@@ -64,7 +53,7 @@ If your agents are registered in the Nacos service discovery platform, use Nacos
 In the **External A2A Agent** list you can view and manage every discovered agent:
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-discovery-list.jpg" style="width: 80%; height: auto;" />
+  <img src="./assets/agent-development/a2a-discovery-list.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. **View Agent Details**: click the agent card to see the full info: name, description, URL, capability list, etc.
@@ -91,7 +80,7 @@ In the **External A2A Agent** list you can view and manage every discovered agen
    > Nexent does not currently support agents that require authentication. Do not set `auth-token` when starting DataAgent.
 
    <div style="display: flex; justify-content: left;">
-     <img src="../assets/agent-development/dataagent_deploy.png" style="width: 80%; height: auto;" />
+     <img src="./assets/agent-development/dataagent_deploy.png" style="width: 80%; height: auto;" />
    </div>
 
 2. In Nexent, choose **URL Discovery**, fill in `http://<IP>:9999/.well-known/agent-card.json`, and click **Discover**

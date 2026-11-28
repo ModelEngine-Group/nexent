@@ -22,7 +22,7 @@
 4. 文件上传后系统自动创建知识库并开始处理文件
 
 
-![创建知识库](../assets/knowledge-base/create-knowledge-base.png)
+![创建知识库](./assets/knowledge-base/create-knowledge-base.png)
 
 ## 📁 上传文件
 
@@ -34,12 +34,12 @@
 4. 可在列表中查看文件的处理状态
 
 :::tip 文件大小限制
-单个知识库文件的默认上传上限为 **100 MB**。实际限制由系统参数 `MAX_KNOWLEDGE_FILE_SIZE_MB` 决定，可通过[系统配置 → 系统参数](../operations/configuration#文件上传)调整；如果部署的网关或反向代理设置了更低的限制，应同时调整对应组件。
+单个知识库文件的默认上传上限为 **100 MB**。实际限制由系统参数 `MAX_KNOWLEDGE_FILE_SIZE_MB` 决定，可通过[系统配置 → 系统参数](./operations/configuration#文件上传)调整；如果部署的网关或反向代理设置了更低的限制，应同时调整对应组件。
 :::
 
 上传前，共享知识库按租户容量和知识库自身配额校验；私有知识库还会校验上传用户的个人知识库容量。若页面提示容量不足，请先删除不再需要的文件，或联系管理员调整相应配额。
 
-平台、租户、个人和单个知识库配额的设置入口、优先级与预警规则，详见[知识库容量与配额](../resource-management#44-知识库容量与配额)。达到上限后不会自动删除历史内容；删除不再需要的文件可释放容量，也可以在下次上传前由管理员调整配额。
+平台、租户、个人和单个知识库配额的设置入口、优先级与预警规则，详见[知识库容量与配额](./resource-management#44-知识库容量与配额)。达到上限后不会自动删除历史内容；删除不再需要的文件可释放容量，也可以在下次上传前由管理员调整配额。
 
 ### 文件处理状态
 
@@ -88,7 +88,7 @@
 3. 您可对生成的内容总结进行编辑修改，使其更准确
 4. 最后记得点击"保存"将您的修改保存
 
-![内容总结](../assets/knowledge-base/summary-knowledge-base.png)
+![内容总结](./assets/knowledge-base/summary-knowledge-base.png)
 
 ### 自动总结频率
 
@@ -145,9 +145,9 @@ Nexent 支持知识库与智能体绑定。创建智能体时，在工具配置�
 
 根据知识库来源的不同，系统提供对应的检索工具。Nexent 原生知识库使用 **knowledge_base_search** 工具：
 
-![工具1](../assets/knowledge-base/knowledge-tool1.png)
+![工具1](./assets/knowledge-base/knowledge-tool1.png)
 
-![工具2](../assets/knowledge-base/knowledge-tool2.png)
+![工具2](./assets/knowledge-base/knowledge-tool2.png)
 
 在工具配置弹窗中，您可看到已绑定的知识库列表，支持搜索和勾选操作。每个知识库旁边会显示其向量模型信息，帮助您确认兼容性。
 
@@ -179,7 +179,7 @@ Nexent 支持知识库与智能体绑定。创建智能体时，在工具配置�
 
 > 点击编辑，可管理知识库的名称、可见的用户组及组内权限
 
-<img src="../assets/knowledge-base/knowledge-base-permission.png" alt="知识库权限" style="width:50%;">
+<img src="./assets/knowledge-base/knowledge-base-permission.png" alt="知识库权限" style="width:50%;">
 
 ### 编辑知识库
 
@@ -195,7 +195,7 @@ Nexent 支持知识库与智能体绑定。创建智能体时，在工具配置�
 
 完成知识库配置后，建议您继续配置：
 
-1. **[智能体开发](../agent-development)** - 创建和配置智能体
-2. **[开始问答](../start-chat)** - 与智能体进行交互
+1. **[智能体开发](agent-configuration)** - 创建和配置智能体
+2. **[开始问答](./start-chat)** - 与智能体进行交互
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq.md)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq.md)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

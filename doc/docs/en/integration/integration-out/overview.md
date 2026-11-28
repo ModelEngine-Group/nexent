@@ -75,6 +75,6 @@ Based on your needs, select the corresponding guide:
 
 ## Related Resources
 
-- [Agent Development](../../user-guide/agent-development) — Learn how to develop and publish Agents
+- [Agent Development](../../user-guide/agent-configuration) — Learn how to develop and publish Agents
 - [API Reference](../../backend/api-reference) — Complete API interface reference
 - [A2A Protocol Specification](https://a2a-protocol.org/) — Official protocol documentation

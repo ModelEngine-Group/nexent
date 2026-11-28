@@ -201,4 +201,4 @@ Authorization: Bearer {access_key}
 ## 🔗 相关资源
 
 - [调用 Agent 北向 API](./northbound-api) — 北向 RESTful API 详细参考
-- [智能体配置](../../user-guide/agent-development/agent-configuration) — Agent 配置详解
+- [智能体配置](../../user-guide/agent-configuration) — Agent 配置详解

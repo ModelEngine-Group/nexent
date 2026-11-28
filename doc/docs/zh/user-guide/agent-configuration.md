@@ -16,8 +16,8 @@
 2. 输入智能体名称，然后点击“创建”。
 3. 进入编辑页面后，可以通过自然语言描述需求生成智能体（[NL2Agent](#configure-with-nl2agent)），也可以直接进入[智能体编辑](#edit-agent)查看和填写各项配置。
 
-已有模板时，可以选择“从模板创建”。已有导出的智能体配置文件时，可按[智能体导出与导入](../../integration/integration-out/agents-export.md)中的流程导入。
-![创建智能体弹窗](./create-agent.png)
+已有模板时，可以选择“从模板创建”。已有导出的智能体配置文件时，可按[智能体导出与导入](../integration/integration-out/agents-export.md)中的流程导入。
+![创建智能体弹窗](./assets/agent-configuration/create-agent.png)
 
 ## 2. 自然语言生成智能体（NL2Agent） {#configure-with-nl2agent}
 
@@ -31,19 +31,19 @@ NL2Agent 是编辑页面中的智能体开发助手。您可以用自然语言�
 
 如果模型判断当前信息不足，页面会显示“澄清需求”卡片。根据问题选择选项或填写答案，然后点击“提交”。如果模型判断需求已经明确，会直接继续整理需求。
 
-![NL2Agent 的“澄清需求”卡片](./nl2agent-clarification.png)
+![NL2Agent 的“澄清需求”卡片](./assets/agent-configuration/nl2agent-clarification.png)
 
 #### 第 2 步 查看并确认需求
 
 NL2Agent 会将描述拆成可以逐项核对的需求query，以及中英文总结。这些需求将显示在“需求和资源”卡片中，并且支持对需求进行新增，修改和删除。如果涉及到需求修改，会进入到需求修改阶段，确认后会默认进入“更新需求并重新搜索”，阶段。系统会重新匹配受影响需求的资源。卡片会标出“待选择”“待绑定”“已就绪”和“暂无匹配”等状态。
 
-![修改需求后点击“更新需求并重新搜索”](./nl2agent-update-requirement.png)
+![修改需求后点击“更新需求并重新搜索”](./assets/agent-configuration/nl2agent-update-requirement.png)
 
 #### 第 3 步 选择、配置并绑定资源
 
 只有保留的需求全部就绪，且所选资源都已配置并绑定，才能点击“继续”进入生成阶段。
 
-![NL2Agent 资源配置与绑定](./nl2agent-bind-resource.png)
+![NL2Agent 资源配置与绑定](./assets/agent-configuration/nl2agent-bind-resource.png)
 
 1. 展开各项需求，查看系统推荐的工具或技能。对照资源描述和相关性选择所需资源。如果需要检索知识库，按卡片提示核对推荐的知识库并确认要关联的范围。
 2. 对需要填写参数的资源，点击“配置”，补齐必填项。确认选中的资源后，点击“绑定所选资源”。
@@ -56,13 +56,13 @@ NL2Agent 会将描述拆成可以逐项核对的需求query，以及中英文总
 
 提示词写入后，NL2Agent 会继续生成开场白和示例问题。生成结束后，在右侧“智能体配置”中检查“模型与提示词”和“开场白与示例问题”，按需要调整草稿，再进入[智能体编辑](#edit-agent)或[调试和发布](#debug-and-publish)。
 
-![NL2Agent 生成完成后的摘要和已填充的配置](./nl2agent-finish.png)
+![NL2Agent 生成完成后的摘要和已填充的配置](./assets/agent-configuration/nl2agent-finish.png)
 
 ### 修改智能体
 
 在对话区说明要修改的配置项和目标值。涉及模型、知识库、工具、技能或协作智能体时，可以提供名称，方便助手定位。除了简介、提示词和会话引导，也可以通过对话调整模型、资源、标签、权限、安全护栏和部分高级设置。特别地，如果已有提示词，页面会显示“提示词生成”卡片。可以先预览或编辑生成内容，再点击“确认应用”。
 
-![NL2Agent 提示词生成卡片](./nl2agent-update-prompt.png)
+![NL2Agent 提示词生成卡片](./assets/agent-configuration/nl2agent-update-prompt.png)
 
 您也可以从“生成提示词”“推荐可用资源”“推荐知识库”或“生成会话引导”等快捷操作开始，发送前按需要补充要求。
 
@@ -70,7 +70,7 @@ NL2Agent 会将描述拆成可以逐项核对的需求query，以及中英文总
 
 NL2Agent 按用户和智能体保留最近 **3 个配置会话**。再次进入该智能体的对话配置区时，默认恢复最近一个会话。点击“历史”可切换到其他保留的会话，点击“新会话”可重新开始对话。已发布的智能体版本可在版本管理中查看。
 
-![NL2Agent 会话历史](./nl2agent-history.png)
+![NL2Agent 会话历史](./assets/agent-configuration/nl2agent-history.png)
 
 ## 3. 智能体编辑 {#edit-agent}
 
@@ -78,7 +78,7 @@ NL2Agent 按用户和智能体保留最近 **3 个配置会话**。再次进入�
 
 ### 一个智能体由什么组成
 
-![智能体配置页面全览](./agent-edit.png)
+![智能体配置页面全览](./assets/agent-configuration/agent-edit.png)
 
 下表按页面从上到下列出各栏目。
 
@@ -106,10 +106,10 @@ NL2Agent 按用户和智能体保留最近 **3 个配置会话**。再次进入�
 
 - **知识库**提供可检索的业务资料。上传文档并等待就绪后，将知识库关联到智能体。具体步骤见[知识库配置](./knowledge-configuration.md)。
 - **技能**为一类任务提供操作指南，说明完成任务需要遵循的流程和要求。
-- **工具**负责执行具体操作。在“工具管理”中点击“点击添加工具”，可以从“本地工具”选择 Nexent 内置工具，也可以从“MCP 服务”选择已接入的工具。补齐工具的必填参数后，可在配置窗口运行“工具测试”。具体操作见[内置工具](../local-tools/index.md)和[MCP 服务接入](../../integration/integration-in/mcp.md)。
+- **工具**负责执行具体操作。在“工具管理”中点击“点击添加工具”，可以从“本地工具”选择 Nexent 内置工具，也可以从“MCP 服务”选择已接入的工具。补齐工具的必填参数后，可在配置窗口运行“工具测试”。具体操作见[内置工具](./local-tools/index.md)和[MCP 服务接入](../integration/integration-in/mcp.md)。
 - **协作智能体**也称子智能体，用于承接主智能体委派的专项任务。可选用已发布的内部智能体或已接入的[外部 A2A Agent](./a2a-external.md)。
 
-![智能体资源配置区域与“添加工具”窗口](./agent-edit-resource.png)
+![智能体资源配置区域与“添加工具”窗口](./assets/agent-configuration/agent-edit-resource.png)
 
 如需跨会话复用信息，请参阅[记忆配置](./memory-configuration.md)。
 
@@ -144,11 +144,11 @@ NL2Agent 按用户和智能体保留最近 **3 个配置会话**。再次进入�
 
 点击“调试”，系统校验并保存草稿后打开调试区。提交能覆盖主要任务和信息不足情况的问题，检查回答是否符合提示词要求。如果配置了知识库、工具或协作智能体，可以展开运行过程，查看资源调用和错误信息，再回到配置区修改并重试。
 
-![智能体调试默认模式中的开场白、示例问题和输入区](./agent-debug.png)
+![智能体调试默认模式中的开场白、示例问题和输入区](./assets/agent-configuration/agent-debug.png)
 
 如需比较模型效果，切换到**对比模式**，在左右两侧选择两个可用模型，提交同一个问题。两侧使用同一智能体配置，分别展示各自的运行结果。可以对照回答准确性、引用情况和工具调用表现，再回到配置区选定要发布的模型。
 
-![智能体调试对比模式中的左右模型选择器](./agent-debug-compare.png)
+![智能体调试对比模式中的左右模型选择器](./assets/agent-configuration/agent-debug-compare.png)
 
 ### 发布版本
 
@@ -157,7 +157,7 @@ NL2Agent 按用户和智能体保留最近 **3 个配置会话**。再次进入�
 3. 发布成功后，进入“智能体发布”查看体验链接、API 调用示例和 A2A 接入信息。后续修改可以继续在草稿中调试，验证后再发布新版本。
 4. 需要比较或回滚历史版本时，打开[版本管理](#version-management)。
 
-![智能体发布页面中的体验与分享、API 调用示例和 A2A 链接区域](./agent-publish.png)
+![智能体发布页面中的体验与分享、API 调用示例和 A2A 链接区域](./assets/agent-configuration/agent-publish.png)
 
 ### 管理智能体版本 {#version-management}
 
@@ -171,14 +171,14 @@ NL2Agent 按用户和智能体保留最近 **3 个配置会话**。再次进入�
 | 编辑版本信息 | 在版本菜单中选择“编辑”，修改版本名称或发布说明。 |
 | 删除历史版本 | 有编辑权限时，可在历史版本的菜单中选择“删除”。请在确认窗口核对版本名称。当前发布版本不提供删除操作。 |
 
-![版本对比窗口中的版本选择和问答对比](./agent-version-compare.png)
+![版本对比窗口中的版本选择和问答对比](./assets/agent-configuration/agent-version-compare.png)
 
 ### 上架与评估
 
 发布后，可在“智能体配置”列表的智能体卡片右上角打开“…”菜单。
 
-- **上架**。当前发布版本尚未上架时，选择“上架”，上传必填的智能体图标，按需添加最多 5 个标签和上架说明，再点击“提交申请”。审核状态可在 [Agent 仓库](../resource-repository/agent-repository.md)查看。
-- **评估**。选择“评估”进入评估页面，对当前已发布版本发起评测。操作步骤见[智能体评估](../evaluation.md)。
+- **上架**。当前发布版本尚未上架时，选择“上架”，上传必填的智能体图标，按需添加最多 5 个标签和上架说明，再点击“提交申请”。审核状态可在 [Agent 仓库](./resource-repository/agent-repository.md)查看。
+- **评估**。选择“评估”进入评估页面，对当前已发布版本发起评测。操作步骤见[智能体评估](./evaluation.md)。
 
 ## 5. 智能体使用 {#use-agent}
 
@@ -186,11 +186,11 @@ NL2Agent 按用户和智能体保留最近 **3 个配置会话**。再次进入�
 
 #### 在工作台使用
 
-打开“工作台”，在输入区点击“智能体”，选择要用于当前任务的已发布智能体。可以选择多个智能体，确认后在输入框描述任务。详细步骤见[工作台](../workbench.md)。
+打开“工作台”，在输入区点击“智能体”，选择要用于当前任务的已发布智能体。可以选择多个智能体，确认后在输入框描述任务。详细步骤见[工作台](./workbench.md)。
 
 #### 在智能体对话中使用
 
-打开“智能体对话”，在列表中选择一个有权使用的已发布主智能体，然后发起对话。也可以在“智能体发布”页点击“体验”，或通过分享入口获取链接，提供给其他平台用户访问。对话和会话管理的详细步骤见[智能体对话](../start-chat.md)。
+打开“智能体对话”，在列表中选择一个有权使用的已发布主智能体，然后发起对话。也可以在“智能体发布”页点击“体验”，或通过分享入口获取链接，提供给其他平台用户访问。对话和会话管理的详细步骤见[智能体对话](./start-chat.md)。
 
 ### 在外部平台使用
 
@@ -207,7 +207,7 @@ curl -N 'https://nexent.example.com/nb/v1/chat/run' \
   -d '{"agent_name":"YOUR_AGENT_NAME","query":"YOUR_QUERY"}'
 ```
 
-接口通过 SSE 返回对话事件。需要继续已有会话时，在下一次请求中传入该会话的 `conversation_id`。附件上传、会话管理和响应格式见[调用 Agent 北向 API](../../integration/integration-out/northbound-api.md)。
+接口通过 SSE 返回对话事件。需要继续已有会话时，在下一次请求中传入该会话的 `conversation_id`。附件上传、会话管理和响应格式见[调用 Agent 北向 API](../integration/integration-out/northbound-api.md)。
 
 #### 通过 A2A 调用
 
@@ -224,4 +224,4 @@ curl 'https://nexent.example.com/nb/a2a/YOUR_ENDPOINT_ID/message:send' \
   -d '{"message":{"role":"user","parts":[{"text":"YOUR_QUERY"}]}}'
 ```
 
-发布选项和协议端点见[《Agent 发布》的 A2A 小节](../../integration/integration-out/agents-publish.md#publish-as-a2a)。
+发布选项和协议端点见[《Agent 发布》的 A2A 小节](../integration/integration-out/agents-publish.md#publish-as-a2a)。

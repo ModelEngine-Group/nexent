@@ -90,7 +90,7 @@ MCP 服务器运行后，将其连接到 Nexent：
 
 ### ⚙️ 步骤 2：在 Nexent 中注册
 
-1. 进入 **[智能体开发](../../user-guide/agent-development)** 页面
+1. 进入 **[智能体开发](../../user-guide/agent-configuration)** 页面
 2. 在"选择Agent的工具"页签右侧，点击"**MCP配置**"
 3. 在弹出的配置窗口中，输入服务器名称和服务器URL
    - ⚠️ **注意**：
@@ -187,7 +187,7 @@ if __name__ == "__main__":
 
 ### 🔗 相关指南
 
-- [Nexent 智能体开发指南](../../user-guide/agent-development)
+- [Nexent 智能体开发指南](../../user-guide/agent-configuration)
 - [MCP 工具生态系统概览](../../mcp-ecosystem/overview)
 - [MCP 推荐](../../mcp-ecosystem/mcp-recommendations)
 

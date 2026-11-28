@@ -43,7 +43,7 @@ To remove a resource, use its label in the composer.
 2. Choose a model for the current conversation. The composer displays the selected model and uses it for subsequent messages. If a response is in progress, wait for it to finish before switching.
 3. To adjust parameters, reopen the model selector. Depending on the model, you can use **Deep thinking**, adjust **Thinking intensity**, or change Temperature and Top P under **Advanced settings**. Use **Restore defaults** to clear custom sampling values.
 
-The list depends on your tenant's model configuration. If the model you need is missing, ask your administrator to check that it is connected and available. See [Model Configuration](./agent-development/model-configuration).
+The list depends on your tenant's model configuration. If the model you need is missing, ask your administrator to check that it is connected and available. See [Model Configuration](./model-configuration).
 
 ![Selecting a model and finding advanced settings in the Workbench](./assets/workbench/model-selector.png)
 
@@ -70,7 +70,7 @@ Creation controls appear according to your account permissions. The Workbench op
 
    ![Reviewing agent requirements and binding resources](./assets/workbench/agent-creation-resources.png)
 
-3. When the result card shows **Draft Generated**, click **Edit current draft** above the composer or **Go to Agent Development** in the result card. In the configuration, review or edit the prompts under **Model and prompt**, then follow the [Agent Configuration](./agent-development) guide to debug and publish the agent.
+3. When the result card shows **Draft Generated**, click **Edit current draft** above the composer or **Go to Agent Development** in the result card. In the configuration, review or edit the prompts under **Model and prompt**, then follow the [Agent Configuration](./agent-configuration) guide to debug and publish the agent.
 
    ![Reviewing the generated agent draft and opening its configuration](./assets/workbench/agent-creation-result.png)
 

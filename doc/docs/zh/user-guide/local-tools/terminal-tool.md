@@ -100,7 +100,7 @@ docker run -d --name nexent-terminal -p 2222:22 nexent-terminal
 
 ### 在智能体中配置终端工具
 
-1. 进入 **[智能体配置](../agent-development/agent-configuration)** 页面，打开目标智能体
+1. 进入 **[智能体配置](../agent-configuration)** 页面，打开目标智能体
 2. 在工具列表中找到终端工具并添加
 3. 点击配置按钮，填写连接参数
 

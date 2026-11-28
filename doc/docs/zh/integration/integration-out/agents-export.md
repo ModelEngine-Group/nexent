@@ -143,4 +143,4 @@ data-analyst.zip
 
 - [Agent 智能体发布](./agents-publish) — 将 Agent 发布为可外部调用的服务
 - [Agent 接入](../integration-in/agents) — 通过 A2A 协议接入第三方 Agent
-- [智能体配置](../../user-guide/agent-development/agent-configuration) — Agent 配置详解
+- [智能体配置](../../user-guide/agent-configuration) — Agent 配置详解

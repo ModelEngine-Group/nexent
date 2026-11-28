@@ -89,7 +89,7 @@
 
 ## 添加本地工具 {#configure-local-tools}
 
-1. 打开要编辑的智能体，进入[智能体配置](../agent-development/agent-configuration.md#edit-agent)。
+1. 打开要编辑的智能体，进入[智能体配置](../agent-configuration.md#edit-agent)。
 2. 在“工具管理”中点击“点击添加工具”，切换到“本地工具”，找到并勾选所需工具。
 3. 工具需要参数时，点击齿轮打开配置，填写必填项。可以在配置窗口运行“工具测试”，检查入参和返回结果。
 4. 确认选择后，在“工具管理”中检查已添加的工具。

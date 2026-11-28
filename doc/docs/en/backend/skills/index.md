@@ -24,7 +24,7 @@ In Nexent, **Tools** and **Skills** are two distinct layers:
 ## Related References
 
 - [Skill Management (User Guide)](../../user-guide/resource-repository/skill-repository.md)
-- [Agent Development Guide](../../user-guide/agent-development)
+- [Agent Development Guide](../../user-guide/agent-configuration)
 - [Local Tools Overview](../../user-guide/local-tools/index)
 - [SDK Tool Development Guide](../../sdk/core/tools)
 - [MCP Tool Development](../tools/mcp)

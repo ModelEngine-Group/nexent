@@ -16,7 +16,7 @@ During a normal conversation, memory works as follows:
 
 Memory operations are performed through built-in tools. You can inspect tool execution status to confirm the memory-loading trace. If memory retrieval fails, the system skips memory and continues the current task so that a memory service issue does not interrupt the entire conversation.
 
-![Memory search tool](./../assets/memory-management/memory-search-tool.png)
+![Memory search tool](./assets/memory-management/memory-search-tool.png)
 
 > 💡 **Note:** Memory retrieval and writing are disabled in agent debug mode to prevent test data from affecting production memories. Use **Start Chat** to verify cross-conversation memory behavior.
 
@@ -36,7 +36,7 @@ Memory operations are performed through built-in tools. You can inspect tool exe
 
 Changes to the switch are saved immediately. If saving fails, the page restores the previous state and displays an error message.
 
-![Memory settings](./../assets/memory-management/memory-settings.png)
+![Memory settings](./assets/memory-management/memory-settings.png)
 
 Base Settings also provides the Dreaming schedule and advanced parameters described below.
 
@@ -99,7 +99,7 @@ Dreaming analyzes the current user's accumulated Agent short-term memories, sele
 
 Dreaming collects short-term signals, identifies stable patterns, selects candidates, and generates long-term memory in sequence. It relies on a dedicated background worker. If a task remains queued for a long time, ask an administrator to check the corresponding service.
 
-![Dreaming basic settings](./../assets/memory-management/dreaming-run-and-schedule.png)
+![Dreaming basic settings](./assets/memory-management/dreaming-run-and-schedule.png)
 
 ### Advanced Parameters
 
@@ -116,7 +116,7 @@ The defaults are suitable for most users. Adjust them only when Dreaming include
 
 Lowering the first three values creates long-term memory sooner but may include information that is not yet stable. Increasing the candidate count, output limit, or retry count usually increases execution time and model cost.
 
-![Dreaming advanced settings](./../assets/memory-management/dreaming-advanced-settings.png)
+![Dreaming advanced settings](./assets/memory-management/dreaming-advanced-settings.png)
 
 ## 🗂️ View and Filter Memories
 
@@ -135,7 +135,7 @@ The Agent tab also supports:
 - Viewing the agent name and source conversation
 - Clicking the source conversation title to return to the conversation that generated the memory
 
-![Agent memory](./../assets/memory-management/agent-memory.png)
+![Agent memory](./assets/memory-management/agent-memory.png)
 
 ### Memory Status
 
@@ -189,9 +189,9 @@ After switching embedding models, Agent memories indexed with the previous model
 | Incompatible | Disabled |
 | Compatible | Active |
 
-<img src="./../assets/memory-management/embedding-missing-warn.png" alt="Missing embedding model warning" style="zoom:50%;" />
+<img src="./assets/memory-management/embedding-missing-warn.png" alt="Missing embedding model warning" style="zoom:50%;" />
 
-![Disabled memory](./../assets/memory-management/disabled-memory.png)
+![Disabled memory](./assets/memory-management/disabled-memory.png)
 
 If you switch back to an embedding model compatible with the original records, disabled Agent memories become **Active** again.
 
@@ -217,8 +217,8 @@ Follow these guidelines:
 
 After configuring memory, you can:
 
-1. Start multiple conversations with the same agent in **[Start Chat](../start-chat)** to verify cross-conversation memory.
+1. Start multiple conversations with the same agent in **[Start Chat](./start-chat)** to verify cross-conversation memory.
 2. Check the embedding model in **[Model Configuration](./model-configuration.md)**.
 3. Continue creating and adjusting agents in **[Agent Configuration](./agent-configuration.md)**.
 
-If you encounter any issues, refer to the **[FAQ](../../quick-start/faq.md)** or visit [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) for support.
+If you encounter any issues, refer to the **[FAQ](../quick-start/faq.md)** or visit [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) for support.

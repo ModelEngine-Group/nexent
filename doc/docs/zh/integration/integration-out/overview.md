@@ -75,6 +75,6 @@ Nexent 提供以下几种导出与发布方式：
 
 ## 🔗 相关资源
 
-- [智能体开发](../../user-guide/agent-development) — 了解如何开发和发布 Agent
+- [智能体开发](../../user-guide/agent-configuration) — 了解如何开发和发布 Agent
 - [API 参考](../../backend/api-reference) — 完整的 API 接口参考
 - [A2A 协议规范](https://a2a-protocol.org/) — 官方协议文档

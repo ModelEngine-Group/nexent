@@ -170,7 +170,7 @@ title: Skill 仓库
 
 ### 为智能体配置技能
 
-1. 打开 **[智能体配置](../agent-development/agent-configuration.md)** 页面。
+1. 打开 **[智能体配置](../agent-configuration.md)** 页面。
 2. 在「选择智能体的工具」中切换到 **Skills** 页签，点击「选择 Skill」。
 3. 选择需要配置的 Skill；再次选择可取消。
 4. 若 Skill 存在必填参数，选择时会自动打开参数配置窗口。完成填写并保存后，Skill 才会加入当前智能体。
@@ -604,7 +604,7 @@ NL-to-Skill 擅长生成以下类型的技能：
 
 ## 相关参考
 
-- [智能体配置](../agent-development/agent-configuration.md)
+- [智能体配置](../agent-configuration.md)
 - [本地工具概览](../local-tools/index.md)
 - [MCP 仓库配置](./mcp-repository)
 - [官方技能](./official-skills)

@@ -124,34 +124,19 @@ export default defineConfig({
               },
               {
                 "text": "Model Configuration",
-                "link": "/en/user-guide/agent-development/model-configuration"
+                "link": "/en/user-guide/model-configuration"
               },
               {
                 "text": "Knowledge Base Configuration",
-                "link": "/en/user-guide/agent-development/knowledge-configuration"
+                "link": "/en/user-guide/knowledge-configuration"
               },
               {
                 "text": "Agent Configuration",
-                "link": "/en/user-guide/agent-development",
-                "collapsed": false,
-                "items": [
-                  {
-                    "text": "Create and Configure Agents",
-                    "link": "/en/user-guide/agent-development/agent-configuration"
-                  },
-                  {
-                    "text": "Add External A2A Agents",
-                    "link": "/en/user-guide/agent-development/a2a-external"
-                  },
-                  {
-                    "text": "Publish as an A2A Agent",
-                    "link": "/en/user-guide/agent-development/a2a-publish"
-                  }
-                ]
+                "link": "/en/user-guide/agent-configuration"
               },
               {
                 "text": "Memory Configuration",
-                "link": "/en/user-guide/agent-development/memory-configuration"
+                "link": "/en/user-guide/memory-configuration"
               },
               {
                 "text": "Agent Evaluation",
@@ -577,19 +562,19 @@ export default defineConfig({
               },
               {
                 "text": "模型配置",
-                "link": "/zh/user-guide/agent-development/model-configuration"
+                "link": "/zh/user-guide/model-configuration"
               },
               {
                 "text": "知识库配置",
-                "link": "/zh/user-guide/agent-development/knowledge-configuration"
+                "link": "/zh/user-guide/knowledge-configuration"
               },
               {
                 "text": "智能体配置",
-                "link": "/zh/user-guide/agent-development/agent-configuration"
+                "link": "/zh/user-guide/agent-configuration"
               },
               {
                 "text": "记忆配置",
-                "link": "/zh/user-guide/agent-development/memory-configuration"
+                "link": "/zh/user-guide/memory-configuration"
               },
               {
                 "text": "智能体评估",

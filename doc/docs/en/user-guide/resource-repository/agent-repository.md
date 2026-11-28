@@ -88,7 +88,7 @@ The repository also shows built-in official agents with an "Official" badge, cov
 
 The **My Agents** tab manages agents you can edit, including agents you created and agents copied from the repository.
 
-> 💡 **Entry note**: The "Apply for listing" and "Evaluate" entries have moved to the "..." menu at the top-right of agent cards on the **[Agent Configuration](../agent-development/agent-configuration)** page — see the "Listing" section there for the application form; this tab handles listing status tracking and review progress management (canceling applications and taking down).
+> 💡 **Entry note**: The "Apply for listing" and "Evaluate" entries have moved to the "..." menu at the top-right of agent cards on the **[Agent Configuration](../agent-configuration)** page — see the "Listing" section there for the application form; this tab handles listing status tracking and review progress management (canceling applications and taking down).
 
 ### Filter and Search
 
@@ -182,7 +182,7 @@ The tab shows a pending-count badge so admins can handle applications promptly.
 After managing agents in the Agent Repository, you can:
 
 1. Interact with agents in **[Agent Chat](../start-chat)**
-2. Continue creating or iterating agents in **[Agent Configuration](../agent-development/agent-configuration)**
-3. Configure **[Memory Configuration](../agent-development/memory-configuration)** to improve agent memory
+2. Continue creating or iterating agents in **[Agent Configuration](../agent-configuration)**
+3. Configure **[Memory Configuration](../memory-configuration)** to improve agent memory
 
 If you run into any issues, check the **[FAQ](../../quick-start/faq)** or ask in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

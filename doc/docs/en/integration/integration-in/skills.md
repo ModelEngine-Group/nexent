@@ -196,5 +196,5 @@ The skill description should be written in the YAML Front Matter `description` f
 
 ## Related Resources
 
-- [Agent Configuration](../../user-guide/agent-development/agent-configuration) — Use Skills in Agents
+- [Agent Configuration](../../user-guide/agent-configuration) — Use Skills in Agents
 - [Skill System Overview](../../backend/skills/overview) — Deep dive into the Skill mechanism

@@ -145,5 +145,5 @@ Create skill → Configure parameters → Select skill for agent → Debug → P
 ## Related References
 
 - [Skill Management (User Guide)](../../user-guide/resource-repository/skill-repository.md)
-- [Agent Development Guide](../../user-guide/agent-development)
+- [Agent Development Guide](../../user-guide/agent-configuration)
 - [Local Tools Overview](../../user-guide/local-tools/index)

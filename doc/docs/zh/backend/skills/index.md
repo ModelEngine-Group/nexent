@@ -24,7 +24,7 @@
 ## 相关参考
 
 - [技能管理（用户指南）](../../user-guide/resource-repository/skill-repository.md)
-- [智能体开发指南](../../user-guide/agent-development)
+- [智能体开发指南](../../user-guide/agent-configuration)
 - [本地工具概览](../../user-guide/local-tools/index)
 - [SDK 工具开发规范](../../sdk/core/tools)
 - [MCP 工具开发](../tools/mcp)

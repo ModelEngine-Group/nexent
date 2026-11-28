@@ -172,7 +172,7 @@ The queue shows information such as the Skill name, submitter, listing note, and
 
 ### Configuring Skills for an Agent
 
-1. Open the **[Agent Configuration](../agent-development/agent-configuration.md)** page.
+1. Open the **[Agent Configuration](../agent-configuration.md)** page.
 2. In **Select Tools**, switch to the **Skills** tab and click **Select Skills**.
 3. Select the Skill you want to configure; select it again to remove it.
 4. If the Skill has required parameters, its configuration dialog opens automatically. Complete and save the parameters before the Skill is added to the current agent.
@@ -615,7 +615,7 @@ When creating or uploading a Skill, if its name already exists, the system promp
 
 ## Related References
 
-- [Agent Configuration](../agent-development/agent-configuration.md)
+- [Agent Configuration](../agent-configuration.md)
 - [Local Tools Overview](../local-tools/index.md)
 - [MCP Space](./mcp-repository.md)
 - [Official Skills](./official-skills.md)

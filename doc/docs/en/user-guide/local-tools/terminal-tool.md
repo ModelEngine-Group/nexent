@@ -100,7 +100,7 @@ docker run -d --name nexent-terminal -p 2222:22 nexent-terminal
 
 ### Configure the Terminal tool in an agent
 
-1. Open the **[Agent Configuration](../agent-development/agent-configuration)** page and select the target agent
+1. Open the **[Agent Configuration](../agent-configuration)** page and select the target agent
 2. Find the Terminal tool in the tool list and add it
 3. Select Configure on the tool row and fill in the connection parameters
 

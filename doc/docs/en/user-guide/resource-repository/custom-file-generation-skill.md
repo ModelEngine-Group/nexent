@@ -219,4 +219,4 @@ Keep the file extension, actual file content, and `mime_type` consistent. The fr
 - [Official Skills](./official-skills.md)
 - [Skill Space](./skill-repository.md)
 - [Skills System Overview](/en/backend/skills/overview)
-- [Agent Configuration](../agent-development/agent-configuration.md)
+- [Agent Configuration](../agent-configuration.md)

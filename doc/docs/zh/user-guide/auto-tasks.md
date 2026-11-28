@@ -14,8 +14,8 @@
 
 创建任务前，请确认：
 
-1. 已在 [模型配置](./agent-development/model-configuration) 中配置可用的语言模型；
-2. 已在 [智能体配置](./agent-development) 中创建并保存可用于问答的智能体；
+1. 已在 [模型配置](./model-configuration) 中配置可用的语言模型；
+2. 已在 [智能体配置](./agent-configuration) 中创建并保存可用于问答的智能体；
 3. 智能体已经配置任务需要的工具、知识库、Skill、记忆或其他智能体；
 4. 您可以访问用于创建任务的会话。
 
@@ -265,5 +265,5 @@ Cron 表达式会按照提案中的时区计算。一次性任务的执行时间
 ## 下一步
 
 - [智能体对话](./start-chat)：选择智能体并通过自然语言创建自动任务。
-- [智能体配置](./agent-development)：为任务配置模型、工具、知识库、Skill 和记忆。
-- [模型配置](./agent-development/model-configuration)：检查任务使用的语言模型。
+- [智能体配置](./agent-configuration)：为任务配置模型、工具、知识库、Skill 和记忆。
+- [模型配置](./model-configuration)：检查任务使用的语言模型。

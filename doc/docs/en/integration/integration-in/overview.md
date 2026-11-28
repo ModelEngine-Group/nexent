@@ -87,5 +87,5 @@ Based on the resource type you need to integrate, select the corresponding guide
 ## Related Resources
 
 - [MCP Ecosystem](../../mcp-ecosystem/overview) — Learn more about MCP ecosystem
-- [Agent Configuration](../../user-guide/agent-development/agent-configuration) — Use integrated resources in Agents
+- [Agent Configuration](../../user-guide/agent-configuration) — Use integrated resources in Agents
 - [Skill System Overview](../../backend/skills/overview) — Deep dive into the Skill mechanism
