@@ -32,7 +32,6 @@ import { conversationService } from "@/services/conversationService";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
-  AuiIf,
   ComposerPrimitive,
   useAui,
   useAuiState,
@@ -190,6 +189,12 @@ export interface ComposerProps {
   modelSelectionDisabled?: boolean;
   configurationLayout?: boolean;
   hidePlan?: boolean;
+  /** Override send and cancel for a shared draft. An accepted send clears the input. */
+  submission?: {
+    isRunning: boolean;
+    send: (text: string) => boolean;
+    cancel: () => void;
+  };
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onOpenWorkbenchSkillPicker?: () => void;
@@ -337,6 +342,7 @@ export const Composer: FC<ComposerProps> = ({
   modelSelectionDisabled,
   configurationLayout = false,
   hidePlan = false,
+  submission,
   workbenchPresentation,
   workbenchResources,
   onOpenWorkbenchSkillPicker,
@@ -355,6 +361,17 @@ export const Composer: FC<ComposerProps> = ({
     const threadId = runtime.threads.getState().mainThreadId;
     const thread = runtime.threads.getById(threadId);
     const composerState = thread.composer.getState();
+    if (submission) {
+      event?.preventDefault();
+      if (
+        !disabled &&
+        !submission.isRunning &&
+        submission.send(composerState.text)
+      ) {
+        thread.composer.setText("");
+      }
+      return;
+    }
     const config = composerState.runConfig;
     setSendError("");
     const pendingAnnotations = annotations?.annotations ?? [];
@@ -560,7 +577,8 @@ export const Composer: FC<ComposerProps> = ({
     onKnowledgeOpenChange?.(knowledgeModalOpen);
     return () => onKnowledgeOpenChange?.(false);
   }, [knowledgeModalOpen, onKnowledgeOpenChange]);
-  const isRunning = useAuiState((state) => state.thread.isRunning);
+  const isThreadRunning = useAuiState((state) => state.thread.isRunning);
+  const isRunning = submission?.isRunning ?? isThreadRunning;
   const hasAttachments = useAuiState(
     (state) => state.composer.attachments.length > 0
   );
@@ -582,7 +600,10 @@ export const Composer: FC<ComposerProps> = ({
   const knowledgePreviewNames =
     knowledgePreview?.[knowledgeSource].display_names;
   const knowledgeNamesById = new Map(
-    knowledgePreviewIds?.map((id, index) => [id, knowledgePreviewNames?.[index]])
+    knowledgePreviewIds?.map((id, index) => [
+      id,
+      knowledgePreviewNames?.[index],
+    ])
   );
   const knowledgeResources = knowledgeIds.map((id) => ({
     id,
@@ -603,17 +624,17 @@ export const Composer: FC<ComposerProps> = ({
     return onKnowledgeScopeChange(nextScope, {
       local: local
         ? { disabled: !ids.length, knowledge_ids: ids, display_names }
-        : knowledgePreview?.local ?? {
+        : (knowledgePreview?.local ?? {
             disabled: nextScope.local.mode === "disabled",
             knowledge_ids: [],
             display_names: [],
-          },
+          }),
       aidp: local
-        ? knowledgePreview?.aidp ?? {
+        ? (knowledgePreview?.aidp ?? {
             disabled: nextScope.aidp.mode === "disabled",
             kds_ids: [],
             display_names: [],
-          }
+          })
         : { disabled: !ids.length, kds_ids: ids, display_names },
     });
   };
@@ -966,6 +987,8 @@ export const Composer: FC<ComposerProps> = ({
                 {children}
                 <ComposerSendOrCancel
                   onSend={prepareSend}
+                  onCancel={submission?.cancel}
+                  isRunning={isRunning}
                   disabled={disabled}
                   hasAnnotations={(annotations?.annotations.length ?? 0) > 0}
                 />
@@ -1099,57 +1122,55 @@ const WorkbenchPlanningMenu: FC<{
 // `ComposerPrimitive.Cancel` / `Send` forward their internal `onClick` to the
 // direct child via Radix Slot, so the Button MUST be the immediate child for
 // the click handler to actually fire. The tooltip wrapper sits outside so its
-// Trigger can use `asChild` against the Button. `AuiIf` toggles between the
-// two branches declaratively based on `thread.isRunning`.
+// Trigger can use `asChild` against the Button.
 const ComposerSendOrCancel: FC<{
   onSend: (event?: { preventDefault: () => void }) => void;
+  onCancel?: () => void;
+  isRunning: boolean;
   disabled?: boolean;
   hasAnnotations?: boolean;
-}> = ({ onSend, disabled, hasAnnotations = false }) => {
+}> = ({ onSend, onCancel, isRunning, disabled, hasAnnotations = false }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
-  return (
-    <>
-      <AuiIf condition={(s) => s.thread.isRunning}>
-        <TooltipWrapper
-          tooltip={t("chat.composer.stopGenerating")}
-          side="bottom"
-          wrapTrigger
-        >
-          <ComposerPrimitive.Cancel
-            asChild
-            aria-label={t("chat.composer.stopGenerating")}
-          >
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label={t("chat.composer.stopGenerating")}
-              className="size-8 rounded-base text-foreground hover:bg-accent"
-            >
-              <CircleStop aria-hidden="true" className="size-5" />
-            </Button>
+  if (isRunning) {
+    const cancelButton = (
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        aria-label={t("chat.composer.stopGenerating")}
+        className="size-8 rounded-base text-foreground hover:bg-accent"
+        onClick={onCancel}
+      >
+        <CircleStop aria-hidden="true" className="size-5" />
+      </Button>
+    );
+    return (
+      <TooltipWrapper tooltip={t("chat.composer.stopGenerating")} wrapTrigger>
+        {onCancel ? (
+          cancelButton
+        ) : (
+          <ComposerPrimitive.Cancel asChild>
+            {cancelButton}
           </ComposerPrimitive.Cancel>
-        </TooltipWrapper>
-      </AuiIf>
-      <AuiIf condition={(s) => !s.thread.isRunning}>
-        <TooltipWrapper
-          tooltip={t("chat.composer.send")}
-          side="bottom"
-          wrapTrigger
+        )}
+      </TooltipWrapper>
+    );
+  }
+
+  return (
+    <TooltipWrapper tooltip={t("chat.composer.send")} wrapTrigger>
+      <ComposerPrimitive.Send asChild onClick={onSend}>
+        <Button
+          size="icon"
+          className="size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4"
+          disabled={disabled || (!hasText && !hasAnnotations)}
+          aria-label={t("chat.composer.send")}
         >
-          <ComposerPrimitive.Send asChild onClick={onSend}>
-            <Button
-              size="icon"
-              className="size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4"
-              disabled={disabled || (!hasText && !hasAnnotations)}
-              aria-label={t("chat.composer.send")}
-            >
-              <Send />
-            </Button>
-          </ComposerPrimitive.Send>
-        </TooltipWrapper>
-      </AuiIf>
-    </>
+          <Send />
+        </Button>
+      </ComposerPrimitive.Send>
+    </TooltipWrapper>
   );
 };

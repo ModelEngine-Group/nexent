@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
@@ -104,7 +106,10 @@ export function useVersionCompareRuntime({
 
   const resetCompareState = useCallback(() => {
     stopCompare();
-    if (!leftRuntime.thread.getState().isLoading) leftRuntime.thread.reset();
+    if (!leftRuntime.thread.getState().isLoading) {
+      leftRuntime.thread.reset();
+      leftRuntime.thread.composer.setText("");
+    }
     if (!rightRuntime.thread.getState().isLoading) rightRuntime.thread.reset();
   }, [leftRuntime, rightRuntime, stopCompare]);
 
@@ -168,7 +173,7 @@ export function useVersionCompareRuntime({
   ]);
 
   const runCompare = useCallback(
-    (question: string) => {
+    (question: string, modelId?: string, enablePlan = false) => {
       const text = question.trim();
       if (
         !open ||
@@ -178,20 +183,29 @@ export function useVersionCompareRuntime({
         rightVersionNo === null ||
         leftVersionNo === rightVersionNo
       )
-        return;
+        return false;
       if (
         leftRuntime.thread.getState().isLoading ||
         rightRuntime.thread.getState().isLoading ||
         leftRuntime.thread.getState().isRunning ||
         rightRuntime.thread.getState().isRunning
       )
-        return;
+        return false;
+      const runConfig = {
+        custom: {
+          modelId,
+          enablePlan,
+          modelPreferenceScope: leftRuntime.threads.getState().mainThreadId,
+        },
+      };
       for (const runtime of [leftRuntime, rightRuntime]) {
         runtime.thread.append({
           role: "user",
           content: [{ type: "text", text }],
+          runConfig,
         });
       }
+      return true;
     },
     [open, agentId, leftVersionNo, rightVersionNo, leftRuntime, rightRuntime]
   );
@@ -200,6 +214,7 @@ export function useVersionCompareRuntime({
     leftRuntime,
     rightRuntime,
     isCompareStreaming: leftRunning || rightRunning,
+    isCompareReady: !leftLoading && !rightLoading,
     runCompare,
     stopCompare,
     resetCompareState,

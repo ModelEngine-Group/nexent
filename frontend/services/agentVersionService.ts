@@ -27,6 +27,9 @@ export interface Agent {
   name: string;
   display_name?: string;
   description: string;
+  greeting_message?: string;
+  example_questions?: string[];
+  icon_url?: string;
   author?: string;
   author_cas_username?: string | null;
   model_ids?: number[];

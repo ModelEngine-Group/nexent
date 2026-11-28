@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { Form, Input } from "antd";
+import { Button, Form, Input } from "antd";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentConfigHeader } from "../../app/[locale]/agents/[agentId]/components/agent-config-header";
@@ -45,6 +45,7 @@ function setup(
     onPublication: vi.fn(),
     onManualUnlock: vi.fn(),
   };
+  const onManageVersions = vi.fn();
   const { container } = render(
     <Form component="div" disabled={readOnly}>
       <Input aria-label="Protected field" />
@@ -54,15 +55,33 @@ function setup(
         readOnly={readOnly}
         debugVisible={!publicationVisible}
         publicationVisible={publicationVisible}
+        versionAction={
+          <Button disabled={false} onClick={onManageVersions}>
+            Version management
+          </Button>
+        }
         canManualUnlock={false}
         {...callbacks}
       />
     </Form>
   );
-  return { ...callbacks, container };
+  return { ...callbacks, onManageVersions, container };
 }
 
 describe("AgentConfigHeader workflow navigation", () => {
+  it("places version management immediately before Publish in the action area", () => {
+    const { onManageVersions } = setup(true);
+    const publish = screen.getByRole("button", {
+      name: "agent.config.button.publish",
+    });
+    const versions = screen.getByRole("button", { name: "Version management" });
+    expect(versions.nextElementSibling).toBe(publish);
+    expect(versions).toBeEnabled();
+    fireEvent.click(versions);
+    expect(onManageVersions).toHaveBeenCalledTimes(1);
+    expect(publish).toBeDisabled();
+  });
+
   it("opens the publication tab without publishing in read-only mode", () => {
     const callbacks = setup(true);
     const publication = screen.getByRole("button", {

@@ -8,7 +8,6 @@ import {
   App,
   Empty,
   InputNumber,
-  Modal,
   Select,
   Spin,
   Button,
@@ -436,19 +435,12 @@ export default function AgentsPage() {
         </div>
       </section>
 
-      <Modal
-        centered
-        width={900}
+      <AgentVersion
+        currentVersionNo={selectedAgent?.current_version_no}
+        onRefreshAgentInfo={refreshSelectedAgentInfo}
         open={isVersionManageOpen}
-        title={t("agent.version.manage")}
-        onCancel={() => setIsVersionManageOpen(false)}
-        footer={null}
-      >
-        <AgentVersion
-          currentVersionNo={selectedAgent?.current_version_no}
-          onRefreshAgentInfo={refreshSelectedAgentInfo}
-        />
-      </Modal>
+        onClose={() => setIsVersionManageOpen(false)}
+      />
       <CreateAgentModal
         open={isCreateOpen}
         onCancel={() => setIsCreateOpen(false)}
