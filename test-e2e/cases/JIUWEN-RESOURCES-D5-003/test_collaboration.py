@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
-import runpy
 import sys
 from pathlib import Path
 import pytest
@@ -62,14 +61,9 @@ def test_configured_outer_deadline_closes_stalled_a2a_and_recovers(monkeypatch, 
         patch.setenv("RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS", "5")
         patch.setenv("DEFAULT_TOOL_CALL_TIMEOUT", "5")
         patch.setenv(setting, "0.1")
-        settings = runpy.run_module("contracts.constants.environment")
-        timeouts = {
-            "collaboration_timeout_seconds": settings["RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS"],
-            "tool_call_timeout_seconds": settings["DEFAULT_TOOL_CALL_TIMEOUT"],
-        }
         started = time.monotonic()
         _, state, events, _ = asyncio.run(run_collaboration(
-            patch, child_core="a2a", fault="timeout", run_timeouts=timeouts,
+            patch, child_core="a2a", fault="timeout", use_deployment_timeouts=True,
         ))
     assert time.monotonic() - started < 5
     assert state["closed"] and len(state["remote"]) == 1

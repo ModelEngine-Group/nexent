@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
-import runpy
 import json
 import re
 import socket
@@ -371,13 +370,8 @@ def test_native_python_children_overlap_with_distinct_system_kernel_leases(monke
 def test_configured_deadlines_allow_delayed_a2a_completion(monkeypatch, protocol):
     monkeypatch.setenv("RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS", "1.5")
     monkeypatch.setenv("DEFAULT_TOOL_CALL_TIMEOUT", "2.5")
-    settings = runpy.run_module("contracts.constants.environment")
-    timeouts = {
-        "collaboration_timeout_seconds": settings["RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS"],
-        "tool_call_timeout_seconds": settings["DEFAULT_TOOL_CALL_TIMEOUT"],
-    }
     info, state, events, _ = asyncio.run(run_collaboration(
-        monkeypatch, child_core="a2a", protocol=protocol, run_timeouts=timeouts, remote_delay=0.2,
+        monkeypatch, child_core="a2a", protocol=protocol, remote_delay=0.2, use_deployment_timeouts=True,
     ))
     assert info.collaboration_timeout_seconds == 1.5
     assert info.tool_call_timeout_seconds == 2.5
