@@ -152,6 +152,12 @@ def record_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None
         # JSONB metadata, correlated with the response through request_id.
         route = request.scope.get("route") if request is not None else None
         template = getattr(route, "path", None)
+        # New-style include_router(prefix=...) mounts (the ops /nb mirror)
+        # expose the un-prefixed route template while the request path carries
+        # the mount prefix; the ledger must record the published /nb template.
+        if (template and is_northbound_path(path)
+                and not template.startswith(NORTHBOUND_PATH_PREFIX)):
+            template = NORTHBOUND_PATH_PREFIX + template
         log_token_usage(
             token_id=token_id,
             call_function_name=(template or path)[:100],

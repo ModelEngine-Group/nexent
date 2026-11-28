@@ -71,7 +71,10 @@ API Key 用量记账照常写入**同一张账本表（`user_token_usage_log_t`�
 同一 declarative 元数据，management 三处原位置重导出）；编排函数 `record_api_key_usage`
 下沉到共享 Web 层，Ops 提交到本进程线程管理器的 `control-io` lane（fail-open）。测试以
 `is` 同一性断言单一定义，并钉死字段（token_id/路由模板/created_by/metadata）、fail-open
-与提交链路。
+与提交链路。容器化接口测试发现并修复一处真实缺陷：新版 `include_router(prefix=...)`
+挂载暴露的 `route.path` 不含挂载前缀，北向调用的账本行被记成 `/ops/v1/monitoring/...`
+（与内部面板调用混同）；共享层写入器现按请求路径补回 `/nb` 前缀，回归测试钉死两种挂载
+形态（无前缀的 ops 镜像路由 / 自带前缀的 management legacy 路由）。
 
 **仍在的 management 依赖 = develop 基线**（`test_ops_management_import_surface.py` 冻结）：
 session 通道的 `authenticate`（`services/permission/identity/session`）、监控目录查询的

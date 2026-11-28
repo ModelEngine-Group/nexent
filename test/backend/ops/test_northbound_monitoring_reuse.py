@@ -714,3 +714,38 @@ def test_audit_record_survives_a_broken_logger(monkeypatch):
 
     security_audit.record_security_event("evt", request=BrokenRequest(),
                                          user_id="u", tenant_id="t")
+
+
+def test_record_api_key_usage_restores_the_mount_prefix_on_route_templates(monkeypatch):
+    """Mounted /nb routers expose un-prefixed templates; the ledger needs /nb.
+
+    Found by the containerized interface test: the ops mirror's route objects
+    carry ``/ops/v1/monitoring/...`` as ``route.path`` (include_router mounts
+    keep the original template), so accounting recorded northbound calls as
+    internal ones. The shared writer re-attaches the northbound prefix.
+    """
+    from backend.http.server import northbound as shared
+
+    captured = {}
+    monkeypatch.setattr(shared, "log_token_usage",
+                        lambda **kw: captured.update(kw))
+    principal = AuthenticatedIdentity(user_id="u", tenant_id="t", token_id=7,
+                                      kind=CredentialKind.API_KEY)
+    request = SimpleNamespace(
+        url=SimpleNamespace(path="/nb/ops/v1/monitoring/models/refreshes/<jwt>"),
+        method="GET", headers={},
+        scope={"route": SimpleNamespace(path="/ops/v1/monitoring/models/refreshes/{refresh_id}")},
+    )
+    shared.record_api_key_usage(principal, request)
+    assert captured["call_function_name"] == \
+        "/nb/ops/v1/monitoring/models/refreshes/{refresh_id}"
+
+    # Management-style routes already embed their prefix: untouched.
+    captured.clear()
+    request = SimpleNamespace(
+        url=SimpleNamespace(path="/nb/v1/automations"),
+        method="GET", headers={},
+        scope={"route": SimpleNamespace(path="/nb/v1/automations")},
+    )
+    shared.record_api_key_usage(principal, request)
+    assert captured["call_function_name"] == "/nb/v1/automations"
