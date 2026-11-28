@@ -3,7 +3,6 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import psycopg2
@@ -13,8 +12,6 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from local_auth import disposable_database
 from psycopg2.extensions import parse_dsn
-
-ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture(scope="module")
@@ -60,9 +57,8 @@ def native_runtime():
             cursor.execute("CREATE SCHEMA nexent")
             from shared.merged_migrations import merged_migration_sql
             cursor.execute(merged_migration_sql("v2.9.0_009_system_configuration.sql"))
-            migrations = ROOT / "deploy/sql/migrations"
-            cursor.execute((migrations / "v2.9.0_019_local_session_renewal.sql").read_text("utf-8"))
-            cursor.execute((migrations / "v2.9.0_020_local_session_audit.sql").read_text("utf-8"))
+            cursor.execute(merged_migration_sql("v2.9.0_019_local_session_renewal.sql"))
+            cursor.execute(merged_migration_sql("v2.9.0_020_local_session_audit.sql"))
         models.TableBase.metadata.create_all(
             db_client.engine, tables=[model.__table__ for model in tables]
         )
