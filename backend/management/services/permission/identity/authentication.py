@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import EmailStr
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import select
 
 from contracts.constants.constants import (
@@ -31,14 +32,11 @@ from contracts.roles import (
     roles_from_record,
 )
 from management.services.permission.identity.session import (
-    calculate_expires_at,
-    ensure_cas_session_active_from_authorization,
-    generate_session_jwt,
     get_current_user_id,
-    get_jwt_expiry_seconds,
     require_active_account,
     resolve_tenant_id_from_user_tenant_record,
 )
+from management.services.permission.identity.local_session import issue_local_session, rotate_local_session
 from management.utils.account_passwords import hash_password, verify_password
 from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import (
@@ -106,11 +104,8 @@ def get_provider_username(user_id: str, provider: str) -> Optional[str]:
     return None
 
 
-def build_token_response(user_id: str) -> dict:
-    """Keep the existing response object without a server-side session store."""
-    token = generate_session_jwt(user_id)
-    return {"access_token": token, "refresh_token": "", "expires_at": calculate_expires_at(token),
-            "expires_in_seconds": get_jwt_expiry_seconds(token)}
+def build_token_response(user_id: str, token_version: int | None = None) -> dict:
+    return issue_local_session(user_id, token_version)
 
 
 async def check_auth_service_health():
@@ -183,13 +178,12 @@ async def signin_user(email: EmailStr, password: str):
         require_asset_owner_enabled()
     return {"message": "Login successful", "data": {
         "user": {"id": account["user_id"], "email": account["email"], "role": membership["user_role"], "roles": list(roles_from_record(membership))},
-        "session": build_token_response(account["user_id"]),
+        "session": build_token_response(account["user_id"], account["token_version"]),
     }}
 
 
-async def refresh_user_token(authorization, refresh_token: str):
-    # Preserve the route, but never exchange legacy refresh tokens for local JWTs.
-    raise UnauthorizedError("Token refresh is unavailable; please log in again")
+async def refresh_user_token(authorization, refresh_token: str, request_id: str | None = None):
+    return await run_in_threadpool(rotate_local_session, authorization, refresh_token, request_id)
 
 
 async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:

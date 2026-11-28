@@ -53,12 +53,14 @@ safe to re-run.
 Newer migrations remain separate until their minor-version history is
 consolidated.
 
-For the v2.9.0 release, the resource denylist migration is embedded at the end of
-`v2.9.0_merged_migrations.sql`, after the runtime replica section and the system
-configuration table definition. It has no separate migration file.
+For the v2.9.0 release, the resource denylist section in
+`v2.9.0_merged_migrations.sql` follows the runtime replica and system configuration
+table definitions. The local session table and its audit fields are created
+together after the MCP SSL section. The application writes UTC values to the
+session timestamp columns.
 
 The remote MCP per-server TLS verification switch (`ssl_verify` on
-`nexent.mcp_record_t`) is embedded as the final section of
+`nexent.mcp_record_t`) is embedded in
 `v2.9.0_merged_migrations.sql`, after the resource denylist section. It has no
 separate migration file; environments that already applied the pre-fold bundle
 replay the idempotent sections once.

@@ -250,6 +250,7 @@ def test_ops_dockerfile_includes_dependencies_without_other_launchers():
     # dependency too or the service fails at import (ModuleNotFoundError).
     assert "backend/http/server/exception_handlers.py" in files
     assert "backend/http/server/request_context.py" in files
+    assert "backend/management/db/identity/local_session.py" in files
 
 
 def test_management_image_packages_mcp_sources_without_runtime():

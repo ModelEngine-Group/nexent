@@ -31,6 +31,7 @@ export const STATUS_CODES = {
 
 // Local storage keys (user info only — tokens are in HttpOnly cookies)
 export const STORAGE_KEYS = {
+  REFRESH_ATTEMPT: "nexent_session_refresh_attempt",
   SESSION: "session",
   USER_INFO: "user_info",
 };
@@ -40,6 +41,8 @@ export const COOKIE_NAMES = {
   ACCESS_TOKEN: "nexent_access_token",
   REFRESH_TOKEN: "nexent_refresh_token",
   EXPIRES_AT: "nexent_token_expires_at",
+  SCOPE: "nexent_session_scope",
+  SIGNED_OUT: "nexent_signed_out",
   OAUTH_PENDING: "nexent_oauth_pending",
 } as const;
 

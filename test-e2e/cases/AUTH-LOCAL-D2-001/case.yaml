@@ -30,11 +30,15 @@ case:
   - order: 4
     action: Apply the system-configuration migration to an empty database, then run the standalone bootstrap-su flow before any Web lifespan starts.
     expected: The command loads the seeded configuration snapshot and creates the first SU; repeated bootstrap remains idempotent and another SU is rejected.
+  - order: 5
+    action: Refresh a local session concurrently, retry the same request, then revoke the session.
+    expected: One rotation commits, an exact retry returns that result, and expired or mismatched credentials are rejected.
   expected_results:
   - Successful identity behavior matches the preserved HTTP/data contract.
   - Negative paths reject access or writes deterministically.
   - API-only users retain valid keys with no password login and atomic batch persistence.
   - Standalone first-SU creation works after migration without relying on a Web configuration lifespan.
+  - Local refresh rotates once and revokes only the selected session.
   forbidden_side_effects:
   - No plaintext password/hash/token/DSN in returned errors or logs; no writes to
     unrelated users.
@@ -53,6 +57,11 @@ case:
     - 4
     forbidden_side_effects:
     - 1
+  - id: AC-02
+    description: Local session rotation validates both credentials, handles concurrent retry and preserves other sessions.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]
   contract:
     protocol: HTTP API
     request_expectations:

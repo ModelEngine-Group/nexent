@@ -3,7 +3,6 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import psycopg2
@@ -13,8 +12,6 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from local_auth import disposable_database
 from psycopg2.extensions import parse_dsn
-
-ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture(scope="module")
@@ -35,9 +32,10 @@ def native_runtime():
         from contracts.errors.exceptions import AppException
         from management.services.permission.identity import session as helpers
         from management.api.identity import user_management as routes
-        from infrastructure.system_configuration.runtime import stop_system_configuration
+        from infrastructure.system_configuration.runtime import load_system_configuration, stop_system_configuration
         from management.db import models
         from infrastructure.rdb.client import db_client
+        from infrastructure.rdb.tenant_config_record import TenantConfig
         from management.services.permission.identity import authentication as auth
 
         tables = [
@@ -52,15 +50,20 @@ def native_runtime():
             models.TenantGroupInfo,
             models.TenantInvitationCode,
             models.TenantInvitationRecord,
+            TenantConfig,
         ]
         asyncio.run(stop_system_configuration())
         with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
             cursor.execute("CREATE SCHEMA nexent")
             from shared.merged_migrations import merged_migration_sql
             cursor.execute(merged_migration_sql("v2.9.0_009_system_configuration.sql"))
+            cursor.execute(merged_migration_sql("v2.9.0_019_local_session_renewal.sql"))
         models.TableBase.metadata.create_all(
             db_client.engine, tables=[model.__table__ for model in tables]
         )
+        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            cursor.execute(merged_migration_sql("v2.9.0_014_su_system_configuration.sql"))
+        load_system_configuration()
         patch.setattr(auth, "init_tool_list_for_tenant", AsyncMock())
         patch.setattr(auth, "init_skill_list_for_tenant", AsyncMock())
         patch.setattr(routes, "record_security_event", lambda *a, **kw: None)
@@ -82,9 +85,11 @@ def native_runtime():
 @pytest.fixture
 def runtime(native_runtime):
     client, auth, helpers, models = native_runtime
+    from sqlalchemy import text
     from infrastructure.rdb.client import get_db_session
 
     with get_db_session() as session:
+        session.execute(text("DELETE FROM nexent.user_local_session_t"))
         for model in [
             models.UserAccount,
             models.UserTenant,
@@ -113,11 +118,11 @@ def runtime(native_runtime):
     return native_runtime
 
 
-def register(client):
+def register(client, email="native@example.com"):
     response = client.post(
         "/api/user/signup",
         json={
-            "email": "native@example.com",
+            "email": email,
             "password": "Password123",
             "invite_code": "NATIVE-INVITE",
             "auto_login": True,

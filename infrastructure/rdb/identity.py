@@ -2,7 +2,7 @@
 """Bounded, read-only identity snapshots without business ORM or SDK imports."""
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 
 import asyncpg
 
@@ -47,13 +47,13 @@ class IdentityRepository:
             raise IdentityRejected("Identity unavailable or ambiguous")
         return dict(rows[0])
 
-    async def snapshot(self, query):
+    async def snapshot(self, query, *, local_session=False):
         try:
             async with asyncio.timeout(self.timeout):
                 async with self.pool.acquire(timeout=self.timeout) as connection:
                     try:
                         async with connection.transaction(isolation="repeatable_read", readonly=True):
-                            return await self._snapshot(connection, query)
+                            return await self._snapshot(connection, query, local_session=local_session)
                     except (asyncpg.PostgresError, asyncpg.InterfaceError, asyncpg.InternalClientError, OSError):
                         # A server disconnect can leave a pending protocol operation.
                         # Never return that connection to the pool or retry identity.
@@ -67,7 +67,7 @@ class IdentityRepository:
         except (asyncpg.PostgresError, asyncpg.InterfaceError, asyncpg.InternalClientError, OSError, TimeoutError):
             raise IdentityStoreUnavailable("Identity database unavailable") from None
 
-    async def _snapshot(self, connection, query):
+    async def _snapshot(self, connection, query, *, local_session):
         kind = query.get("kind")
         token_id = None
         if kind == "api_key":
@@ -88,12 +88,19 @@ class IdentityRepository:
             "SELECT tenant_id FROM nexent.user_tenant_t "
             "WHERE user_id=$1 AND delete_flag='N' ORDER BY user_tenant_id LIMIT 1", user_id))
         session_active = True
-        if kind == "session" and query.get("session_id"):
+        sid = query.get("session_id") if kind == "session" else None
+        if sid and local_session:
+            session_active = bool(await connection.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM nexent.user_local_session_t "
+                "WHERE session_id=$1 AND user_id=$2 AND revoked_at IS NULL AND delete_flag='N' "
+                "AND idle_expires_at>$3 AND absolute_expires_at>$3)",
+                sid, user_id, datetime.now(UTC).replace(tzinfo=None)))
+        elif sid:
             # CAS stores naive local timestamps today. Gateway and Management
             # deployments use the same TZ; preserve the existing expiry contract.
             session_active = bool(await connection.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM nexent.user_cas_session_t "
                 "WHERE session_id=$1 AND user_id=$2 AND status='active' "
-                "AND delete_flag='N' AND expires_at>$3)", query["session_id"], user_id, datetime.now()))
+                "AND delete_flag='N' AND expires_at>$3)", sid, user_id, datetime.now()))
         return {"account": account, "membership": membership, "token_id": token_id,
                 "session_active": session_active}

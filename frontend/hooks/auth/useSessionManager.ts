@@ -6,7 +6,13 @@ import { useCallback, useEffect, useRef } from "react";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { casService } from "@/services/casService";
 import {
+  sessionService,
+  withLocalSessionLock,
+} from "@/services/sessionService";
+import { authFlowState } from "@/lib/authFlow";
+import {
   getTokenExpiresAt,
+  getSessionScope,
   hasAuthCookies,
   checkSessionValid,
   handleSessionExpired,
@@ -39,8 +45,21 @@ export const isSessionExpiringSoon = (): boolean => {
   return msUntilExpiry > 0 && msUntilExpiry <= TOKEN_REFRESH_BEFORE_EXPIRY_MS;
 };
 
-/** Retained for callers that used the old refresh hook; local JWTs require login on expiry. */
-export const refreshSession = async (): Promise<boolean> => false;
+export const refreshSession = async (): Promise<boolean> => {
+  const expiresAt = getTokenExpiresAt();
+  const scope = getSessionScope();
+  return withLocalSessionLock(async () => {
+    if (
+      authFlowState.isExplicitLogoutInProgress() ||
+      document.hidden ||
+      !isSessionExpiringSoon() ||
+      getTokenExpiresAt() !== expiresAt ||
+      getSessionScope() !== scope
+    )
+      return false;
+    return Boolean(await sessionService.refreshToken());
+  });
+};
 
 // ============================================================================
 // Hook implementation
@@ -64,6 +83,7 @@ export function useSessionManager(user?: User | null) {
   useEffect(() => {
     if (!isDeploymentReady) return;
 
+    sessionService.discardPreviousRefreshAttempt();
     if (!hasAuthCookies()) {
       return;
     }
@@ -160,7 +180,10 @@ export function useSessionManager(user?: User | null) {
   const setupTokenAutoRefresh = useCallback(() => {
     let lastActivityCheckAt = 0;
 
-    const maybeRefreshOnActivity = async () => {
+    let localRefreshInFlight = false;
+    let lastLocalRefreshAttempt = 0;
+
+    const maybeRefreshOnActivity = async (event: Event) => {
       try {
         reconcileExpiryRef.current();
 
@@ -254,8 +277,21 @@ export function useSessionManager(user?: User | null) {
           return;
         }
 
-        // Ordinary JWT credentials expire at the configured deadline.
-        // CAS heartbeat remains independent of local password authentication.
+        if (
+          !["click", "keydown", "touchstart"].includes(event.type) ||
+          !event.isTrusted ||
+          localRefreshInFlight ||
+          !isSessionExpiringSoon() ||
+          now - lastLocalRefreshAttempt < MIN_ACTIVITY_CHECK_INTERVAL_MS
+        )
+          return;
+        localRefreshInFlight = true;
+        lastLocalRefreshAttempt = now;
+        try {
+          if (await refreshSession()) reconcileExpiryRef.current();
+        } finally {
+          localRefreshInFlight = false;
+        }
       } catch (error) {
         log.error("Activity-based refresh check failed:", error);
       }
@@ -270,12 +306,14 @@ export function useSessionManager(user?: User | null) {
     ];
     const windowEvents: (keyof WindowEventMap)[] = ["focus"];
 
-    const handler = () => {
-      void maybeRefreshOnActivity();
+    const handler = (event: Event) => {
+      void maybeRefreshOnActivity(event);
     };
 
+    // Local session activity must reach this listener even when a widget stops bubbling.
+    const capture = user?.authProvider !== "cas";
     documentEvents.forEach((eventName) => {
-      document.addEventListener(eventName, handler, { passive: true });
+      document.addEventListener(eventName, handler, { passive: true, capture });
     });
     windowEvents.forEach((eventName) => {
       window.addEventListener(eventName, handler, { passive: true });
@@ -283,7 +321,7 @@ export function useSessionManager(user?: User | null) {
 
     return () => {
       documentEvents.forEach((eventName) => {
-        document.removeEventListener(eventName, handler);
+        document.removeEventListener(eventName, handler, capture);
       });
       windowEvents.forEach((eventName) => {
         window.removeEventListener(eventName, handler);

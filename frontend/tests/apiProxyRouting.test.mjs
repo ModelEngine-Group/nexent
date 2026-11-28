@@ -29,9 +29,12 @@ for (const [setting, secure] of [[undefined, true], ["true", true], ["false", fa
     assert.ok(cookies.every((entry) => entry.secure === secure && entry.sameSite === "lax"));
     assert.ok(cookies.every((entry) => entry.httpOnly === (entry.name !== "nexent_token_expires_at")));
 
+    cookies = [];
     context.clearAuthCookies(response);
     context.clearPendingOAuthCookie(response);
-    assert.ok(cookies.every((entry) => entry.secure === secure && entry.maxAge === 0 && entry.path === "/nexent"));
+    assert.ok(cookies.every((entry) => entry.secure === secure && entry.path === "/nexent"));
+    assert.ok(cookies.filter((entry) => entry.name !== "nexent_signed_out").every((entry) => entry.maxAge === 0));
+    assert.equal(cookies.find((entry) => entry.name === "nexent_signed_out").value, "1");
 
     cookies = [];
     context.setAuthCookies(response, { access_token: "access" });
@@ -51,6 +54,8 @@ test("auth proxy replaces chunked encoding with the buffered response length", a
     Buffer,
     URL,
     COOKIE_NAMES: { ACCESS_TOKEN: "access", OAUTH_PENDING: "pending" },
+    sessionCookieScope: () => "",
+    getSessionCookie: () => undefined,
     collectRequestBody: async () => Buffer.alloc(0),
     prepareAuthRequestBody: (_path, body) => body,
     parseCookies: () => ({}),

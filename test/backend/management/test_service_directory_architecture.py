@@ -226,6 +226,7 @@ MIGRATED_MODULES = {
     'permission/identity/gateway_lookup.py',
     'permission/identity/groups.py',
     'permission/identity/invitations.py',
+    'permission/identity/local_session.py',
     'permission/identity/northbound.py',
     'permission/identity/oauth.py',
     'permission/identity/registration.py',

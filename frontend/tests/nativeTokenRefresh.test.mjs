@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import assert from "node:assert/strict";
+import { webcrypto } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
@@ -23,42 +24,245 @@ function loadTypescript(relativePath, context) {
   return exports;
 }
 
-test("legacy refresh service returns no credential and makes no request", async () => {
-  let requests = 0;
-  const context = {
-    fetch: () => {
-      requests += 1;
-      throw new Error("unexpected refresh request");
+function loadRefreshService({
+  expiresAt = () => 1234,
+  valid = true,
+  scope = () => "a",
+  storage = new Map(),
+  fetch,
+  onExpiry = () => {},
+}) {
+  return loadTypescript("../services/sessionService.ts", {
+    fetch,
+    crypto: webcrypto,
+    sessionStorage: {
+      getItem: (key) => storage.get(key),
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key),
     },
-    require: () => ({
-      fetchWithAuth: () => {
-        requests += 1;
-        throw new Error("unexpected auth request");
-      },
-    }),
-  };
-  const { sessionService } = loadTypescript(
-    "../services/sessionService.ts",
-    context
+    require: (name) =>
+      name === "@/const/auth"
+        ? { STORAGE_KEYS: { REFRESH_ATTEMPT: "refresh-attempt" } }
+        : name === "@/services/api"
+          ? {
+              API_ENDPOINTS: {
+                user: { refreshToken: "/api/user/refresh_token" },
+              },
+            }
+          : {
+              checkSessionValid: () => valid,
+              getTokenExpiresAt: expiresAt,
+              getSessionScope: scope,
+              handleSessionExpired: onExpiry,
+            },
+  }).sessionService;
+}
+
+test("expired sessions make no renewal request", async () => {
+  const fetch = () => assert.fail("unexpected renewal");
+  assert.equal(
+    await loadRefreshService({ fetch, valid: false }).refreshToken(),
+    null
   );
-  assert.equal(await sessionService.refreshToken(), null);
-  assert.equal(requests, 0);
 });
 
-test("legacy hook refresh reports unavailable without calling a token service", async () => {
+test("a 204 skips further requests for the same session without logging out", async () => {
   let requests = 0;
-  const { refreshSession } = loadTypescript(
+  let scope = "a";
+  const service = loadRefreshService({
+    scope: () => scope,
+    fetch: async () => {
+      requests += 1;
+      return { ok: true, status: 204 };
+    },
+    onExpiry: () => assert.fail("unexpected logout"),
+  });
+  assert.equal(await service.refreshToken(), null);
+  assert.equal(await service.refreshToken(), null);
+  assert.equal(requests, 1);
+  scope = "b";
+  assert.equal(await service.refreshToken(), null);
+  assert.equal(requests, 2);
+});
+
+test("retry preserves the request ID and simultaneous calls share a request", async () => {
+  const requestIds = [];
+  const service = loadRefreshService({
+    fetch: async (url, options) => {
+      assert.equal(url, "/api/user/refresh_token");
+      requestIds.push(options.headers["X-Refresh-Request-Id"]);
+      if (requestIds.length === 1) throw new Error("response lost");
+      return {
+        ok: true,
+        json: async () => ({ data: { session: { expires_at: 5678 } } }),
+      };
+    },
+  });
+  const pending = service.refreshToken();
+  assert.equal(pending, service.refreshToken());
+  await assert.rejects(pending, /response lost/);
+  assert.equal((await service.refreshToken()).expires_at, 5678);
+  assert.equal(requestIds.length, 2);
+  assert.equal(requestIds[0], requestIds[1]);
+});
+
+test("a reload retries the same request ID only for the same login", async () => {
+  const storage = new Map();
+  const ids = [];
+  let scope = "a";
+  const config = {
+    storage,
+    scope: () => scope,
+    fetch: async (_, options) => {
+      ids.push(options.headers["X-Refresh-Request-Id"]);
+      throw new Error("response lost");
+    },
+  };
+  await assert.rejects(
+    loadRefreshService(config).refreshToken(),
+    /response lost/
+  );
+  await assert.rejects(
+    loadRefreshService(config).refreshToken(),
+    /response lost/
+  );
+  assert.equal(ids[0], ids[1]);
+  scope = "b";
+  await assert.rejects(
+    loadRefreshService(config).refreshToken(),
+    /response lost/
+  );
+  assert.notEqual(ids[1], ids[2]);
+});
+
+test("a delayed renewal rejection leaves the new login alone", async () => {
+  let respond;
+  let scope = "a";
+  const service = loadRefreshService({
+    scope: () => scope,
+    fetch: () =>
+      new Promise((resolve) => {
+        respond = resolve;
+      }),
+    onExpiry: () => assert.fail("unexpected logout"),
+  });
+  const pending = service.refreshToken();
+  scope = "b";
+  respond({ ok: false, status: 401 });
+  assert.equal(await pending, null);
+});
+
+test("a rotation conflict keeps the session and invalid credentials expire it", async () => {
+  let expirations = 0;
+  const statuses = [409, 401];
+  const service = loadRefreshService({
+    fetch: async () => ({ ok: false, status: statuses.shift() }),
+    onExpiry: () => {
+      expirations += 1;
+    },
+  });
+  assert.equal(await service.refreshToken(), null);
+  assert.equal(expirations, 0);
+  assert.equal(await service.refreshToken(), null);
+  assert.equal(expirations, 1);
+});
+
+test("foreground activity starts renewal inside the window and stops after the absolute limit response", async () => {
+  const listeners = new Map();
+  const effects = [];
+  let now = 1_000_000_000;
+  let expiresAt = now / 1_000 + 1_801;
+  const absoluteExpiresAt = now / 1_000 + 1_900;
+  let requests = 0;
+  const service = loadRefreshService({
+    expiresAt: () => expiresAt,
+    fetch: async () => {
+      requests += 1;
+      if (requests === 1) {
+        expiresAt = absoluteExpiresAt;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: { session: { expires_at: expiresAt } } }),
+        };
+      }
+      return { ok: true, status: 204 };
+    },
+    onExpiry: () => assert.fail("unexpected logout"),
+  });
+  const document = {
+    hidden: false,
+    addEventListener: (name, handler, options) =>
+      listeners.set(name, { handler, capture: options?.capture }),
+    removeEventListener: (name) => listeners.delete(name),
+  };
+  const window = {
+    addEventListener: (name, handler, options) =>
+      listeners.set(name, { handler, capture: options?.capture }),
+    removeEventListener: (name) => listeners.delete(name),
+  };
+  const mocks = {
+    react: {
+      useEffect: (effect) => effects.push(effect),
+      useRef: (current) => ({ current }),
+      useCallback: (callback) => callback,
+    },
+    "@/components/providers/deploymentProvider": {
+      useDeployment: () => ({ isDeploymentReady: false }),
+    },
+    "@/services/sessionService": {
+      withLocalSessionLock: (callback) => callback(),
+      sessionService: service,
+    },
+    "@/lib/authFlow": {
+      authFlowState: { isExplicitLogoutInProgress: () => false },
+    },
+    "@/const/constants": {
+      TOKEN_REFRESH_BEFORE_EXPIRY_MS: 1_800_000,
+      MIN_ACTIVITY_CHECK_INTERVAL_MS: 30_000,
+    },
+    "@/lib/session": {
+      getTokenExpiresAt: () => expiresAt,
+      getSessionScope: () => "a",
+      checkSessionValid: () => expiresAt * 1_000 > now,
+    },
+    "@/lib/casHeartbeat": { getHeartbeatIntervalMs: () => 300_000 },
+  };
+  const { useSessionManager } = loadTypescript(
     "../hooks/auth/useSessionManager.ts",
     {
-      require: () => ({
-        sessionService: {
-          refreshToken: () => {
-            requests += 1;
-          },
-        },
-      }),
+      document,
+      window,
+      Date: { now: () => now },
+      require: (name) => mocks[name] ?? {},
     }
   );
-  assert.equal(await refreshSession(), false);
+  useSessionManager({ id: "local-account" });
+  effects.forEach((effect) => effect());
+  const dispatch = async (type, isTrusted = true, stopsPropagation = false) => {
+    const { handler, capture } = listeners.get(type);
+    if (!stopsPropagation || capture) handler({ type, isTrusted });
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  await dispatch("click");
+  expiresAt = now / 1_000;
+  await dispatch("keydown");
+  expiresAt = now / 1_000 + 1_800;
+  await dispatch("visibilitychange");
+  await dispatch("focus");
+  await dispatch("click", false);
   assert.equal(requests, 0);
+  await dispatch("keydown", true, true);
+  assert.equal(requests, 1);
+  assert.equal(expiresAt, absoluteExpiresAt);
+
+  now += 100_000;
+  await dispatch("click");
+  assert.equal(requests, 2);
+  for (const type of ["keydown", "touchstart", "click"]) {
+    now += 30_000;
+    await dispatch(type);
+  }
+  assert.equal(requests, 2);
+  assert.equal(expiresAt, absoluteExpiresAt);
 });

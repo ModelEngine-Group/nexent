@@ -4,6 +4,7 @@
 import asyncio
 import ast
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -65,7 +66,7 @@ async def test_policy_preserves_canonical_roles_and_empty_tenant_rules(kind, rol
         assert result["tenant_id"] == expected and result["role"] == role
         assert result["email"] == "fixture@example.test" and result["language"] == "en"
         assert result["session_id"] == ("s1" if kind == "session" else None)
-    repository.snapshot.assert_awaited_once_with(query)
+    repository.snapshot.assert_awaited_once_with(query, local_session=False)
 
 
 @pytest.mark.asyncio
@@ -86,6 +87,34 @@ async def test_provider_sanitizes_storage_failures(error, expected):
     assert "secret" not in str(caught.value)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("active", [True, False])
+async def test_gateway_queries_local_session_state_before_authorizing(active, mocker):
+    current = datetime(2026, 11, 28, 9, 0, tzinfo=UTC)
+    clock = mocker.patch("infrastructure.rdb.identity.datetime")
+    clock.now.return_value = current
+    record = snapshot()
+    repo, connection, _, _ = repository([[record["account"]], [record["membership"]]], session_active=active)
+    provider = DatabaseIdentityProvider(repo)
+    query = {"kind": "session", "user_id": "u1", "token_version": 3, "session_id": "local:fixture"}
+
+    if active:
+        identity = await provider(query)
+        assert identity["session_id"] == "local:fixture"
+    else:
+        with pytest.raises(IdentityError, match="Invalid or revoked session"):
+            await provider(query)
+
+    connection.fetchval.assert_awaited_once()
+    sql, session_id, user_id, now = connection.fetchval.await_args.args
+    assert "nexent.user_local_session_t" in sql
+    assert "revoked_at IS NULL" in sql and "delete_flag='N'" in sql
+    assert "idle_expires_at>$3" in sql and "absolute_expires_at>$3" in sql
+    assert (session_id, user_id) == ("local:fixture", "u1")
+    clock.now.assert_called_once_with(UTC)
+    assert now == current.replace(tzinfo=None)
+
+
 class Pool:
     def __init__(self, connection):
         self.connection = connection
@@ -102,7 +131,7 @@ class Pool:
             self.events.append("release")
 
 
-def repository(rows, *, cas=True):
+def repository(rows, *, session_active=True):
     transactions = []
 
     @asynccontextmanager
@@ -110,7 +139,7 @@ def repository(rows, *, cas=True):
         transactions.append(kwargs)
         yield
 
-    connection = SimpleNamespace(fetch=AsyncMock(side_effect=rows), fetchval=AsyncMock(return_value=cas),
+    connection = SimpleNamespace(fetch=AsyncMock(side_effect=rows), fetchval=AsyncMock(return_value=session_active),
                                  transaction=transaction, terminate=MagicMock())
     pool = Pool(connection)
     return IdentityRepository(pool), connection, pool, transactions

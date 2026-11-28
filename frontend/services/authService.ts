@@ -8,7 +8,7 @@
  * - expires_at is readable from a non-HttpOnly cookie
  */
 import { API_ENDPOINTS } from "@/services/api";
-import { sessionService } from "@/services/sessionService";
+import { sessionService, withLocalSessionLock } from "@/services/sessionService";
 
 import { Session, SessionResponse, AuthInfoResponse } from "@/types/auth";
 import { ASSET_OWNER_TENANT_ID, STATUS_CODES, USER_ROLES } from "@/const/auth";
@@ -18,6 +18,7 @@ import { fetchWithAuth } from "@/lib/auth";
 import { authFlowState } from "@/lib/authFlow";
 import {
   removeSessionFromStorage,
+  getSessionScope,
   getSessionFromStorage,
   saveUserToStorage,
   removeUserFromStorage,
@@ -90,14 +91,17 @@ export const authService = {
   },
 
   revoke: async (): Promise<{ error: null }> => {
+    const scope = getSessionScope();
     try {
-      await fetchWithAuth(API_ENDPOINTS.user.revoke, {
-        method: "POST",
+      await withLocalSessionLock(async () => {
+        if (getSessionScope() !== scope) return;
+        const response = await fetch(API_ENDPOINTS.user.revoke, { method: "POST" });
+        if (!response.ok) throw new Error("Account revocation failed");
       });
     } catch (error) {
       log.error("Account revoke failed:", error);
     } finally {
-      removeSessionFromStorage();
+      if (getSessionScope() === scope) removeSessionFromStorage();
     }
 
     return { error: null };
@@ -280,12 +284,17 @@ export const authService = {
 
   signOut: async (): Promise<{ error: null }> => {
     authFlowState.beginExplicitLogout();
+    const scope = getSessionScope();
     try {
-      const response = await fetchWithAuth(API_ENDPOINTS.user.logout, {
-        method: "POST",
-        keepalive: true,
+      const response = await withLocalSessionLock(async () => {
+        if (getSessionScope() !== scope) return null;
+        return fetch(API_ENDPOINTS.user.logout, { method: "POST", keepalive: true });
       });
-      const data = await response.json().catch(() => null);
+      const data = await response?.json().catch(() => null);
+      if (getSessionScope() !== scope) {
+        authFlowState.endExplicitLogout();
+        return { error: null };
+      }
       const casLogoutUrl = data?.data?.cas_logout_url;
 
       // server.js clears HttpOnly cookies; clear local user info
@@ -300,7 +309,7 @@ export const authService = {
     } catch (error) {
       log.error("Logout failed:", error);
 
-      removeSessionFromStorage();
+      if (getSessionScope() === scope) removeSessionFromStorage();
       authFlowState.endExplicitLogout();
 
       return { error: null };

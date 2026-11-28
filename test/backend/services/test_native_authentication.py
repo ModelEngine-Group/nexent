@@ -39,7 +39,7 @@ async def test_native_signin_checks_password_and_local_membership(monkeypatch, a
     monkeypatch.setattr(
         auth,
         "build_token_response",
-        lambda uid: {"access_token": "signed", "refresh_token": ""},
+        lambda uid, version: {"access_token": "signed", "refresh_token": "new-refresh"},
     )
     data = await auth.signin_user("USER@example.com", "Password123")
     assert data["data"]["user"] == {
@@ -48,7 +48,7 @@ async def test_native_signin_checks_password_and_local_membership(monkeypatch, a
         "role": "DEV",
         "roles": ["DEV"],
     }
-    assert data["data"]["session"]["refresh_token"] == ""
+    assert data["data"]["session"]["refresh_token"] == "new-refresh"
     with pytest.raises(UnauthorizedError):
         await auth.signin_user("user@example.com", "wrong")
     monkeypatch.setattr(auth, "get_user_tenant_by_user_id", lambda uid: None)
@@ -139,9 +139,12 @@ def test_jwt_signature_type_and_account_revision(monkeypatch, account):
 
 
 @pytest.mark.asyncio
-async def test_legacy_refresh_never_mints_a_local_jwt():
+async def test_legacy_refresh_never_mints_a_local_jwt(monkeypatch):
+    from management.services.permission.identity import local_session
+
+    monkeypatch.setattr(local_session, "JWT_SECRET", "test-jwt-signing-key-with-32-bytes")
     with pytest.raises(UnauthorizedError):
-        await auth.refresh_user_token("Bearer old", "old-refresh")
+        await auth.refresh_user_token("Bearer old", "old-refresh".ljust(40, "x"))
 
 
 def test_password_policy_enforces_hashing_byte_limit():
