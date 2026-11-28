@@ -148,6 +148,8 @@ def test_native_http_identity_password_and_api_keys(runtime):
 def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, caplog):
     from contracts.constants import environment
     from sqlalchemy import text
+    from gateway.identity.protocol import IdentityError
+    from gateway.security.database_provider import DatabaseIdentityProvider
     from infrastructure.rdb.client import get_db_session
     from infrastructure.rdb.identity import IdentityRepository
 
@@ -235,8 +237,17 @@ def test_native_http_rotates_once_and_replays_only_the_same_request(runtime, cap
             password=environment.NEXENT_POSTGRES_PASSWORD,
         )
         try:
-            snapshot = await repo.snapshot({"kind": "session", "user_id": claims["sub"], "session_id": claims["sid"]})
-            return snapshot["session_active"]
+            provider = DatabaseIdentityProvider(repo)
+            try:
+                await provider({
+                    "kind": "session",
+                    "user_id": claims["sub"],
+                    "token_version": claims["ver"],
+                    "session_id": claims["sid"],
+                })
+            except IdentityError:
+                return False
+            return True
         finally:
             await repo.close()
 

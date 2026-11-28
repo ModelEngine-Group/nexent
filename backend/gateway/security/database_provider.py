@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Gateway identity policy over an infrastructure database snapshot."""
 
+from contracts.identity_session import is_local_session_id
 from gateway.identity.protocol import IdentityError
 from gateway.security.management_client import IdentityUnavailable
 from infrastructure.rdb.identity import IdentityRejected, IdentityStoreUnavailable
@@ -11,14 +12,15 @@ class DatabaseIdentityProvider:
         self.repository = repository
 
     async def __call__(self, query):
+        kind = query.get("kind")
+        local_session = kind == "session" and is_local_session_id(query.get("session_id"))
         try:
-            snapshot = await self.repository.snapshot(query)
+            snapshot = await self.repository.snapshot(query, local_session=local_session)
         except IdentityRejected:
             raise IdentityError("Invalid or revoked credentials") from None
         except IdentityStoreUnavailable:
             raise IdentityUnavailable("Identity database unavailable") from None
         account, membership = snapshot["account"], snapshot["membership"]
-        kind = query["kind"]
         if kind == "session" and (type(query.get("token_version")) is not int
                                   or query["token_version"] != account["token_version"]
                                   or not snapshot["session_active"]):

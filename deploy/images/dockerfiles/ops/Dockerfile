@@ -67,6 +67,7 @@ COPY \
     backend/management/db/identity/account.py \
     backend/management/db/identity/cas_session.py \
     backend/management/db/identity/conversation_agent_history_db.py \
+    backend/management/db/identity/local_session.py \
     backend/management/db/identity/membership.py \
     backend/management/db/identity/models.py \
     backend/management/db/identity/role_permission.py \
