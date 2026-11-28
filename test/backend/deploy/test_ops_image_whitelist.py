@@ -32,7 +32,6 @@ sys.path.insert(0, str(root / "sdk"))
 
 import backend.http.ops_service
 import backend.http.server.northbound
-import backend.http.server.security_audit
 import management.services.permission.identity.northbound
 import ops.api.monitoring
 import ops.api.northbound_envelope

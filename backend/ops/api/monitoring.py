@@ -194,29 +194,6 @@ async def nb_action_guard(request: Request,
         await check_and_consume_rate_limit(principal.identity.tenant_id)
 
 
-def _audit_outcome(status_code: int) -> str:
-    return "denied" if status_code in (401, 403) else "failed"
-
-
-def _nb_audit(principal: OpsPrincipal, request: Request, capability: str, outcome: str,
-              target: dict) -> None:
-    """Record one northbound action audit event; fail-open like the gate policy hook."""
-    if principal.kind != "api_key":
-        return
-    try:
-        from backend.http.server.security_audit import record_security_event
-
-        record_security_event(
-            f"northbound_{capability.replace('.', '_')}",
-            request=request, user_id=principal.identity.user_id, tenant_id=principal.identity.tenant_id,
-            details={"capability": capability, "token_id": principal.identity.token_id, "target": target,
-                     "outcome": outcome, "request_id": get_request_id(request)},
-            result=outcome,
-        )
-    except Exception:
-        logger.warning("Northbound monitoring audit write failed capability=%s", capability)
-
-
 def ops_tenant(scope: Annotated[Selection, Depends(selection)],
                principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
     return ops_scoped_tenant(principal, scope.tenant_id)
@@ -506,37 +483,31 @@ def _refresh_key(kind="model"):
 def refresh_models(request: Request, scope: RefreshSelection,
                    _guard: Annotated[None, Depends(nb_action_guard)],
                    principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
-    target = {"start_date": scope.start_date.isoformat(), "end_date": scope.end_date.isoformat()}
+    tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
+    if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
+        raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
+    service = getattr(request.app.state, "monitoring", None)
+    if service is None or not JWT_SECRET:
+        raise HTTPException(503, "Model monitoring refresh is unavailable")
     try:
-        tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
-        if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
-            raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
-        service = getattr(request.app.state, "monitoring", None)
-        if service is None or not JWT_SECRET:
-            raise HTTPException(503, "Model monitoring refresh is unavailable")
-        try:
-            rows = service.store.states(tenant, "model", scope.start_date, scope.end_date)
-        except Exception:
-            raise HTTPException(503, "Model monitoring refresh is temporarily unavailable") from None
-        revisions = {row["statistic_date"].isoformat(): row["source_revision"] for row in rows}
-        dates = [day.isoformat() for day in days_inclusive(scope.start_date, scope.end_date)]
-        missing_dates = [day for day in dates if day not in revisions]
-        if missing_dates:
-            raise HTTPException(409, {"code": "MONITORING_DATES_UNCOVERED", "missing_dates": missing_dates})
-        now = datetime.now(timezone.utc)
-        # Keep the path-sized token bounded even with a full year of PostgreSQL BIGINT revisions.
-        revision_bytes = pack(f"!{len(dates)}Q", *(revisions[day] for day in dates))
-        token = jwt.encode({
-            "aud": "ops-model-monitoring-refresh", "tenant": tenant,
-            "start": scope.start_date.isoformat(), "end": scope.end_date.isoformat(),
-            "revisions": {},  # An older worker can report the target as uncovered during a rollout.
-            "revision_bytes": urlsafe_b64encode(revision_bytes).decode("ascii"),
-            "requested": now.timestamp(), "exp": now + timedelta(minutes=10),
-        }, _refresh_key("model"), algorithm="HS256")
-    except HTTPException as exc:
-        _nb_audit(principal, request, "monitoring.models.refresh", _audit_outcome(exc.status_code), target)
-        raise
-    _nb_audit(principal, request, "monitoring.models.refresh", "success", {**target, "tenant_id": tenant})
+        rows = service.store.states(tenant, "model", scope.start_date, scope.end_date)
+    except Exception:
+        raise HTTPException(503, "Model monitoring refresh is temporarily unavailable") from None
+    revisions = {row["statistic_date"].isoformat(): row["source_revision"] for row in rows}
+    dates = [day.isoformat() for day in days_inclusive(scope.start_date, scope.end_date)]
+    missing_dates = [day for day in dates if day not in revisions]
+    if missing_dates:
+        raise HTTPException(409, {"code": "MONITORING_DATES_UNCOVERED", "missing_dates": missing_dates})
+    now = datetime.now(timezone.utc)
+    # Keep the path-sized token bounded even with a full year of PostgreSQL BIGINT revisions.
+    revision_bytes = pack(f"!{len(dates)}Q", *(revisions[day] for day in dates))
+    token = jwt.encode({
+        "aud": "ops-model-monitoring-refresh", "tenant": tenant,
+        "start": scope.start_date.isoformat(), "end": scope.end_date.isoformat(),
+        "revisions": {},  # An older worker can report the target as uncovered during a rollout.
+        "revision_bytes": urlsafe_b64encode(revision_bytes).decode("ascii"),
+        "requested": now.timestamp(), "exp": now + timedelta(minutes=10),
+    }, _refresh_key("model"), algorithm="HS256")
     return {"data": {"refresh_id": token, "status": "queued"}}
 
 
@@ -587,35 +558,29 @@ def model_refresh_status(request: Request, refresh_id: str,
 def refresh_skills(request: Request, scope: RefreshSelection,
                    _guard: Annotated[None, Depends(nb_action_guard)],
                    principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
-    target = {"start_date": scope.start_date.isoformat(), "end_date": scope.end_date.isoformat()}
+    tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
+    if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
+        raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
+    service = getattr(request.app.state, "monitoring", None)
+    if service is None or not JWT_SECRET:
+        raise HTTPException(503, "Skill monitoring refresh is unavailable")
     try:
-        tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
-        if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
-            raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
-        service = getattr(request.app.state, "monitoring", None)
-        if service is None or not JWT_SECRET:
-            raise HTTPException(503, "Skill monitoring refresh is unavailable")
-        try:
-            rows = service.store.states(tenant, "skill", scope.start_date, scope.end_date)
-        except Exception:
-            raise HTTPException(503, "Skill monitoring refresh is temporarily unavailable") from None
-        revisions = {row["statistic_date"].isoformat(): row["source_revision"] for row in rows}
-        dates = [day.isoformat() for day in days_inclusive(scope.start_date, scope.end_date)]
-        missing_dates = [day for day in dates if day not in revisions]
-        if missing_dates:
-            raise HTTPException(409, {"code": "MONITORING_DATES_UNCOVERED", "missing_dates": missing_dates})
-        now = datetime.now(timezone.utc)
-        revision_bytes = pack(f"!{len(dates)}Q", *(revisions[day] for day in dates))
-        token = jwt.encode({
-            "aud": "ops-skill-monitoring-refresh", "tenant": tenant,
-            "start": scope.start_date.isoformat(), "end": scope.end_date.isoformat(),
-            "revisions": {}, "revision_bytes": urlsafe_b64encode(revision_bytes).decode("ascii"),
-            "requested": now.timestamp(), "exp": now + timedelta(minutes=10),
-        }, _refresh_key("skill"), algorithm="HS256")
-    except HTTPException as exc:
-        _nb_audit(principal, request, "monitoring.skills.refresh", _audit_outcome(exc.status_code), target)
-        raise
-    _nb_audit(principal, request, "monitoring.skills.refresh", "success", {**target, "tenant_id": tenant})
+        rows = service.store.states(tenant, "skill", scope.start_date, scope.end_date)
+    except Exception:
+        raise HTTPException(503, "Skill monitoring refresh is temporarily unavailable") from None
+    revisions = {row["statistic_date"].isoformat(): row["source_revision"] for row in rows}
+    dates = [day.isoformat() for day in days_inclusive(scope.start_date, scope.end_date)]
+    missing_dates = [day for day in dates if day not in revisions]
+    if missing_dates:
+        raise HTTPException(409, {"code": "MONITORING_DATES_UNCOVERED", "missing_dates": missing_dates})
+    now = datetime.now(timezone.utc)
+    revision_bytes = pack(f"!{len(dates)}Q", *(revisions[day] for day in dates))
+    token = jwt.encode({
+        "aud": "ops-skill-monitoring-refresh", "tenant": tenant,
+        "start": scope.start_date.isoformat(), "end": scope.end_date.isoformat(),
+        "revisions": {}, "revision_bytes": urlsafe_b64encode(revision_bytes).decode("ascii"),
+        "requested": now.timestamp(), "exp": now + timedelta(minutes=10),
+    }, _refresh_key("skill"), algorithm="HS256")
     return {"data": {"refresh_id": token, "status": "queued"}}
 
 
@@ -801,36 +766,30 @@ def _tool_refresh_key():
 def refresh_mcp_tools(request: Request, scope: RefreshSelection,
                       _guard: Annotated[None, Depends(nb_action_guard)],
                       principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
-    target = {"start_date": scope.start_date.isoformat(), "end_date": scope.end_date.isoformat()}
+    tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
+    if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
+        raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
+    service = getattr(request.app.state, "monitoring", None)
+    if service is None or not JWT_SECRET:
+        raise HTTPException(503, "MCP tool monitoring refresh is unavailable")
     try:
-        tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
-        if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
-            raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
-        service = getattr(request.app.state, "monitoring", None)
-        if service is None or not JWT_SECRET:
-            raise HTTPException(503, "MCP tool monitoring refresh is unavailable")
-        try:
-            rows = service.store.states(tenant, "mcp_tool", scope.start_date, scope.end_date)
-        except Exception:
-            raise HTTPException(503, "MCP tool monitoring refresh is temporarily unavailable") from None
-        revisions = {row["statistic_date"].isoformat(): row["source_revision"] for row in rows}
-        dates = [day.isoformat() for day in days_inclusive(scope.start_date, scope.end_date)]
-        missing_dates = [day for day in dates if day not in revisions]
-        if missing_dates:
-            raise HTTPException(409, {"code": "MONITORING_DATES_UNCOVERED", "missing_dates": missing_dates})
-        now = datetime.now(timezone.utc)
-        revision_bytes = pack(f"!{len(dates)}Q", *(revisions[day] for day in dates))
-        token = jwt.encode({
-            "aud": "ops-mcp-tool-monitoring-refresh", "tenant": tenant,
-            "start": scope.start_date.isoformat(), "end": scope.end_date.isoformat(),
-            "revisions": {},  # An older worker can report the target as uncovered during a rollout.
-            "revision_bytes": urlsafe_b64encode(revision_bytes).decode("ascii"),
-            "requested": now.timestamp(), "exp": now + timedelta(minutes=10),
-        }, _tool_refresh_key(), algorithm="HS256")
-    except HTTPException as exc:
-        _nb_audit(principal, request, "monitoring.mcp_tools.refresh", _audit_outcome(exc.status_code), target)
-        raise
-    _nb_audit(principal, request, "monitoring.mcp_tools.refresh", "success", {**target, "tenant_id": tenant})
+        rows = service.store.states(tenant, "mcp_tool", scope.start_date, scope.end_date)
+    except Exception:
+        raise HTTPException(503, "MCP tool monitoring refresh is temporarily unavailable") from None
+    revisions = {row["statistic_date"].isoformat(): row["source_revision"] for row in rows}
+    dates = [day.isoformat() for day in days_inclusive(scope.start_date, scope.end_date)]
+    missing_dates = [day for day in dates if day not in revisions]
+    if missing_dates:
+        raise HTTPException(409, {"code": "MONITORING_DATES_UNCOVERED", "missing_dates": missing_dates})
+    now = datetime.now(timezone.utc)
+    revision_bytes = pack(f"!{len(dates)}Q", *(revisions[day] for day in dates))
+    token = jwt.encode({
+        "aud": "ops-mcp-tool-monitoring-refresh", "tenant": tenant,
+        "start": scope.start_date.isoformat(), "end": scope.end_date.isoformat(),
+        "revisions": {},  # An older worker can report the target as uncovered during a rollout.
+        "revision_bytes": urlsafe_b64encode(revision_bytes).decode("ascii"),
+        "requested": now.timestamp(), "exp": now + timedelta(minutes=10),
+    }, _tool_refresh_key(), algorithm="HS256")
     return {"data": {"refresh_id": token, "status": "queued"}}
 
 

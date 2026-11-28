@@ -202,8 +202,7 @@ sequenceDiagram
   租户等于身份租户，不匹配按 404 处理（与"不存在"不可区分，防跨租户探测）。
 - **动作防护**：3 个 refresh POST 在 `/nb` 通道附加每租户限流
   （共享层 `check_and_consume_rate_limit`，超限 429
-  三段式错误体）与审计（`record_security_event`，事件名
-  `northbound_monitoring_*_refresh`，失败/拒绝也留痕，fail-open）。查询门控不限流
+  三段式错误体）；不记审计事件（评审决定）。查询门控不限流
   （与 `automations.list` 门控惯例一致）。
 - **响应契约**：`NorthboundEnvelopeMiddleware`（`ops/api/northbound_envelope.py`）只对
   `/nb` 路径生效：2xx 包成 `{message, data, requestId}`（`data` 为内部体原样，含其 `data`
@@ -224,13 +223,13 @@ sequenceDiagram
 | monitoring.models.summary | GET | models/summary | 模型监控汇总 |
 | monitoring.models.rankings | GET | models/rankings | 模型 Top 5 |
 | monitoring.models.trends | GET | models/trends | 模型趋势 |
-| monitoring.models.refresh | POST | models/refresh | 触发重算（202，审计+限流） |
+| monitoring.models.refresh | POST | models/refresh | 触发重算（202，限流） |
 | monitoring.models.refresh_status | GET | models/refreshes/{refresh_id} | 重算状态 |
 | monitoring.skills.list | GET | skills | 技能监控列表 |
 | monitoring.skills.summary | GET | skills/summary | 技能监控汇总 |
 | monitoring.skills.rankings | GET | skills/rankings | 技能 Top 5 |
 | monitoring.skills.trends | GET | skills/trends | 技能趋势 |
-| monitoring.skills.refresh | POST | skills/refresh | 触发重算（202，审计+限流） |
+| monitoring.skills.refresh | POST | skills/refresh | 触发重算（202，限流） |
 | monitoring.skills.refresh_status | GET | skills/refreshes/{refresh_id} | 重算状态 |
 | monitoring.agents.list | GET | agents | Agent 监控列表 |
 | monitoring.agents.summary | GET | agents/summary | Agent 监控汇总（含 Token 用量） |
@@ -242,7 +241,7 @@ sequenceDiagram
 | monitoring.mcp_tools.trends | GET | mcp-tools/trends | MCP 调用趋势 |
 | monitoring.mcp_tools.catalog | GET | mcp-tools/catalog | MCP 服务目录（筛选项） |
 | monitoring.mcp_tools.overview | GET | mcp-tools/overview | 平台总览 |
-| monitoring.mcp_tools.refresh | POST | mcp-tools/refresh | 触发重算（202，审计+限流） |
+| monitoring.mcp_tools.refresh | POST | mcp-tools/refresh | 触发重算（202，限流） |
 | monitoring.mcp_tools.refresh_status | GET | mcp-tools/refreshes/{refresh_id} | 重算状态 |
 
 ## 4. 请求与响应示例
@@ -267,7 +266,7 @@ curl -X GET "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/summary?
 }
 ```
 
-触发重算（动作类，受限流与审计约束）：
+触发重算（动作类，受限流约束）：
 
 ```bash
 curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh" \
@@ -302,7 +301,7 @@ curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh
 
 | 文件 | 变更 |
 | --- | --- |
-| `backend/ops/api/monitoring.py` | `OpsPrincipal`/`ops_principal`/`ops_scoped_tenant`/`nb_action_guard`/`_nb_audit`；11 个 handler 与 `_read_agent_views` 换用路径感知身份；响应体与校验零改动；`/nb` 通道读 `trusted_identity`，对 management 的导入保持 develop 原样（仅 `authenticate`，服务 session 通道） |
+| `backend/ops/api/monitoring.py` | `OpsPrincipal`/`ops_principal`/`ops_scoped_tenant`/`nb_action_guard`；11 个 handler 与 `_read_agent_views` 换用路径感知身份；响应体与校验零改动；`/nb` 通道读 `trusted_identity`，对 management 的导入保持 develop 原样（仅 `authenticate`，服务 session 通道） |
 | `backend/ops/api/northbound_envelope.py` | 新增：`/nb` 响应包装中间件 |
 | `backend/http/server/northbound.py` | 新增（共享 Web 层）：路径策略、统一信封、每租户限流、`record_api_key_usage` 记账编排 |
 | `backend/http/server/security_audit.py` | 新增（共享 Web 层）：`[SEC_AUDIT]` 安全审计（自 management 下沉） |
@@ -312,7 +311,7 @@ curl -X POST "https://your-nexent-domain.com/nb/ops/v1/monitoring/models/refresh
 | `backend/ops/api/application.py` | 注册中间件；`ops_router` 以 `/nb` 前缀二次挂载 |
 | `deploy/images/dockerfiles/ops/Dockerfile` | 白名单扩展：共享 Web 层两个新模块 + `infrastructure/redis` + `infrastructure/rdb/token_usage.py` |
 | `backend/gateway/exposure/registry.json` | 手工新增 24 行（`capability_id`、`target=ops`、`credential_kinds=["api_key"]`），`--check` 通过 |
-| `test/backend/ops/test_northbound_monitoring_reuse.py` | UT：信封、租户锁、令牌绑定、审计、限流、错误翻译、session 对照、防漂移、接口契约扫描（24 路由）、记账同一性与提交链路、无签名身份 401 |
+| `test/backend/ops/test_northbound_monitoring_reuse.py` | UT：信封、租户锁、令牌绑定、限流、错误翻译、session 对照、防漂移、接口契约扫描（24 路由）、记账同一性与提交链路、无签名身份 401 |
 | `test/backend/ops/test_ops_management_import_surface.py` | 新增：Ops→management 导入面 ⊆ develop 基线防护 |
 | `test/backend/gateway/test_exposure.py` | 新增 `/nb/ops` 行断言与能力急停测试 |
 | `test/backend/gateway/test_model_monitoring.py` | 新增网关↔Ops 北向集成测试（D3 级证据，24 路由全扫） |

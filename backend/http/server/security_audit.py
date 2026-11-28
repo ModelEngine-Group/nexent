@@ -15,9 +15,10 @@ never break the underlying business flow. Secrets (passwords, access keys,
 tokens) must never be passed in; call sites only provide identifiers and
 non-sensitive context.
 
-Moved to the shared Web layer (from ``management/services/monitor/audit.py``)
-because the ops ``/nb`` mirror records the same security events; the old
-module re-exports these names so existing management call sites keep working.
+Moved to the shared Web layer (from ``management/services/monitor/audit.py``);
+the old module re-exports these names so existing management call sites keep
+working. Management is the current consumer; the logger stays in the shared
+layer so any service exposing /nb routes can record the same events.
 """
 
 import json

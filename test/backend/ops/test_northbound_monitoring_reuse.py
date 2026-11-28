@@ -217,21 +217,6 @@ def test_nb_refresh_status_resolves_own_tenant_tokens(nb_client):
     assert response.json()["data"]["data"]["status"] == "completed"
 
 
-def test_nb_refresh_records_audit_for_success_and_failure(nb_client, monkeypatch):
-    client, store, identity = nb_client
-    events = []
-    monkeypatch.setattr("backend.http.server.security_audit.record_security_event",
-                        lambda event, **kwargs: events.append((event, kwargs.get("result"))))
-    _nb_refresh_token(client)
-    assert events == [("northbound_monitoring_models_refresh", "success")]
-
-    events.clear()
-    store.states.side_effect = RuntimeError("offline")
-    failed = _nb_refresh_token(client)
-    assert failed.status_code == 503
-    assert events == [("northbound_monitoring_models_refresh", "failed")]
-
-
 def test_nb_refresh_actions_are_rate_limited_per_tenant(nb_client, monkeypatch):
     client, _, _ = nb_client
 
@@ -638,19 +623,6 @@ def test_nb_lane_rejects_an_incomplete_gateway_identity(nb_client, monkeypatch):
         assert response.status_code == 401
     finally:
         client.app.dependency_overrides.pop(ops_principal, None)
-
-
-def test_nb_refresh_survives_an_audit_writer_failure(nb_client, monkeypatch):
-    """The audit hook is fail-open: a broken writer never fails the action."""
-    client, store, _ = nb_client
-
-    def broken(*_args, **_kwargs):
-        raise RuntimeError("audit store down")
-
-    monkeypatch.setattr("backend.http.server.security_audit.record_security_event", broken)
-    response = _nb_refresh_token(client)
-    assert response.status_code == 202
-    assert response.json()["data"]["data"]["status"] == "queued"
 
 
 def test_nb_refresh_rejects_an_invalid_date_range(nb_client):
