@@ -102,7 +102,6 @@ from management.services.model.reasoning import (
 from management.services.permission.identity.session import authenticate, get_current_user_id
 from permissions.depends import require
 from permissions.models import CurrentUser
-from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
 from nexent.core.concurrency import run_blocking
 from management.db.model.repository import get_model_by_model_id
 from management.services.monitor.audit import record_security_event
@@ -209,6 +208,16 @@ def _require_manage_scope(current_user: CurrentUser, target_tenant_id: str) -> N
     resolve_tenant_scope(
         current_user, target_tenant_id, denied_detail="Tenant admins may only manage models of their own tenant",
     )
+
+
+def _provider_discovery_http_error(error: ModelProviderError) -> HTTPException:
+    """Reserve HTTP 401 for failures authenticating to Nexent."""
+    if error.upstream_status == HTTPStatus.UNAUTHORIZED:
+        return HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail="Model provider authentication failed. Check the model API key.",
+        )
+    return HTTPException(status_code=error.upstream_status, detail=error.message)
 
 
 def _catalog_unavailable_response(status_code: HTTPStatus, **extra: Any) -> JSONResponse:
@@ -472,7 +481,7 @@ async def create_provider_model(
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ModelProviderError as exc:
-        raise HTTPException(status_code=exc.upstream_status, detail=exc.message) from exc
+        raise _provider_discovery_http_error(exc) from exc
     except HTTPException:
         # Surface provider failures (e.g. 502 connection_failed) with the
         # status the service layer classified, instead of flattening every
@@ -1242,7 +1251,7 @@ async def manage_create_provider_models(
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ModelProviderError as exc:
-        raise HTTPException(status_code=exc.upstream_status, detail=exc.message) from exc
+        raise _provider_discovery_http_error(exc) from exc
     except HTTPException:
         # Same contract as /provider/create: keep the classified provider
         # status (e.g. 502) instead of flattening it to 500.
