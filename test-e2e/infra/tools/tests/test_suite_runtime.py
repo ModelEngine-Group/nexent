@@ -246,7 +246,9 @@ class SuiteTests(unittest.TestCase):
             with patch.object(suite, "machine_environment", return_value={}), patch.object(suite, "run_one") as run:
                 suite.worker(Path(root), Path(root), record, directory, {})
                 run.assert_not_called()
-                self.assertEqual(json.loads((directory / "receipt.json").read_text())["result"], "BLOCKED")
+                receipt = json.loads((directory / "receipt.json").read_text())
+                self.assertEqual(receipt["result"], "BLOCKED")
+                self.assertEqual(receipt["blocked_phase"], "CASE_PREPARATION")
 
     def test_preparation_needs_no_hash_approval(self):
         for implementation_hash in ("sha256:" + "a" * 64, "sha256:" + "b" * 64):
@@ -437,6 +439,64 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(summary["counts"], {"BLOCKED": 1})
             self.assertTrue(summary["execution_complete"])
             self.assertEqual(json.loads((batch / "d0/static-assets.json").read_text())["assets"][0]["destination"], "MISSING")
+            diagnostic = json.loads((batch / "cases/A-001/block-diagnostic.json").read_text())
+            self.assertEqual(diagnostic["phase"], "STATIC_ASSET_PREFLIGHT")
+            self.assertFalse(diagnostic["worker_started"])
+            self.assertIn("AUD-001", diagnostic["reason"])
+            self.assertIn("d0/static-assets.json", diagnostic["related_records"])
+
+    def test_blocked_case_receipts_reach_the_same_batch_journal(self):
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            directory = home / "batch"
+            records = [
+                {"case_id": "P-001", "stage": "D3", "status": "blocked", "automation": "automated", "execution": None},
+                {"case_id": "P-002", "stage": "D3", "status": "active", "automation": "manual", "execution": None},
+                {"case_id": "P-003", "stage": "D3", "status": "active", "execution": {"test": True}},
+                {"case_id": "P-004", "stage": "D3", "status": "retired", "execution": None},
+            ]
+            definition = home / "test-e2e/cases/P-001/case.yaml"
+            definition.parent.mkdir(parents=True)
+            definition.write_text("case:\n  source:\n    blocked_reason: Missing fixture with demo-secret\n")
+            notifications = []
+
+            def command_result(command, cwd, env, log, timeout):
+                if "--case" in command:
+                    self.assertEqual(command[command.index("--case") + 1], "P-003")
+                    case_dir = directory / "cases/P-003"
+                    save(case_dir / "runtime/preparation-failure.json", {"result": "BLOCKED_BY_DEPENDENCY"})
+                    save(case_dir / "receipt.json", {"case_id": "P-003", "stage": "D3",
+                         "result": "BLOCKED_BY_DEPENDENCY", "reason": "Dependency unavailable",
+                         "blocked_phase": "CASE_PREPARATION"})
+                    return 1
+                return 0
+
+            def on_result(row):
+                if row["result"] in suite.BLOCKED_RESULTS:
+                    receipt = f"cases/{row['case_id']}/block-diagnostic.json"
+                    self.assertIn(receipt, row["evidence"])
+                    notifications.append(json.loads((directory / receipt).read_text()))
+
+            with patch.object(suite, "machine_environment", return_value={"DEMO_TOKEN": "demo-secret"}), \
+                 patch.object(suite, "fingerprint", return_value={"head": "test"}), \
+                 patch.object(suite, "static_requirements", return_value=set()), \
+                 patch.object(suite, "static_inventory", return_value=[]), \
+                 patch.object(suite, "logged", side_effect=command_result):
+                self.assertEqual(suite._execute(home, home, records, {"case_timeout_seconds": 10},
+                                               directory=directory, on_result=on_result), 1)
+            planned, manual, preparation = notifications
+            self.assertEqual(planned["phase"], "CASE_PLAN")
+            self.assertEqual(planned["related_records"], ["plan.json"])
+            self.assertIn("Missing fixture with [REDACTED]", planned["reason"])
+            self.assertFalse(planned["worker_started"])
+            self.assertIn("Manual case", manual["reason"])
+            self.assertEqual(preparation["phase"], "CASE_PREPARATION")
+            self.assertTrue(preparation["worker_started"])
+            self.assertIn("cases/P-003/runtime/preparation-failure.json", preparation["related_records"])
+            self.assertFalse((directory / "cases/P-004").exists())
+            journal = [json.loads(row) for row in (directory / "results.journal.jsonl").read_text().splitlines()]
+            self.assertEqual([row["result"] for row in journal],
+                             ["BLOCKED", "BLOCKED", "BLOCKED_BY_DEPENDENCY", "RETIRED"])
 
 
 if __name__ == "__main__":

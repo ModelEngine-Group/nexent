@@ -226,6 +226,9 @@ it("remembers server conversation IDs and refreshes the shared history list", as
     onId?.("23");
   });
   expect(state.onId).toHaveBeenLastCalledWith("23");
+  expect(state.chat.mock.calls.at(-1)?.[0]).toMatchObject({
+    modelPreferenceConversationId: 23,
+  });
   await act(send);
   expect(state.run.mock.calls.at(-1)?.[0].runConfig?.custom?.threadId).toBe(
     "23"

@@ -71,32 +71,39 @@ def test_global_core_real_protocol(monkeypatch, protocol, mode):
         events = [event for chunk in output for event in parser.process(chunk)] + parser.flush()
         assert "<code>print(1)</code>" in "".join(event.get("content", "") for event in events if event["type"] == "skill_body")
         assert "".join(event.get("content", "") for event in events if event["type"] == "file_content").strip() == "print(1)"
-        _assert_creator_history(monkeypatch, info, output)
+        _assert_creator_history(monkeypatch, output)
     else:
         assert "SPIKE_FINAL_RESULT_5" in json.dumps(output)
 
 
-def _assert_creator_history(monkeypatch, info, output):
+def _assert_creator_history(monkeypatch, output):
     from unittest.mock import AsyncMock
     from sqlalchemy import update
+    from starlette.responses import StreamingResponse
     from jiuwen_output_runtime import context_database
-    from contracts.agent import NL2SkillRunRequest
+    from contracts.agentos import PreparedSkillCreatorRun
     from infrastructure.rdb.client import get_db_session
     from management.db.models import ConversationMessageUnit
     from management.db.conversation.repository import create_conversation, get_conversation_history
     from management.services.conversation.creation_history import persist_creation_stream
     from management.services.conversation.service import get_conversation_history_service
-    from services import nl2skill_service
+    from management.services.skill import creation
 
-    async def replay(*args, **kwargs):
+    async def replay():
         for event in output:
-            yield json.dumps(event)
+            yield f"data: {json.dumps(event)}\n\n"
+        yield "event: agentos_execution_complete\ndata: {}\n\n"
 
-    monkeypatch.setattr(nl2skill_service, "build_nl2skill_run_info", AsyncMock(return_value=info))
-    monkeypatch.setattr(nl2skill_service, "agent_run", replay)
+    monkeypatch.setattr(creation, "forward_creator_run", AsyncMock(return_value=StreamingResponse(replay())))
+    payload = PreparedSkillCreatorRun.model_validate({
+        "mode": "nl2skill", "run_id": "a" * 32,
+        "input": {"query": "Create"}, "language": "en",
+        "model": {"model_id": 1, "alias": "fixture", "revision": "v1"},
+        "input_budget": 8192, "context_window_tokens": 8192,
+    })
 
     async def persist(cid):
-        stream = await nl2skill_service.create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "spike-tenant", "en")
+        stream = creation.create_nl2skill_stream(payload, "owner", "spike-tenant")
         return [json.loads(event.removeprefix("data: ")) async for event in persist_creation_stream(
             stream, conversation_id=cid, assistant_index=1, user_id="owner", tenant_id="spike-tenant")]
 

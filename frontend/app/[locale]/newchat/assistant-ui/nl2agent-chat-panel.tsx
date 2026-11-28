@@ -373,6 +373,9 @@ export const Nl2AgentChatPanel = forwardRef<
           <div className="min-h-0 flex-1 [&>div]:!bg-transparent">
             <Thread
               agent={nl2AgentDisplay}
+              modelPreferenceConversationId={
+                selectedId ? Number(selectedId) : undefined
+              }
               generatedTitle={assistantTitle}
               chatMode="execution"
               {...modelControls}

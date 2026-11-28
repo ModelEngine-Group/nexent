@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: AUTO-CHAT-CONFIRM-20261126
+  change_type: bugfix
+  bug_id: AUTO-CHAT-CONFIRM-20261126
+  title: Confirm a scheduled task proposal through chat
+  description: Route an affirmative reply to the latest invitation for an owned draft to the existing confirmation service.
+  observed_behavior: A chat confirmation can elicit a success answer without a task, including when the model rephrases or appends a summary to the invitation.
+  expected_behavior: A direct affirmative reply to the uniquely pending draft persists the task and returns its ID. Intervening topics prevent chat confirmation. A repeat returns the persisted ID.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: PW-TASK-01 confirms only by button and does not exercise a follow-up chat message.
+  feature_contract_changed: true
+  affected_features:
+    existing: [F-129]
+    added: []
+    modified: [V5-PW-TASK-01]
+    retired: []
+  affected_cases:
+    existing: [AGT-054]
+    added: []
+    modified: [PW-TASK-01]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_automation_chat_confirmation.py
+    - test/backend/services/test_agent_automation_lifecycle.py
+    - test/backend/services/test_prepared_turn_admission_errors.py
+    - test/backend/services/test_agentos_automation_callback.py
+    - test/backend/services/test_agent_automation_tool_adapter.py
+    - test/backend/app/test_agentos_prepared_run.py
+    - test/backend/database/test_agent_automation_db.py
+    - test/backend/database/test_prepared_turn_resume.py
+    - frontend/tests/workbench/AutomationProposalConfirmation.test.tsx
+    - frontend/tests/workbench/AutomationResultExpansion.test.tsx
+    behaviors:
+    - Short replies use the prior card and its server-owned proposal linkage independently of assistant wording. Unrelated turns and ambiguous or unbound cards cannot create tasks.
+    - The model can classify more complex replies. Edit requests, denials, conditional replies and invalid model responses never authorize creation.
+    - Missing, ambiguous, expired and failed confirmations cannot produce a success receipt.
+    - Button and chat confirmation share atomic task creation and reuse the accepted receipt.
+    - Runtime journals a typed receipt only for a valid committed task ID.
+    reason: The browser regression proves user-visible behavior; isolated tests exercise failure and competing write paths deterministically.
+  notes: >
+    Uses the existing chat-automation-proposal-routing design and browser lifecycle.
+    The added browser steps own and delete their second run-scoped task.
+    The existing API scenario remains regression coverage for button confirmation. The structured linkage regression uses the existing D4 journey and focused database cases for valid cards with varied or absent prose and invalid linkage.

@@ -406,7 +406,10 @@ it("multi-agent select-all remains pending and cancel does not apply it", async 
       .every((card) => card.getAttribute("aria-selected") === "true")
   ).toBe(true);
   expect(confirm).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByText("关闭", { selector: "button" }));
+  const footer = screen
+    .getByRole("dialog")
+    .querySelector<HTMLElement>('[data-picker-part="footer"]')!;
+  await userEvent.click(within(footer).getByRole("button", { name: "关闭" }));
   expect(cancel).toHaveBeenCalledOnce();
   expect(confirm).not.toHaveBeenCalled();
 });

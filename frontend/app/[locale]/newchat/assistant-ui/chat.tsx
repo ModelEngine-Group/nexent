@@ -21,6 +21,7 @@ export interface ChatProps {
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
   conversationId?: number;
+  modelPreferenceConversationId?: number;
   isLoadingAgents?: boolean;
   selectedAgent: Agent | null;
   onAgentSelected?: (agent: Agent) => void;
@@ -77,6 +78,7 @@ export const Chat: FC<ChatProps> = ({
   welcomeTitle,
   welcomeSuggestions,
   conversationId,
+  modelPreferenceConversationId,
   isLoadingAgents = false,
   selectedAgent,
   onAgentSelected,
@@ -138,6 +140,7 @@ export const Chat: FC<ChatProps> = ({
           agent={workbenchPlaceholderAgent}
           generatedTitle={generatedTitle}
           conversationId={conversationId}
+          modelPreferenceConversationId={modelPreferenceConversationId}
           newChatDesign={newChatDesign}
           welcomeContent={landingContent}
           selectedModelId={selectedModelId}
@@ -176,6 +179,7 @@ export const Chat: FC<ChatProps> = ({
       welcomeTitle={welcomeTitle}
       welcomeSuggestions={welcomeSuggestions}
       conversationId={conversationId}
+      modelPreferenceConversationId={modelPreferenceConversationId}
       newChatDesign={newChatDesign}
       onBack={onBack}
       chatMode={chatMode}

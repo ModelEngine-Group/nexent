@@ -4,8 +4,6 @@
 import os
 from pathlib import Path
 import re
-import shutil
-import subprocess
 
 import pytest
 import yaml
@@ -26,7 +24,6 @@ def function(name):
     ("nexent/other", False, 1, False),
 ])
 def test_retirement_checks_ownership_and_never_deletes_images_or_volumes(identity, missing, expected, mutates):
-    executable = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
     script = """docker() {
       if [ "$1" = inspect ]; then
         [ "$FIXTURE_MISSING" = true ] && return 1
@@ -37,7 +34,8 @@ def test_retirement_checks_ownership_and_never_deletes_images_or_volumes(identit
     }
     """ + function("retire_legacy_northbound_container") + "\nretire_legacy_northbound_container"
     env = {**os.environ, "FIXTURE_IDENTITY": identity, "FIXTURE_MISSING": "true" if missing else "false"}
-    result = subprocess.run([executable, "-c", script], capture_output=True, text=True, encoding="utf-8", env=env, timeout=10)
+    env.pop("NEXENT_DEPLOY_LOG_FILE", None)
+    result = run_shell(script, env=env)
     assert result.returncode == expected
     commands = [line for line in result.stderr.splitlines() if line.startswith("docker:")]
     assert commands == (["docker:update --restart=no nexent-northbound", "docker:stop --time 30 nexent-northbound",

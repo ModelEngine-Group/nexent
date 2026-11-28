@@ -71,6 +71,12 @@ def detect_instruction_language(instruction: str) -> str:
     return LANGUAGE["ZH"] if re.search(r"[\u3400-\u9fff]", instruction) else LANGUAGE["EN"]
 
 
+PROPOSAL_CONFIRMATION_QUESTIONS = {
+    "zh": "定时任务草稿已生成。请核对任务和执行时间。要创建这个定时任务吗？可以回复「好」「可以」，或点击「创建任务」。",
+    "en": "The scheduled-task draft is ready. Review the task and schedule. Create this task? Reply “yes” or use the Create task button.",
+}
+
+
 def _normalize_model_output(content: str, fallback: str, max_length: int, source: str = "") -> str:
     normalized = re.sub(r"<think>[\s\S]*?</think>", "", content or "", flags=re.IGNORECASE).strip()
     normalized = normalized.removeprefix("```text").removeprefix("```markdown").strip("`\n ")

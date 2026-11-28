@@ -728,7 +728,7 @@ ensure_namespace() {
         echo "Namespace '$NAMESPACE' already exists."
     else
         echo "Creating namespace '$NAMESPACE'..."
-        kubectl create namespace "$NAMESPACE"
+        deployment_run_visible kubectl create namespace "$NAMESPACE"
     fi
 }
 
@@ -751,7 +751,7 @@ helm_application_chart() {
 }
 
 helm_upgrade_application_release() {
-    deployment_run_logged helm_application_chart "$1" "$2" upgrade --install
+    deployment_run_visible helm_application_chart "$1" "$2" upgrade --install
 }
 
 validate_application_release() {
@@ -850,7 +850,7 @@ stop_old_business_workloads() {
     done
     for deployment in "${business[@]}"; do
         [ -n "${existing[$deployment]:-}" ] || continue
-        deployment_run_logged kubectl scale "deployment/$deployment" -n "$NAMESPACE" --replicas=0 || return 1
+        deployment_run_visible kubectl scale "deployment/$deployment" -n "$NAMESPACE" --replicas=0 || return 1
     done
     for deployment in "${business[@]}"; do
         elapsed=0
@@ -883,7 +883,7 @@ bootstrap_job_failed() {
     local job="$1"
     deployment_run_logged kubectl logs -n "$NAMESPACE" "job/$job" --all-containers=true \
         --request-timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" >&2 || true
-    deployment_run_logged kubectl delete job "$job" -n "$NAMESPACE" --wait=true --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" >/dev/null || true
+    deployment_run_visible kubectl delete job "$job" -n "$NAMESPACE" --wait=true --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" || true
     deployment_error "Error: system Agent bootstrap failed. Business workloads remain paused."
     return 1
 }
@@ -920,7 +920,8 @@ run_system_agent_bootstrap() {
     require_runtime_deploy_lock || return 1
     sync_official_skills_to_workspace "$pod" || { bootstrap_job_failed "$job"; return 1; }
     require_runtime_deploy_lock || return 1
-    kubectl exec -n "$NAMESPACE" "$pod" -c nexent-config -- sh -c ': > /tmp/nexent-bootstrap-start' || { bootstrap_job_failed "$job"; return 1; }
+    deployment_run_visible kubectl exec -n "$NAMESPACE" "$pod" -c nexent-config -- \
+        sh -c ': > /tmp/nexent-bootstrap-start' || { bootstrap_job_failed "$job"; return 1; }
     elapsed=0
     while true; do
         status=$(kubectl get job "$job" -n "$NAMESPACE" -o 'jsonpath={.status.succeeded}:{.status.failed}') || { bootstrap_job_failed "$job"; return 1; }
@@ -1001,7 +1002,7 @@ deploy_application_release() {
                 require_runtime_shared_storage || return 1
             fi
             require_runtime_deploy_lock || return 1
-            deployment_run_logged helm_application_chart false "" upgrade || return 1
+            deployment_run_visible helm_application_chart false "" upgrade || return 1
             deployment_log "Waiting for the application workloads..."
             require_runtime_deploy_lock || return 1
             wait_for_nexent_ready || return 1
@@ -1040,7 +1041,7 @@ deploy_application_release() {
 }
 
 helm_upgrade_infrastructure_release() {
-    deployment_run_logged helm upgrade --install "$INFRASTRUCTURE_RELEASE_NAME" "$INFRASTRUCTURE_CHART_DIR" \
+    deployment_run_visible helm upgrade --install "$INFRASTRUCTURE_RELEASE_NAME" "$INFRASTRUCTURE_CHART_DIR" \
         --namespace "$NAMESPACE" \
         -f "$INFRASTRUCTURE_GENERATED_VALUES" \
         -f "$INFRASTRUCTURE_GENERATED_RUNTIME_VALUES" \
@@ -1050,7 +1051,7 @@ helm_upgrade_infrastructure_release() {
 
 wait_for_deployment_ready() {
     local deployment="$1"
-    deployment_run_logged kubectl rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
+    deployment_run_visible kubectl rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
 }
 
 release_scope_includes_infrastructure() {
@@ -1143,7 +1144,7 @@ sync_official_skills_to_workspace() {
         return 1
     }
 
-    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+    if ! deployment_run_visible kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
         set -e
         staging_dir="$1"
         target_dir="$2"
@@ -1162,14 +1163,14 @@ sync_official_skills_to_workspace() {
         return 1
     fi
 
-    if ! kubectl cp "$OFFICIAL_SKILLS_SOURCE_DIR/." \
+    if ! deployment_run_visible kubectl cp "$OFFICIAL_SKILLS_SOURCE_DIR/." \
         "$NAMESPACE/$config_pod:$staging_dir"; then
         kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
         echo "Error: failed to copy official skills to the workspace PVC."
         return 1
     fi
 
-    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+    if ! deployment_run_visible kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
         find "$1" -mindepth 1 -maxdepth 1 \( ! -type f -o ! -name "*.zip" \) -exec rm -rf {} +
         chmod 0755 "$1"
         chmod 0644 "$1"/*.zip
@@ -1193,7 +1194,7 @@ sync_official_skills_to_workspace() {
         return 1
     fi
 
-    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+    if ! deployment_run_visible kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
         set -e
         staging_dir="$1"
         target_dir="$2"
@@ -1320,7 +1321,7 @@ recreate_legacy_nexent_secret_for_helm_management() {
     managers=$(kubectl get secret nexent-secrets -n "$NAMESPACE" -o jsonpath='{range .metadata.managedFields[*]}{.manager}{"\n"}{end}' 2>/dev/null || true)
     if printf '%s\n' "$managers" | grep -qx 'kubectl-patch'; then
         echo "Recreating legacy nexent-secrets so Helm owns all Secret fields..."
-        kubectl delete secret nexent-secrets -n "$NAMESPACE"
+        deployment_run_visible kubectl delete secret nexent-secrets -n "$NAMESPACE"
     fi
 }
 
@@ -1459,7 +1460,7 @@ pull_mcp_image() {
         echo "Build or load it locally before using --image-source local-latest."
     else
         echo "MCP image not found locally, pulling..."
-        if deployment_run_logged docker pull "${mcp_image_name}"; then
+        if deployment_run_visible docker pull "${mcp_image_name}"; then
             echo "MCP image pulled successfully."
         else
             echo "Warning: Failed to pull MCP image, but deployment will continue."
@@ -1501,7 +1502,7 @@ pull_sandbox_image() {
         echo "Build or load it locally before using --image-source local-latest."
     else
         echo "Sandbox image not found locally, pulling..."
-        if deployment_run_logged docker pull "${sandbox_image_name}"; then
+        if deployment_run_visible docker pull "${sandbox_image_name}"; then
             echo "Sandbox image pulled successfully."
         else
             echo "Warning: Failed to pull sandbox image, but deployment will continue."
@@ -1654,7 +1655,7 @@ apply() {
         pv_status=$(kubectl get pv "$pv" -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
         if [ "$pv_status" = "Released" ]; then
             echo "  Cleaning up stale PV: $pv"
-            kubectl delete pv "$pv" --ignore-not-found=true || true
+            deployment_run_visible kubectl delete pv "$pv" --ignore-not-found=true || true
         fi
     done
 

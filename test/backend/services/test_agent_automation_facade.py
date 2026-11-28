@@ -522,11 +522,6 @@ async def test_confirm_proposal_updates_persisted_conversation_card(monkeypatch)
     monkeypatch.setattr(facade_module.agent_automation_db, "get_proposal", lambda *args: proposal)
     monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
     monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "update_proposal_status",
-        lambda *args: True,
-    )
-    monkeypatch.setattr(
         facade_module.automation_conversation_adapter,
         "update_proposal",
         lambda unit_id, payload, user_id: captured.update({
@@ -537,8 +532,9 @@ async def test_confirm_proposal_updates_persisted_conversation_card(monkeypatch)
 
     service = AgentAutomationFacade()
 
-    async def fake_create_task(request, tenant_id, user_id):
+    async def fake_create_task(request, tenant_id, user_id, *, confirming_proposal):
         captured["create_request"] = request
+        assert confirming_proposal is proposal
         return {"task_id": 99}
 
     monkeypatch.setattr(service, "create_task", fake_create_task)
@@ -587,7 +583,8 @@ async def test_update_proposal_revalidates_and_persists_card(monkeypatch):
         captured["resolved_instruction"] = kwargs["instruction"]
         return CapabilityResolution(executable=True)
 
-    def fake_update_proposal(proposal_id, tenant_id, user_id, proposed_task, capability_resolution):
+    def fake_update_proposal(proposal_id, tenant_id, user_id, proposed_task, capability_resolution, expected_status):
+        assert expected_status == AutomationProposalStatus.PENDING.value
         captured["stored_task"] = proposed_task
         captured["capability_resolution"] = capability_resolution
         return True
@@ -892,10 +889,12 @@ def test_delete_run_rejects_active_record(monkeypatch):
         ),
     ],
 )
+@pytest.mark.parametrize("workbench", [False, True])
 async def test_create_task_requires_and_reuses_bound_conversation(
     monkeypatch,
     schedule_trigger,
     expected_misfire_policy,
+    workbench,
 ):
     created_task = {}
 
@@ -906,8 +905,11 @@ async def test_create_task_requires_and_reuses_bound_conversation(
             agent_snapshot={"agent_id": 3},
         )
 
+    config = {"mode": "generic_chat", "skill_mounts": [{"skill_id": 3, "config_values": {"entry": "value"}}]}
     monkeypatch.setattr(facade_module, "get_conversation", lambda conversation_id, user_id: {
         "conversation_id": conversation_id,
+        "workbench_config": config if workbench else None,
+        "workbench_config_version": 4 if workbench else None,
     })
     monkeypatch.setattr(
         facade_module.agent_automation_db,
@@ -945,13 +947,20 @@ async def test_create_task_requires_and_reuses_bound_conversation(
     assert task["conversation_id"] == 123
     assert task["status"] == "ACTIVE"
     assert created_task["misfire_policy"] == expected_misfire_policy
-    assert created_task["runtime_snapshot"] == {
+    assert task["runtime_snapshot"] == {
         "agent_id": 3,
         "display_name": "Agent #3",
         "model_id": 55,
         "tool_params": {"tools": {"search": {"top_k": 5}}},
         "original_instruction": "总结销售线索变化",
     }
+    key = facade_module.agent_automation_db.WORKBENCH_EXECUTION_KEY
+    if workbench:
+        saved = created_task["runtime_snapshot"][key]
+        assert saved["version"] == 4
+        assert saved["config"]["skill_mounts"] == config["skill_mounts"]
+    else:
+        assert key not in created_task["runtime_snapshot"]
 
 
 @pytest.mark.asyncio
@@ -1271,7 +1280,7 @@ async def test_patch_task_updates_schedule_runtime_and_capabilities(monkeypatch)
         agent_snapshot={"name": "assistant-v2", "display_name": "助手 V2"},
     )
 
-    monkeypatch.setattr(service, "get_task", lambda *args: task)
+    monkeypatch.setattr(service, "_get_owned_task", lambda *args: task)
 
     async def fake_resolve(*args, **kwargs):
         return resolution
@@ -1339,7 +1348,7 @@ async def test_patch_task_rejects_unready_capabilities_and_lost_update(monkeypat
         "instruction": "old",
         "runtime_snapshot": {},
     }
-    monkeypatch.setattr(service, "get_task", lambda *args: task)
+    monkeypatch.setattr(service, "_get_owned_task", lambda *args: task)
 
     async def unavailable(*args, **kwargs):
         return CapabilityResolution(

@@ -34,9 +34,17 @@ from contracts.errors.messages import ErrorMessage
 class RunModelControlsError(ValueError):
     """A safe preflight failure for request-scoped model controls."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, agent_id: int | None = None,
+                 agent_name: str | None = None, version_no: int | None = None):
         self.code = code
+        self.details = None if agent_id is None else {
+            "agent_id": agent_id, "agent_name": agent_name or str(agent_id), "version_no": version_no,
+        }
         super().__init__(code)
+
+    def to_detail(self) -> dict:
+        """Serialize only safe Agent context, preserving legacy code-only errors."""
+        return {"code": self.code, **({"details": self.details} if self.details is not None else {})}
 
 
 # ==================== New Framework: AppException with ErrorCode ====================

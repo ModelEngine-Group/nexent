@@ -1,0 +1,54 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DB-MIGRATION-D5-001
+  feature_id: F-175
+  business_rule_ids: [F-175-RULE-01]
+  title: Complete release upgrade transforms one million conversations within 300 seconds
+  type: PERFORMANCE
+  priority: P1
+  status: active
+  automation: automated
+  objective: Validate the complete business and Ops SQL manifests and product persistence on a large isolated database.
+  preconditions:
+  - The pinned source release is available in Git and the local PostgreSQL and Management images are available.
+  - The test creates a private Docker network and PostgreSQL volume for each execution.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Restore a seeded release database and execute both formal migration entry points.
+    expected: Every manifest file is accounted for with a matching ledger and timing. Exactly one million seeded conversation targets are converted.
+  - order: 2
+    action: Read upgraded data and write back a new conversation through the application's persistence models.
+    expected: Read and write complete with valid upgraded schema within the single 300-second upgrade budget.
+  - order: 3
+    action: Replay both migration entry points and remove all owned resources.
+    expected: Replay preserves both migration ledgers and seeded data. Cleanup stays inside the test stack.
+  expected_results:
+  - Formal business and Ops migration plans, ledger checks and application persistence verification succeed within 300 seconds.
+  - Replay preserves the migration ledgers and transformed data.
+  forbidden_side_effects:
+  - Do not connect migration or application probes to the shared Daily database.
+  risk_type: PERFORMANCE
+  risk: Large rewrites can exceed the upgrade window or leave partially migrated data.
+  condition:
+  - Repeat against a deterministic old-release snapshot with one million affected conversation rows.
+  metrics:
+  - Total upgrade time, per-script elapsed time, actual transformed rows and replay duration.
+  thresholds:
+  - Total time from upgrade entry to validated application read and write must not exceed 300 seconds.
+  recovery_expectations:
+  - The worker and PostgreSQL containers, their network and disposable volume are removed even after failure.
+  acceptance:
+  - id: AC-01
+    description: All business and Ops migration scripts are accounted for and persistence succeeds within the upgrade deadline.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Replay leaves the upgraded data and ledgers stable and cleanup stays within the owned resources.
+    steps: [3]
+    expected_results: [2]
+    forbidden_side_effects: [1]

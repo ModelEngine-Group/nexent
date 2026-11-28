@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: CREATOR-MODEL-PREFERENCES-20261127
+  change_type: bugfix
+  bug_id: CREATOR-MODEL-PREFERENCES-20261127
+  title: Persist model preference changes for existing standalone creator conversations
+  description: Bind standalone Agent and Skill creation model controls to the current creator conversation after the first turn or history restoration.
+  observed_behavior: The standalone creator controls continue editing a draft after the server assigns a conversation ID. The next turn uses the previously persisted thinking preference.
+  expected_behavior: Existing creator conversations persist explicit preference changes before subsequent turns. New conversations use a local draft until the server assigns an ID.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Panel unit tests check the conversation ID passed to the run adapter but omit the ID passed to the model controls.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Standalone Agent and Skill creation controls bind to the active server conversation.
+    - Starting a fresh standalone Agent conversation clears the preference binding.
+    reason: Existing panel tests cover restored, new, and completed creation sessions. The existing D4 journey proves that explicit false reaches the subsequent run.
+    test_selectors:
+    - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+    - frontend/tests/workbench/Nl2SkillPanelControls.test.tsx
+  affected_features:
+    existing: [CHAT-MODEL-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-MODEL-CONTROLS-D4-001]
+    added: []
+    modified: []
+    retired: []
+  notes: Restores the existing Model Controls specification for a current standalone creator conversation. The model preference binding is separate from the sharing and branching identity.

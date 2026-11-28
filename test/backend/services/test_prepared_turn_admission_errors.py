@@ -18,6 +18,7 @@ from contracts.errors.exceptions import (
     ValidationError, WorkbenchConfigVersionConflict, WorkbenchError,
 )
 from management.services.agent import prepared_turn
+from management.services.automation import confirmation
 from test.backend.services.test_prepared_public_turn import ACTOR, PAYLOAD, REFERENCE, flow
 
 
@@ -50,12 +51,44 @@ async def test_automation_turn_requires_compiled_proposal_binding_before_runtime
     runtime.start_prepared_run.assert_not_awaited()
 
 
+@pytest.mark.parametrize("query, confirms", [("确认创建", True), ("创建好了吗？", False), ("改到九点再创建", False)])
+async def test_owned_chat_confirmation_uses_dedicated_runtime_processing(flow, query, confirms):
+    _, compile_snapshot, runtime, _ = flow
+    compile_snapshot.return_value.resource = SimpleNamespace(
+        agent_id=7, version_no=4, tools=[ToolBinding(tool_id=prepared_turn.AUTOMATION_PROPOSAL_TOOL, version="1")],
+    )
+    request = AgentRequest(query=query, conversation_id=42, agent_id=7, enable_automation_tool=True)
+
+    await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, runtime)
+
+    assert compile_snapshot.call_args.kwargs.get("automation_confirmation", False) is confirms
+    staged = prepared_turn.store.stage_turn.call_args.args[5]
+    assert staged["query"] == query
+    assert staged["automation"].get("confirm_from_chat", False) is confirms
+
+
+async def test_affirmation_stages_the_server_selected_proposal_for_callback(flow):
+    _, compile_snapshot, runtime, _ = flow
+    compile_snapshot.return_value.resource = SimpleNamespace(
+        agent_id=7, version_no=4, tools=[ToolBinding(tool_id=prepared_turn.AUTOMATION_PROPOSAL_TOOL, version="1")],
+    )
+    confirmation.previous_automation_invitation.return_value = 71
+    request = AgentRequest(query="好", conversation_id=42, agent_id=7)
+    await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, runtime)
+    assert compile_snapshot.call_args.kwargs["automation_confirmation"] is True
+    automation_context = prepared_turn.store.stage_turn.call_args.args[5]["automation"]
+    assert automation_context["confirmation_action"] == "confirm"
+    assert automation_context["confirmation_proposal_id"] == 71
+
+
 @pytest.mark.parametrize("error,status,code", [
     (ForbiddenError("no access"), 404, "AGENTOS_RUN_NOT_FOUND"),
     (prepared_turn.store.PreparedTurnConflict(), 409, "AGENTOS_RUN_ALREADY_ACTIVE"),
     (WorkbenchConfigVersionConflict(7, {}), 409, "WORKBENCH_CONFIG_VERSION_CONFLICT"),
     (WorkbenchError("WORKBENCH_DISABLED", status_code=404), 404, "WORKBENCH_DISABLED"),
     (RunModelControlsError("model_not_available"), 404, "model_not_available"),
+    (RunModelControlsError("model_not_available", agent_id=48, agent_name="Chef", version_no=1),
+     404, "model_not_available"),
     (RunModelControlsError("model_unavailable"), 409, "model_unavailable"),
     (RunModelControlsError("model_type_invalid"), 400, "model_type_invalid"),
     (RunModelControlsError("model_controls_invalid"), 422, "model_controls_invalid"),
@@ -71,6 +104,8 @@ async def test_preparation_rejects_claim_before_runtime_admission(flow, mocker, 
         await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, runtime)
 
     assert exc.value.status_code == status
+    if isinstance(error, RunModelControlsError):
+        assert exc.value.detail == error.to_detail()
     if code is not None:
         assert exc.value.detail["code"] == code
     else:

@@ -3,22 +3,25 @@
 "use client";
 import { useTranslation } from "react-i18next";
 import { WorkbenchResourceDrawer } from "./WorkbenchResourceDrawer";
-import { ResourceTagFilter } from "./ResourceTagFilter";
+import { ResourceTagFilterControl } from "@/components/resource-picker/ResourceTagFilterControl";
 import { useResourceTags } from "../hooks/useResourceTags";
 
-import { ResourceSelectionGrid } from "@/features/workbench/components/ResourceSelectionGrid";
+import {
+  ParamDialog,
+  ParamField,
+  ParamInput,
+  ParamSwitch,
+} from "@/components/resource-picker/ParamDialog";
+import {
+  ResourceCollection,
+  ResourceItem,
+} from "@/components/resource-picker/ResourceItem";
+import { ResourceAssignedTags } from "@/components/resource-picker/ResourceAssignedTags";
+import { SkillConfigButton } from "@/components/resource-picker/SkillConfigButton";
+import drawerStyles from "@/components/resource-picker/ResourcePickerDrawer.module.css";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Button,
-  Empty,
-  Input,
-  Modal,
-  Select,
-  Spin,
-  Switch,
-  message,
-} from "antd";
+import { Button, Empty, Input, Modal, Select, Spin, message } from "antd";
 import {
   fetchSkillRepositoryListings,
   installSkillFromRepository,
@@ -26,7 +29,6 @@ import {
 import type { SkillRepositoryListingItem } from "@/types/skillRepository";
 import { fetchSkillsList, type SkillListItem } from "@/services/skillService";
 import type { WorkbenchSkillMount } from "../types";
-import { ResourceSelectionRow } from "./ResourceSelectionRow";
 import { RESOURCE_PAGE_SIZE, resourcePage } from "./ResourcePagination";
 import { validateSkillConfig } from "../skillConfig";
 
@@ -58,7 +60,7 @@ export function SkillPicker({
     skills: SkillListItem[]
   ) => Promise<void> | void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [skills, setSkills] = useState<SkillListItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(
     () => new Set(selected.map((mount) => mount.skill_id))
@@ -292,6 +294,35 @@ export function SkillPicker({
     resourcePage(filtered, minePage, pageSize).every((skill) =>
       selectedIds.has(Number(skill.skill_id))
     );
+  const editingSkill = skills.find(
+    (skill) => Number(skill.skill_id) === editingId
+  );
+  const startConfig = (skillId: number) => {
+    setDraftConfigs({ [skillId]: { ...configs[skillId] } });
+    setEditingId(skillId);
+  };
+  const cancelConfig = () => {
+    setEditingId(null);
+    setConfigQueue([]);
+  };
+  const saveConfig = (skill: SkillListItem) => {
+    const skillId = Number(skill.skill_id);
+    if (missingRequiredConfig(skill, draftConfigs[skillId])) {
+      message.warning(t("workbench.controls.completeSkillConfig"));
+      return;
+    }
+    if (!selectedIds.has(skillId) && selectedIds.size >= 20) {
+      message.warning(t("workbench.skills.limit", { count: 20 }));
+      return;
+    }
+    setConfigs((current) => ({
+      ...current,
+      [skillId]: { ...draftConfigs[skillId] },
+    }));
+    setSelectedIds((current) => new Set([...current, skillId]));
+    setEditingId(configQueue[0] ?? null);
+    setConfigQueue((current) => current.slice(1));
+  };
   const toggleAll = () => {
     const next = new Set(selectedIds);
     resourcePage(filtered, minePage, pageSize).forEach((skill) => {
@@ -377,35 +408,38 @@ export function SkillPicker({
                 spinning={loading}
                 className="h-full [&>.ant-spin-container]:min-h-full"
               >
-                <ResourceSelectionGrid
-                  layout="list"
+                <ResourceCollection
                   aria-label={t("workbench.controls.skills", "技能")}
-                  fillAvailable
-                  className="p-1"
                 >
                   {repository.map((item) => (
-                    <ResourceSelectionRow
+                    <ResourceItem
                       key={item.skill_repository_id}
-                      title={item.name}
-                      description={item.description ?? undefined}
-                      tags={item.tags}
+                      item={{
+                        key: String(item.skill_repository_id),
+                        name: item.name,
+                        description: item.description ?? undefined,
+                        tags: item.tags,
+                        raw: item,
+                      }}
                       disabled={installing !== null}
-                      actions={
-                        <Button
-                          size="small"
-                          disabled={installing !== null}
-                          loading={installing === item.skill_repository_id}
-                          onClick={() => void install(item)}
-                        >
-                          {installing === item.skill_repository_id
-                            ? t("workbench.controls.installing")
-                            : t("workbench.controls.installAndSelect")}
-                        </Button>
-                      }
-                      onClick={() => void install(item)}
+                      slots={{
+                        renderActions: () => (
+                          <Button
+                            size="small"
+                            disabled={installing !== null}
+                            loading={installing === item.skill_repository_id}
+                            onClick={() => void install(item)}
+                          >
+                            {installing === item.skill_repository_id
+                              ? t("workbench.controls.installing")
+                              : t("workbench.controls.installAndSelect")}
+                          </Button>
+                        ),
+                      }}
+                      onToggle={() => void install(item)}
                     />
                   ))}
-                </ResourceSelectionGrid>
+                </ResourceCollection>
               </Spin>
               <Modal
                 title={t("workbench.controls.skillNameExists")}
@@ -465,225 +499,70 @@ export function SkillPicker({
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           ) : (
-            <ResourceSelectionGrid
-              layout="list"
+            <ResourceCollection
               aria-label={t("workbench.controls.skills", "技能")}
-              fillAvailable
-              className="p-1"
             >
-              {skills
-                .filter(
-                  (skill) =>
-                    resourcePage(filtered, minePage, pageSize).includes(
-                      skill
-                    ) || Number(skill.skill_id) === editingId
-                )
-                .map((skill) => {
-                  const skillId = Number(skill.skill_id);
-                  const selectedNow = selectedIds.has(skillId);
-                  const invalid = missingRequiredConfig(
-                    skill,
-                    configs[skillId]
-                  );
-                  return (
-                    <div key={skillId} className="contents">
-                      {resourcePage(filtered, minePage, pageSize).includes(
-                        skill
-                      ) && (
-                        <ResourceSelectionRow
-                          key={skillId}
-                          title={skill.name}
-                          description={skill.description}
-                          tags={skill.tags || []}
-                          selected={selectedNow}
-                          onClick={() => {
-                            if (selectedNow) {
-                              setSelectedIds((current) => {
-                                const next = new Set(current);
-                                next.delete(skillId);
-                                return next;
-                              });
-                              return;
-                            }
-                            if (selectedIds.size >= 20) {
-                              message.warning(
-                                t("workbench.skills.limit", { count: 20 })
-                              );
-                              return;
-                            }
-                            if ((skill.config_schemas || []).length > 0) {
-                              setDraftConfigs({
-                                [skillId]: { ...configs[skillId] },
-                              });
-                              setEditingId(skillId);
-                            } else
-                              setSelectedIds(
-                                (current) => new Set([...current, skillId])
-                              );
-                          }}
-                          disabledReason={
-                            invalid
-                              ? t("workbench.controls.requiredConfig")
-                              : undefined
-                          }
+              {resourcePage(filtered, minePage, pageSize).map((skill) => {
+                const skillId = Number(skill.skill_id);
+                const selectedNow = selectedIds.has(skillId);
+                const hasParameters = (skill.config_schemas || []).length > 0;
+                return (
+                  <ResourceItem
+                    key={skillId}
+                    item={{
+                      key: String(skillId),
+                      name: skill.name,
+                      description: skill.description,
+                      tags: skill.tags,
+                      raw: skill,
+                    }}
+                    selected={selectedNow}
+                    disabled={disabled || saving}
+                    onToggle={() => {
+                      if (selectedNow) {
+                        setSelectedIds((current) => {
+                          const next = new Set(current);
+                          next.delete(skillId);
+                          return next;
+                        });
+                      } else if (selectedIds.size >= 20) {
+                        message.warning(
+                          t("workbench.skills.limit", { count: 20 })
+                        );
+                      } else if (hasParameters) {
+                        startConfig(skillId);
+                      } else {
+                        setSelectedIds(
+                          (current) => new Set([...current, skillId])
+                        );
+                      }
+                    }}
+                    slots={{
+                      renderTags: () => (
+                        <ResourceAssignedTags
+                          resourceType="skill"
+                          resourceId={String(skillId)}
+                          tags={skill.tags}
+                          assignments={[]}
                         />
-                      )}
-                      {editingId === skillId && (
-                        <Modal
-                          title={t("workbench.controls.configureSkill", {
-                            name: skill.name,
-                          })}
-                          open
-                          onCancel={() => {
-                            setEditingId(null);
-                            setConfigQueue([]);
-                          }}
-                          okText={t("workbench.controls.saveConfig")}
-                          cancelText={t("common.cancel")}
-                          onOk={() => {
-                            if (
-                              missingRequiredConfig(
-                                skill,
-                                draftConfigs[skillId]
-                              )
-                            ) {
-                              message.warning(
-                                t("workbench.controls.completeSkillConfig")
-                              );
-                              return;
-                            }
-                            if (
-                              !selectedIds.has(skillId) &&
-                              selectedIds.size >= 20
-                            ) {
-                              message.warning(
-                                t("workbench.skills.limit", { count: 20 })
-                              );
-                              return;
-                            }
-                            setConfigs((current) => ({
-                              ...current,
-                              [skillId]: { ...draftConfigs[skillId] },
-                            }));
-                            setSelectedIds(
-                              (current) => new Set([...current, skillId])
-                            );
-                            setEditingId(configQueue[0] ?? null);
-                            setConfigQueue((current) => current.slice(1));
-                          }}
-                        >
-                          {(skill.config_schemas || []).map((item) => {
-                            const schema = item as {
-                              name?: string;
-                              type?: string;
-                              required?: boolean;
-                              enum?: unknown[];
-                            };
-                            if (!schema.name) return null;
-                            const name = schema.name;
-                            const value =
-                              draftConfigs[skillId]?.[name] ??
-                              skill.config_values?.[name] ??
-                              "";
-                            return (
-                              <label key={name} className="mt-2 block text-sm">
-                                {name}
-                                {schema.required ? " *" : ""}
-                                {schema.type === "boolean" ? (
-                                  <Switch
-                                    aria-label={`${skill.name} ${name}`}
-                                    checked={value === true}
-                                    onChange={(checked) =>
-                                      setDraftConfigs((current) => ({
-                                        ...current,
-                                        [skillId]: {
-                                          ...current[skillId],
-                                          [name]: checked,
-                                        },
-                                      }))
-                                    }
-                                  />
-                                ) : Array.isArray(schema.enum) ? (
-                                  <Select
-                                    aria-label={`${skill.name} ${name}`}
-                                    value={value === "" ? undefined : value}
-                                    options={schema.enum.map((option) => ({
-                                      value: option,
-                                      label: String(option),
-                                    }))}
-                                    onChange={(selectedValue) =>
-                                      setDraftConfigs((current) => ({
-                                        ...current,
-                                        [skillId]: {
-                                          ...current[skillId],
-                                          [name]: selectedValue,
-                                        },
-                                      }))
-                                    }
-                                  />
-                                ) : (
-                                  <Input
-                                    aria-label={`${skill.name} ${name}`}
-                                    type={
-                                      schema.type === "integer" ||
-                                      schema.type === "number"
-                                        ? "number"
-                                        : "text"
-                                    }
-                                    value={
-                                      typeof value === "object"
-                                        ? JSON.stringify(value)
-                                        : String(value)
-                                    }
-                                    onChange={(event) => {
-                                      const raw = event.target.value;
-                                      let parsed: unknown = raw;
-                                      if (
-                                        raw &&
-                                        (schema.type === "integer" ||
-                                          schema.type === "number")
-                                      )
-                                        parsed = Number(raw);
-                                      if (schema.type === "boolean")
-                                        parsed =
-                                          raw === "true"
-                                            ? true
-                                            : raw === "false"
-                                              ? false
-                                              : raw;
-                                      if (
-                                        schema.type === "object" ||
-                                        schema.type === "array"
-                                      ) {
-                                        try {
-                                          parsed = JSON.parse(raw);
-                                        } catch {
-                                          parsed = raw;
-                                        }
-                                      }
-                                      setDraftConfigs((current) => ({
-                                        ...current,
-                                        [skillId]: {
-                                          ...current[skillId],
-                                          [name]: parsed,
-                                        },
-                                      }));
-                                    }}
-                                  />
-                                )}
-                              </label>
-                            );
-                          })}
-                        </Modal>
-                      )}
-                    </div>
-                  );
-                })}
-            </ResourceSelectionGrid>
+                      ),
+                      renderActions: () => (
+                        <SkillConfigButton
+                          hasParameters={hasParameters}
+                          disabled={disabled || saving}
+                          onClick={() => startConfig(skillId)}
+                        />
+                      ),
+                    }}
+                  />
+                );
+              })}
+            </ResourceCollection>
           )}
         </>
       }
       picker={{
+        bodyClassName: drawerStyles.drawer,
         keyword: search,
         searchPlaceholder: t(
           "skillPool.searchSkillsPlaceholder",
@@ -695,7 +574,7 @@ export function SkillPicker({
           setRepositoryPage(1);
         },
         tagFilter: (
-          <ResourceTagFilter
+          <ResourceTagFilterControl
             filter={tags}
             onChange={() => {
               setMinePage(1);
@@ -759,7 +638,7 @@ export function SkillPicker({
         refreshDisabled: loading || saving || installing !== null,
       }}
 
-      title={t("chat.composer.skills", "Skills")}
+      title={t("resourcePicker.addSkill", "添加技能")}
       open={open}
       saving={saving}
       disabled={disabled}
@@ -776,6 +655,105 @@ export function SkillPicker({
         onCancel();
       }}
       onConfirm={() => void submit()}
-    ></WorkbenchResourceDrawer>
+    >
+      {open && editingSkill && editingId !== null && (
+        <ParamDialog
+          key={editingId}
+          variant="skill"
+          open
+          title={editingSkill.name}
+          zIndex={1100}
+          maskClosable
+          onClose={cancelConfig}
+          onConfirm={() => saveConfig(editingSkill)}
+          confirmText={t("common.save")}
+        >
+          {(editingSkill.config_schemas || []).map((item) => {
+            if (!item || typeof item !== "object") return null;
+            const schema = item as {
+              name?: string;
+              type?: string;
+              required?: boolean;
+              enum?: unknown[];
+              description_en?: string;
+              description_zh?: string;
+            };
+            if (!schema.name) return null;
+            const name = schema.name;
+            const value =
+              draftConfigs[editingId]?.[name] ??
+              editingSkill.config_values?.[name] ??
+              "";
+            const label = `${editingSkill.name} ${name}`;
+            const description = i18n.language?.startsWith("zh")
+              ? schema.description_zh || schema.description_en
+              : schema.description_en;
+            const updateValue = (nextValue: unknown) =>
+              setDraftConfigs((current) => ({
+                ...current,
+                [editingId]: { ...current[editingId], [name]: nextValue },
+              }));
+            const numeric =
+              schema.type === "integer" || schema.type === "number";
+            const structured =
+              schema.type === "array" || schema.type === "object";
+            const displayValue =
+              typeof value === "object" ? JSON.stringify(value) : String(value);
+            return (
+              <ParamField
+                key={name}
+                label={name}
+                required={schema.required}
+                info={!!description}
+                infoText={description}
+              >
+                {schema.type === "boolean" ? (
+                  <ParamSwitch
+                    aria-label={label}
+                    checked={value === true}
+                    onChange={updateValue}
+                  />
+                ) : Array.isArray(schema.enum) ? (
+                  <Select
+                    aria-label={label}
+                    value={value === "" ? undefined : value}
+                    options={schema.enum.map((option) => ({
+                      value: option,
+                      label: String(option),
+                    }))}
+                    onChange={updateValue}
+                  />
+                ) : structured ? (
+                  <Input.TextArea
+                    aria-label={label}
+                    className="!rounded-[2px] !border-[#D9D9D9] !text-[14px]"
+                    autoSize={{ minRows: 1, maxRows: 6 }}
+                    value={displayValue}
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      try {
+                        updateValue(JSON.parse(raw));
+                      } catch {
+                        updateValue(raw);
+                      }
+                    }}
+                  />
+                ) : (
+                  <ParamInput
+                    aria-label={label}
+                    type={numeric ? "number" : "text"}
+                    value={displayValue}
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      updateValue(numeric && raw ? Number(raw) : raw);
+                    }}
+                  />
+                )}
+              </ParamField>
+            );
+          })}
+        </ParamDialog>
+      )}
+    </WorkbenchResourceDrawer>
   );
 }

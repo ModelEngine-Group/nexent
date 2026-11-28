@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { journey } from "../../infra/automation/d4/runner/journey";
+import { journey, readFixtureConfig } from "../../infra/automation/d4/runner/journey";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -9,9 +9,7 @@ import { randomUUID } from "node:crypto";
 journey(
   "JIUWEN-CREATOR-RESOURCES-D4-001",
   async ({ page, expect, contract }) => {
-    const config = JSON.parse(
-      readFileSync(process.env.NEXENT_REAL_CREATOR_RESOURCES_CONFIG!, "utf8"),
-    );
+    const config = readFixtureConfig("NEXENT_REAL_CREATOR_RESOURCES_CONFIG");
     const container = config.container || "nexent-runtime";
     const target =
       "/tmp/creator_resources_" + randomUUID().replaceAll("-", "").slice(0, 12);

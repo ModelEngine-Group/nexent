@@ -292,6 +292,29 @@ class TestAddMcpService:
         call_kwargs = mock_add.call_args[1]
         assert call_kwargs["container_port"] == 8080
 
+    @patch('management.api.mcp.remote_mcp.get_current_user_info')
+    @patch('management.api.mcp.remote_mcp.add_mcp_service')
+    def test_add_forwards_ssl_verify(self, mock_add, mock_auth):
+        """ssl_verify is forwarded and defaults to enabled."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.return_value = 42
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "source": "local",
+            "server_url": "http://localhost:8080/mcp",
+            "ssl_verify": False,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["ssl_verify"] is False
+
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "source": "local",
+            "server_url": "http://localhost:8080/mcp",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["ssl_verify"] is True
+
 
 # ============================================================================
 # POST /mcp/add-from-config
@@ -560,6 +583,24 @@ class TestUpdateMcpService:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.CONFLICT
 
+    @patch('management.api.mcp.remote_mcp.get_current_user_info')
+    @patch('management.api.mcp.remote_mcp.update_mcp_service')
+    def test_update_forwards_ssl_verify(self, mock_update, mock_auth):
+        """ssl_verify is forwarded; omission keeps the stored value (None)."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.put("/mcp/update", json={
+            "mcp_id": 1, "name": "new-name", "server_url": "http://new.url",
+            "ssl_verify": False,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert mock_update.call_args[1]["ssl_verify"] is False
+
+        resp = client.put("/mcp/update", json={
+            "mcp_id": 1, "name": "new-name", "server_url": "http://new.url",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert mock_update.call_args[1]["ssl_verify"] is None
+
 
 # ============================================================================
 # DELETE /mcp/{mcp_id}
@@ -760,6 +801,24 @@ class TestMcpConnection:
         assert resp.json()["success"] is False
         assert "connection timeout" in resp.json()["error"]
 
+    @patch('management.api.mcp.remote_mcp.get_current_user_info')
+    @patch('management.api.mcp.remote_mcp.test_mcp_connection')
+    def test_connection_forwards_ssl_verify(self, mock_test, mock_auth):
+        """ssl_verify is forwarded and defaults to enabled."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_test.return_value = True
+        resp = client.post("/mcp/test-connection", json={
+            "server_url": "http://example.com/mcp", "ssl_verify": False,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert mock_test.call_args[1]["ssl_verify"] is False
+
+        resp = client.post("/mcp/test-connection", json={
+            "server_url": "http://example.com/mcp",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert mock_test.call_args[1]["ssl_verify"] is True
+
 
 # ============================================================================
 # GET /mcp/record/{mcp_id}
@@ -817,6 +876,22 @@ class TestGetMcpRecord:
         mock_get.return_value = None
         resp = client.get("/mcp/record/999", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('management.api.mcp.remote_mcp.get_current_user_info')
+    @patch('management.api.mcp.remote_mcp.get_mcp_record_by_id')
+    def test_get_record_returns_ssl_verify(self, mock_get, mock_auth):
+        """ssl_verify is returned in the record response for edit prefill."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_get.return_value = {
+            "mcp_name": "svc",
+            "mcp_server": "http://srv",
+            "authorization_token": "tok",
+            "custom_headers": None,
+            "ssl_verify": False,
+        }
+        resp = client.get("/mcp/record/1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["ssl_verify"] is False
 
 
 # ============================================================================

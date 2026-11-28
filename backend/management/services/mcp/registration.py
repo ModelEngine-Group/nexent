@@ -83,8 +83,9 @@ async def _check_mcp_connectivity(
     headers: dict,
     is_container: bool,
     name: str,
+    ssl_verify: bool = True,
 ) -> list[str] | None:
-    tool_names = await _mcp_protocol_health_check(server_url.strip(), headers)
+    tool_names = await _mcp_protocol_health_check(server_url.strip(), headers, ssl_verify=ssl_verify)
     if not tool_names:
         if is_container:
             logger.warning(
@@ -121,6 +122,7 @@ async def add_mcp_service(
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
     skip_health_check: bool = False,
+    ssl_verify: bool = True,
 ) -> int:
     """Add an MCP service record.
 
@@ -143,6 +145,7 @@ async def add_mcp_service(
         container_port: Container port
         group_ids: Comma-separated group IDs that can access this MCP
         ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
+        ssl_verify: Whether to verify the remote MCP server TLS certificate
     """
     status: bool | None = None
     normalized_container_id = (
@@ -208,7 +211,7 @@ async def add_mcp_service(
             headers = _build_mcp_headers(authorization_token, custom_headers)
             if not skip_health_check:
                 tool_names = await _check_mcp_connectivity(
-                    server_url, headers, is_container, name
+                    server_url, headers, is_container, name, ssl_verify=ssl_verify
                 )
                 if tool_names:
                     resolved_registry_json["_toolNames"] = tool_names
@@ -225,6 +228,7 @@ async def add_mcp_service(
             "container_port": container_port,
             "authorization_token": authorization_token,
             "custom_headers": custom_headers,
+            "ssl_verify": ssl_verify,
             "source": source,
             "registry_json": resolved_registry_json,
             "market_id": market_id,

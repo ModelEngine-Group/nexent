@@ -357,7 +357,7 @@ if [ "$LOAD_IMAGES" = "true" ] && [ "$PUSH_IMAGES" != "true" ]; then
     exit 1
   fi
   deployment_log "Loading offline images for $DEPLOYMENT_TARGET..."
-  deployment_run_logged bash "$LOAD_SCRIPT" "$DEPLOYMENT_TARGET"
+  deployment_run_visible bash "$LOAD_SCRIPT" "$DEPLOYMENT_TARGET"
 fi
 
 if [ "$PUSH_IMAGES" = "true" ]; then
@@ -373,7 +373,7 @@ if [ "$PUSH_IMAGES" = "true" ]; then
 
   require_image_registry_prefix
   deployment_log "Loading and pushing offline images..."
-  deployment_run_logged bash "$PUSH_SCRIPT" --image-registry-prefix "$IMAGE_REGISTRY_PREFIX" --load-images
+  deployment_run_visible bash "$PUSH_SCRIPT" --image-registry-prefix "$IMAGE_REGISTRY_PREFIX" --load-images
 fi
 
 if [ -n "$IMAGE_REGISTRY_PREFIX" ]; then

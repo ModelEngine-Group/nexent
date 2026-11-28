@@ -45,7 +45,9 @@ def traditional_ut_issues(root: Path, plan: object, phase: str, *, typed_missing
     if not isinstance(selectors, list) or any(not isinstance(value, str) for value in selectors):
         return issues + ["traditional_ut test_selectors must be a list of reported repository selectors"]
     if phase == "implementation" and not selectors:
-        issues.append("Confirm actual traditional UT selectors after implementation")
+        message = "Confirm actual traditional UT selectors after implementation"
+        issues.append(ValidationIssue(root / "test-e2e/changes", "", message, "UT_SELECTORS_MISSING")
+                      if typed_missing else message)
     allowed = [root / "test" / name for name in ("backend", "sdk", "ext_components")]
     allowed.append(root / "frontend")
     for selector in selectors:

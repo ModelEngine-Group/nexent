@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
@@ -16,8 +16,9 @@ from shared.postgres import apply_product_postgres_env
 apply_product_postgres_env()
 
 from management.db.automation import messages, repository as runs
-from infrastructure.rdb import agent_execution, conversation_state
+from infrastructure.rdb import agent_execution, conversation_state, model_records
 from infrastructure.rdb.client import db_client
+from infrastructure.rdb.model_record import ModelRecord
 from management.db.conversation import prepared_turn, repository as conversations
 from management.db.conversation.projection_receipt import ConversationProjectionReceipt
 from management.db.models import (
@@ -34,7 +35,7 @@ def run_store(monkeypatch):
         connection.execute(CreateSchema(schema))
         for model in (AgentInfo, ConversationRecord, ConversationMessage, ConversationMessageUnit,
                       ConversationSourceSearch, ConversationSourceImage, AgentAutomationTask, AgentAutomationRun,
-                      ConversationProjectionReceipt, TrajectoryExecution, UserAccount, UserTenant,
+                      ConversationProjectionReceipt, TrajectoryExecution, UserAccount, UserTenant, ModelRecord,
                       agent_execution.AgentExecution):
             model.__table__.create(connection)
 
@@ -44,11 +45,16 @@ def run_store(monkeypatch):
             yield db_session
             return
         with Session(engine) as session, session.begin():
+            @event.listens_for(session.connection(), "before_cursor_execute", retval=True)
+            def scope_scheduler_sql(_connection, _cursor, statement, parameters, _context, _executemany):
+                # SQLAlchemy schema translation applies to ORM queries, but the scheduler claim uses literal SQL.
+                return statement.replace("nexent.agent_automation_", f'"{schema}".agent_automation_'), parameters
+
             session.execute(text("SET LOCAL lock_timeout = '3s'"))
             session.execute(text("SET LOCAL statement_timeout = '5s'"))
             yield session
 
-    for module in (messages, runs, conversations, prepared_turn, conversation_state, agent_execution):
+    for module in (messages, runs, conversations, prepared_turn, conversation_state, agent_execution, model_records):
         monkeypatch.setattr(module, "get_db_session", sessions)
     now = datetime.now(timezone.utc)
     task_data = dict(
@@ -65,8 +71,10 @@ def run_store(monkeypatch):
         with sessions() as session:
             session.add(UserAccount(user_id="owner", user_roles=["USER"], delete_flag="N"))
             session.add(UserTenant(user_id="owner", tenant_id="tenant", delete_flag="N"))
+            session.add(ModelRecord(model_id=102, model_name="Selected model", model_type="llm",
+                                    tenant_id="tenant", delete_flag="N"))
             session.add(ConversationRecord(conversation_id=1, conversation_title="Fixture",
-                                           created_by="owner", updated_by="owner", delete_flag="N"))
+                                           selected_model_id=102, created_by="owner", updated_by="owner", delete_flag="N"))
         task = runs.create_task(task_data, "owner")
 
         def new_run():

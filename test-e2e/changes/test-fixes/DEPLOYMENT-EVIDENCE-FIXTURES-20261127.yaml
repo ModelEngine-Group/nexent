@@ -1,0 +1,21 @@
+schema_version: '1.0'
+change:
+  change_id: DEPLOYMENT-EVIDENCE-FIXTURES-20261127
+  change_type: test-fix
+  title: Repair callable source staging and Jiuwen creator fixture diagnostics
+  description: Fingerprint the sandbox execution module imported by the current-source probe. Report absent local creator configuration as a blocked prerequisite. Replay real Skill observer output through the current Management stream boundary in the global Core integration case.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: The changes maintain formal test fixtures and use existing product boundaries.
+  affected_features:
+    existing: [AGENT-CORE-CONFIG, F-096]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGENT-CALLABLE-D3-001, AGENT-CORE-GLOBAL-D3-001, JIUWEN-AGENT-CREATOR-D4-001, JIUWEN-CREATOR-RESOURCES-D4-001]
+    retired: []
+  notes: Existing owned resource cleanup remains in the individual cases. A missing configuration stops each real D4 case before creating resources. The Agent observer and native MCP portions of the global Core case still require migration.

@@ -102,7 +102,9 @@ journey("AGENT-EDITOR-D4-007", async ({ page, contract, expect }) => {
     ).toBeChecked();
     await dialog.getByRole("textbox").fill("bar");
     await expect(dialog.getByRole("checkbox")).toHaveCount(1);
-    await dialog.getByRole("checkbox", { name: "generate_bar_chart" }).check();
+    const barChart = dialog.getByRole("checkbox", { name: "generate_bar_chart" });
+    await barChart.click();
+    await expect(barChart).toBeChecked();
     await expect(group.getByText(countText(3), { exact: true })).toBeVisible();
     await expect
       .poll(() => fixture.updates.at(-1)?.enabled_tool_ids)

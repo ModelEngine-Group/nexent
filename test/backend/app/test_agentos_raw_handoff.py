@@ -60,11 +60,28 @@ async def test_unsupported_debug_returns_422_without_starting_runtime(public_cli
 
 
 @pytest.mark.asyncio
+async def test_debug_preserves_failing_child_context(public_client, mocker):
+    client, _ = public_client
+    mocker.patch.object(evaluation_snapshot, "prepare_debug_snapshot", side_effect=RunModelControlsError(
+        "model_not_available", agent_id=48, agent_name="厨师助手", version_no=1,
+    ))
+    transport = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    response = await client.post("/api/agent/run", json={"query": "hello", "agent_id": 7, "is_debug": True})
+    assert response.status_code == 404
+    assert response.json() == {"message": {"code": "model_not_available", "details": {
+        "agent_id": 48, "agent_name": "厨师助手", "version_no": 1,
+    }}}
+    assert transport.mock_calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure,status,detail", [
     (UnauthorizedError("private identity"), 401, "Unauthorized"),
     (ForbiddenError("Access denied"), 403, "Access denied"),
     (ValidationError("Invalid input"), 422, "Invalid input"),
     (RunModelControlsError("model_not_available"), 404, {"code": "model_not_available"}),
+    (RunModelControlsError("model_not_available", agent_id=48, agent_name="厨师助手", version_no=1),
+     404, {"code": "model_not_available", "details": {"agent_id": 48, "agent_name": "厨师助手", "version_no": 1}}),
     (RunModelControlsError("model_unavailable"), 409, {"code": "model_unavailable"}),
     (RunModelControlsError("model_type_invalid"), 400, {"code": "model_type_invalid"}),
     (RuntimeError("private failure"), 500, "Internal server error, please try again later."),

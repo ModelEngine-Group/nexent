@@ -98,7 +98,8 @@ async def test_build_callback_runs_coroutine_while_event_loop_is_active(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_adapter_uses_trusted_message_and_east_eight_timezone(monkeypatch):
+@pytest.mark.parametrize("executable", [True, False])
+async def test_agent_loop_adapter_uses_trusted_message_and_east_eight_timezone(monkeypatch, executable):
     captured = {}
 
     async def fake_create_proposal(request, tenant_id, user_id, **kwargs):
@@ -111,6 +112,7 @@ async def test_agent_loop_adapter_uses_trusted_message_and_east_eight_timezone(m
         return {
             "proposal_id": 8,
             "conversation_id": request.conversation_id,
+            "executable": executable,
             "task": {"title": "生成日报"},
         }
 
@@ -135,6 +137,7 @@ async def test_agent_loop_adapter_uses_trusted_message_and_east_eight_timezone(m
     )
 
     assert result["status"] == "proposal_ready"
+    assert ("要创建这个定时任务吗？" in result["user_message"]) is executable
     assert captured["request"].message == "每天九点生成日报"
     assert captured["request"].timezone == "Asia/Shanghai"
     assert captured["request"].agent_id == 7

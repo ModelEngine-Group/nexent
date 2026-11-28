@@ -1,9 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   App,
   Button,
   Card,
+  Checkbox,
   Form,
   Input,
   InputNumber,
@@ -293,6 +296,24 @@ export default function McpServiceDetailModal({
                 autoComplete="new-password"
                 disabled={isReadOnly}
               />
+            </Form.Item>
+            <Form.Item
+              className="mb-0"
+              style={{ marginBottom: 0 }}
+              extra={t("mcpConfig.addServer.sslVerifyHelp")}
+            >
+              <Checkbox
+                checked={draft.sslVerify ?? true}
+                disabled={isReadOnly}
+                onChange={(e) =>
+                  detail.setDraft({
+                    ...draft,
+                    sslVerify: e.target.checked,
+                  })
+                }
+              >
+                {t("mcpConfig.addServer.sslVerify")}
+              </Checkbox>
             </Form.Item>
           </>
         ) : null}

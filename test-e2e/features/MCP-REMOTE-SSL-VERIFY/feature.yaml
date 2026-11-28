@@ -1,0 +1,20 @@
+schema_version: '1.0'
+module:
+  id: MCP-SERVICES
+  name: MCP service management
+feature:
+  feature_id: MCP-REMOTE-SSL-VERIFY
+  name: Per-server TLS certificate verification for remote MCP services
+  status: active
+  description: Remote MCP records carry a per-server ssl_verify switch honored by registration-time discovery, health checks, tool refresh, connection tests and Runtime agent invocation. Verification is enabled by default (secure by default, matching A2A agents); records that disable it reuse the internal skip-verification HTTP client on every path.
+  business_rules:
+  - rule_id: MCP-REMOTE-SSL-VERIFY-RULE-001
+    description: Every remote MCP record stores ssl_verify (NOT NULL, default true). Create and update requests accept the flag; update omission preserves the stored value; list and record read APIs return it.
+  - rule_id: MCP-REMOTE-SSL-VERIFY-RULE-002
+    description: Management-side discovery, health checks, tool refresh and connection tests use a certificate-verifying HTTP client when ssl_verify is enabled and the skip-verification client when it is disabled.
+  - rule_id: MCP-REMOTE-SSL-VERIFY-RULE-003
+    description: Runtime agent materialization injects the skip-verification HTTP client factory only for records with ssl_verify disabled, after revision validation, leaving stored binding revisions unchanged; enabled records keep the SDK default verified client.
+  required_test_stages: []
+  source:
+    requirement_ids: [MCP-SSL-VERIFY-20261127]
+    notes: A configuration field plumbed through existing request/health/materialization surfaces; proof lives in traditional UT. No formal Case quota is manufactured.

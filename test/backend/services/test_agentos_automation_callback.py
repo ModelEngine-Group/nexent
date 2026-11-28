@@ -36,11 +36,12 @@ def test_reverse_agentos_token_is_distinct_and_body_bound(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_callback_confirms_owned_turn_and_uses_its_stored_message(mocker):
+@pytest.mark.parametrize("chat_confirmation", [False, True])
+async def test_callback_confirms_owned_turn_and_uses_its_stored_message(mocker, chat_confirmation):
     turn = SimpleNamespace(assistant_message_id=None)
     context = agentos_callback.AutomationToolRuntimeContext(
         tenant_id="tenant", user_id="actor", conversation_id=42, agent_id=7, user_message="saved input",
-        source_message_id=91,
+        source_message_id=91, confirm_from_chat=chat_confirmation,
     )
 
     async def inline(_name, fn, *args, lane, owner):
@@ -56,11 +57,31 @@ async def test_callback_confirms_owned_turn_and_uses_its_stored_message(mocker):
     mocker.patch.object(agentos_callback, "_agentos_client", return_value=runtime)
     create = mocker.patch.object(agentos_callback.agent_loop_automation_tool_adapter, "create_proposal",
                                  return_value={"status": "proposal_ready"})
+    confirm_chat = mocker.patch.object(agentos_callback, "confirm_from_chat", return_value={"status": "task_confirmed"})
 
-    assert await agentos_callback.create_automation_proposal(REFERENCE, ACTOR) == {"status": "proposal_ready"}
+    result = await agentos_callback.create_automation_proposal(REFERENCE, ACTOR)
     runtime.inspect_run.assert_awaited_once_with(AgentRunLookup(**REFERENCE.model_dump()), "actor", "tenant")
     confirm.assert_called_once_with(turn)
-    create.assert_awaited_once_with(context, "")
+    if chat_confirmation:
+        assert result == {"status": "task_confirmed"}
+        confirm_chat.assert_awaited_once_with(context)
+        create.assert_not_awaited()
+    else:
+        assert result == {"status": "proposal_ready"}
+        create.assert_awaited_once_with(context, "")
+        confirm_chat.assert_not_awaited()
+
+
+def test_callback_uses_the_admitted_turns_message_boundary_for_confirmation(mocker):
+    turn = SimpleNamespace(reference=REFERENCE, message_index=9, tenant_id="tenant", user_id="actor")
+    mocker.patch.object(agentos_callback.store, "automation_source", return_value={
+        "agent_id": 7, "user_message": "好", "source_message_id": 91, "confirm_from_chat": True,
+        "confirmation_action": "confirm", "confirmation_proposal_id": 17,
+    })
+    context = agentos_callback._read_context(turn)
+    assert context.confirmation_before_index == 8
+    assert context.confirmation_proposal_id == 17
+    assert context.user_message == "好"
 
 
 @pytest.mark.asyncio

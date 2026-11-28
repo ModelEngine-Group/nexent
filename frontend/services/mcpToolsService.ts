@@ -358,6 +358,7 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       groupIds: s.group_ids ?? undefined,
       ingroupPermission: s.ingroup_permission ?? undefined,
       sharedFields: s.shared_fields ?? undefined,
+      sslVerify: s.ssl_verify ?? true,
     } as McpServiceItem;
   });
   return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;
@@ -762,6 +763,7 @@ export interface TestConnectionPayload {
   server_url: string;
   authorization_token?: string;
   custom_headers?: Record<string, unknown>;
+  ssl_verify?: boolean;
 }
 
 export interface TestConnectionResult {
