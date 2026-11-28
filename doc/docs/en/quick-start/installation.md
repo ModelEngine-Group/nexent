@@ -1,6 +1,8 @@
 # Docker Installation & Deployment
 
-## 🎯 Prerequisites
+## Environment Setup
+
+### 🎯 Prerequisites
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
@@ -11,6 +13,22 @@
 | **Software** | Docker Engine 18.09+ and Docker Compose v2 | A maintained Docker Engine release and Docker Compose v2 |
 
 > **💡 Note**: The recommended configuration is suitable for environments that enable the complete application, data processing, and Docker sandboxes. Model services are usually deployed separately and are not included in the resource requirements above.
+
+### Install Docker and Compose
+
+| Deployment host | Installation steps |
+| --- | --- |
+| Linux server | Follow the official instructions for your distribution to configure the package repository, install Docker Engine, the CLI, and the Compose plugin, then start the Docker service. If Engine is already installed, you can add the Compose plugin separately. [Install Docker Engine](https://docs.docker.com/engine/install/) · [Install the Compose plugin](https://docs.docker.com/compose/install/linux/) |
+| macOS or Windows development machine | Install and start Docker Desktop, which includes Docker Engine and Compose. On Windows, use Linux containers and run the deployment commands in a terminal with Bash. [Install Docker Desktop on macOS](https://docs.docker.com/desktop/setup/install/mac-install/) · [Install Docker Desktop on Windows](https://docs.docker.com/desktop/setup/install/windows-install/) |
+
+Run these commands in the terminal and account you will use for deployment. If Docker is already installed, start here.
+
+```bash
+docker version
+docker compose version
+```
+
+`docker version` should show both the `Client` and `Server` sections, and the second command should print the Compose version. If you see only client details and a connection error, check that the Docker service or Docker Desktop is running and that your account can access it. Once both checks pass, continue with either online or offline deployment.
 
 ## 🚀 Quick Start
 
@@ -26,7 +44,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **Tip**: Docker and Kubernetes share `deploy/env/.env`. The deployment script preserves existing configuration and adds variables introduced in `deploy/env/.env.example`. If `.env` does not exist, the script first reuses the legacy `docker/.env`; otherwise, it creates the file from the current template. Make sure `.env.example` is readable before deployment.
+Docker and Kubernetes share `deploy/env/.env`. The deployment script keeps existing values and adds any new variables from the template. If the file is missing, the installer uses the legacy `docker/.env` if available, or creates the file from `deploy/env/.env.example`. To set the administrator password or persistent data path before a fresh installation, copy the template to `deploy/env/.env` and edit the settings there.
 
 #### 2. Deployment Options
 
@@ -36,50 +54,50 @@ Run the following command to start deployment:
 bash deploy.sh docker
 ```
 
-After running the command, the script opens Bash TUI menus for deployment options. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
+The installer prints the path to the deployment log when it starts. By default it writes to `logs/deploy/deploy-YYYYMMDD-HHMMSS.log` under the repository or offline package root. If deployment fails, open the file shown in the terminal to find the error from image loading, image pulls, or Compose startup. The installer saves the generated Elasticsearch API key in `deploy/env/.env` as `ELASTICSEARCH_API_KEY`.
 
-**Deployment Components:**
-- **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
-- **application (selected by default, optional)**: config, runtime, mcp, northbound, web
-- **data-process (selected by default, optional)**: data processing service
-- **terminal (optional)**: enables the OpenSSH terminal tool
-- **monitoring (optional)**: enables observability components and then prompts for a provider
+The Bash menu prompts you for deployment options. Use the arrow keys or `j/k` to move, Space to toggle selections, Enter to confirm, `b` or Backspace to go back, and `q` to quit.
 
-The `application` component also prepares the `nexent-sandbox` image. In v2.5.0, Docker deployments run model-generated code and Skill scripts in a system-scoped Docker sandbox by default. A sandbox is not a fixed Compose service; the Runtime service creates and reuses it according to the runtime strategy.
+**Deployment components**
 
-**Port Policy:**
-- **development (default)**: publishes debug and internal service ports for local troubleshooting
-- **production**: publishes only production entry ports
+| Component | Selected by default | Purpose |
+| --- | --- | --- |
+| `infrastructure` | Required | Provides Elasticsearch, PostgreSQL, Redis, and MinIO. |
+| `application` | Yes | Starts Web, Gateway, Management, Runtime, MCP, and Ops. Keep this selected to use the web interface, run agents, or inspect execution traces. |
+| `data-process` | Yes | Starts the service that parses and imports files for knowledge bases. |
+| `terminal` | No | Provides OpenSSH for the agent terminal tool. |
+| `monitoring` | No | Sends telemetry to the selected OpenTelemetry backend. |
 
-**Image Source:**
-- **general (default)**: uses standard public registries
-- **mainland**: uses mainland China mirrors
-- **local-latest**: uses local `latest` Nexent images and avoids pulling Nexent application images
+**Sandbox mode** defaults to the `lightweight` image. Choose `full` if your Skills require document processing, design, or frontend build tools. Runtime creates and reuses sandbox containers according to the execution policy.
 
-You can also pass options directly:
+**Port policy** defaults to `development`, which publishes database and internal service ports on the host for debugging. With `production`, these ports stay on the container network. The base application publishes Web, Gateway, and Ops on ports 3000, 5013, and 5016 by default.
+
+**Image source** defaults to `general`, which uses the standard public registries. Choose `mainland` for mainland China mirrors or `local-latest` to reuse local Nexent application images.
+
+Use `--defaults` to skip the configuration menu and override individual options as needed. Choose one of the following commands.
 
 ```bash
 # Use saved deploy.options or built-in defaults without opening the TUI
 bash deploy.sh docker --defaults
 
-# Default component set, development port policy, standard image source
-bash deploy.sh docker --components infrastructure,application,data-process --port-policy development --image-source general
+# Default components and development ports
+bash deploy.sh docker --defaults --components infrastructure,application,data-process --port-policy development --image-source general
 
-# Add the terminal tool to the default component set
-bash deploy.sh docker --components infrastructure,application,data-process,terminal
+# Include the OpenSSH service
+bash deploy.sh docker --defaults --components infrastructure,application,data-process,terminal
 
-# Use mainland China image sources
-bash deploy.sh docker --image-source mainland
+# Use a mainland registry
+bash deploy.sh docker --defaults --image-source mainland
 
-+# Use local latest images
-bash deploy.sh docker --image-source local-latest
+# Use local application images tagged latest
+bash deploy.sh docker --defaults --image-source local-latest
 ```
 
 #### HTTPS (Optional)
 
-Nexent can terminate HTTPS at an Nginx reverse proxy installed alongside the stack. The option is disabled by default; when enabled, HTTPS uses a dedicated entry port: port 3100 for Docker deployments and NodePort 31000 for Kubernetes deployments. The plain HTTP entry (Docker 3000 / K8s 30000) stays unchanged, so both entries can be used at the same time. To change the entry ports, set `NEXENT_WEB_PORT` (HTTP entry) or `NEXENT_HTTPS_PORT` (HTTPS entry) in `deploy/env/.env`.
+Docker serves the web interface over HTTP on port 3000 by default. When you enable HTTPS, Nginx accepts encrypted connections on port 3100 and forwards requests to Web. Set `NEXENT_WEB_PORT` in `deploy/env/.env` to change the HTTP port. With the `production` port policy, set `NEXENT_HTTPS_PORT` to change the HTTPS port.
 
-Enable it interactively (the installer asks one question: the HTTPS mode) or non-interactively:
+The interactive installer prompts you to choose an HTTPS mode. To enable it non-interactively, use one of these commands.
 
 ```bash
 # Self-signed certificate (recommended for internal deployments)
@@ -91,19 +109,15 @@ bash deploy.sh docker --defaults --https-mode custom --https-cert-file /path/to/
 
 - **self-signed**: the installer generates a 99-year certificate with an unencrypted private key under `<ROOT_DIR>/nginx/ssl/` and reuses it on redeployment. SAN entries are auto-detected from the host network interfaces (loopback and Docker bridges excluded); preset `NEXENT_HTTPS_SAN` in `deploy/env/.env` to override (for example `NEXENT_HTTPS_SAN=10.0.0.5,example.com`). Browsers show an untrusted-certificate warning; import the certificate into your trust store to silence it.
 - **custom**: point `NEXENT_HTTPS_CERT_FILE` and `NEXENT_HTTPS_KEY_FILE` at your PEM files. The installer validates the pair (PEM format, key/cert match, expiry) before deploying. Encrypted private keys are supported: provide the passphrase via `NEXENT_HTTPS_KEY_PASSPHRASE` or `--https-key-passphrase`; like other deployment credentials, it is stored in plain text in `deploy/env/.env`.
-- After enabling HTTPS, update `SITE_URL` in `deploy/env/.env` (for example `SITE_URL=https://your-host:3100`) so auth callbacks and generated links use the HTTPS entry point.
-- After changing the HTTP/HTTPS entry ports, update callback URLs such as `OAUTH_CALLBACK_BASE_URL` and `CAS_CALLBACK_BASE_URL` if they contain the old port.
+- If you use OAuth or CAS, set `OAUTH_CALLBACK_BASE_URL` or `CAS_CALLBACK_BASE_URL` to the address users open in their browsers, for example `https://nexent.example.com:3100`. If you configured a fixed address for shared conversations, also update `SHARE_BASE_URL`.
+
 - Disabling HTTPS again (`--https-mode disabled`) removes the Nginx container; the certificate files are kept and can be reused later.
 
 After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. `--defaults` reuses that file when it exists, otherwise it uses built-in defaults. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
-#### ⚠️ Important Notes
+#### Administrator password for a fresh installation
 
-1️⃣ **When deploying v1.8.0 or later for the first time**, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123`, without prompting, and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`; non-interactive creation displays the effective password. As an exception, an offline package launched with `--config` prompts for and confirms the password, and that input takes precedence without being displayed.
-
-> This account is used for permission management only and cannot develop agents or create knowledge bases. Log in with this account and complete: Access tenant resources → Create tenant → Create tenant administrator, then log in with the tenant administrator account to use all features. For role permissions, see [User Management](../user-guide/resource-management).
-
-2️⃣ For historical account upgrades, administrator failures and data recovery, use the [consolidated migration runbook](https://github.com/ModelEngine-Group/nexent/blob/develop/deploy/sql/tools/supabase_to_postgres/README.md). Preserve the original account ID and tenant ownership; recover consistent data as described there.
+Installing the full application creates the super administrator account `suadmin@nexent.com`. To set its password before the first installation, set `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`. The default is `Nexent@123`. The installer displays the password in the terminal after it creates the account automatically. When you run an offline package with `--config`, it prompts you to enter and confirm the password and hides your input.
 
 ### Offline Deployment
 
@@ -115,15 +129,15 @@ When the target host cannot access public image registries, download a prebuilt 
 
 GitHub Actions artifacts are retained for 30 days. If the required artifact has expired, ask a maintainer to rerun the workflow.
 
-Copy the downloaded archive to the offline host and extract it. The downloaded artifact contains the package files directly, with no nested archive:
+Copy the archive to the offline host. Replace the filename in the example with the file you downloaded, extract it, and run the installer.
 
 ```bash
-unzip nexent-<version>-amd64.zip -d nexent
+unzip 'nexent-<version>-amd64.zip' -d nexent
 cd nexent
 bash deploy.sh --load-images docker
 ```
 
-The offline package installs all Nexent components by default. Add `--config` to reselect components, port policy, image source, or monitoring provider:
+The offline package skips the configuration menu by default. Its `manifest.yaml` lists the components and images selected when the package was built. The official workflow includes images for infrastructure, the application, data processing, and the terminal tool. Use `--config` to enable the terminal tool or change the component selection. The images required by your selected components and sandbox mode must be in the package or already loaded on the server.
 
 ```bash
 bash deploy.sh --load-images --config docker
@@ -140,9 +154,7 @@ bash deploy.sh \
 
 The specified directory must be the root of an extracted previous package and contain `deploy/env/.env`. This option imports the old `.env`, preserves its values, and immediately appends variables newly introduced by the current package's `.env.example`. It also reuses `monitoring.env` and Docker `deploy.options` when present; the new scripts regenerate Docker-derived configuration. `--reuse-from` can be combined with `--config`, `--defaults`, or `--push-images`.
 
-When `suadmin@nexent.com` is created for the first time, non-interactive deployment uses `NEXENT_SUPER_ADMIN_PASSWORD`, which defaults to `Nexent@123`, and displays the effective password after successful creation. Offline deployment with `--config` prompts for and confirms the password; that input is neither persisted nor displayed.
-
-To push the packaged images to an internal registry accessible to the target environment:
+To push the packaged images to an internal registry accessible from the target environment, run the following command.
 
 ```bash
 bash deploy.sh \
@@ -155,66 +167,79 @@ When the prefix is omitted, the wrapper prompts for it. `push-images.sh` then pr
 
 ### Access Your Installation
 
-When deployment completes successfully:
+1. On the deployment host, open `http://localhost:3000`. From another device, use the host's domain name or IP address. If you enabled built-in HTTPS, the default URL is `https://<deployment-host>:3100`.
+2. Sign in as `suadmin@nexent.com` with the password set during installation. In **Tenant Resources**, create a tenant and invite a tenant administrator.
+3. Sign in as the tenant administrator to configure models and resources. See the [User Guide](../user-guide/home-page).
 
-> **Get the administrator password**: The super administrator account is `suadmin@nexent.com`. On its first non-interactive creation, the terminal displays the effective password; when no value was configured, the default password is `Nexent@123`. For an offline deployment using `--config`, the manually entered password is neither saved nor displayed. If it is forgotten, recreate the account by following the earlier "Recreate the `suadmin` account" steps.
+Authentication cookies have the `Secure` attribute by default. Use HTTPS when connecting from other devices, including through an external reverse proxy. If an isolated test environment can reach the remote host only over HTTP, set `NEXENT_AUTH_COOKIE_SECURE=false` in `deploy/env/.env` and redeploy with the same options. Set it back to `true` when you enable HTTPS.
 
-1. Open **http://localhost:3000** in your browser
-2. Log in with the super administrator account
-3. Access tenant resources → Create tenant and tenant administrator
-4. Log in with the tenant administrator account
-5. Refer to the [User Guide](../user-guide/home-page) to develop agents
+On the deployment host, check the container status and the readiness of Gateway and Ops. These commands use the default ports.
 
+```bash
+docker ps -a --filter label=com.docker.compose.project=nexent
+curl --fail http://localhost:5013/health/ready
+curl --fail http://localhost:5016/health/ready
+```
 
-## 🏗️ Service Architecture
+If Web opens but management API calls fail, run the Gateway image's built-in `curl` to check Management readiness from inside the container. This also works with the production port policy, where Management is reachable only on the container network.
 
-Nexent uses a microservices architecture deployed via Docker Compose.
+```bash
+docker exec nexent-gateway curl --fail --show-error --silent --noproxy '*' --max-time 5 http://nexent-config:5010/health/ready
+```
 
-**Application Services:**
-| Service | Description | Default Port |
-|---------|-------------|--------------|
-| nexent-config | Configuration and management API | 5010 |
+For legacy account migration, administrator account issues, and data recovery, see the [migration and troubleshooting guide](https://github.com/ModelEngine-Group/nexent/blob/develop/deploy/sql/tools/supabase_to_postgres/README.md).
+
+## 📦 Service Architecture
+
+Nexent uses a microservice architecture deployed with Docker Compose.
+
+**Application services**
+
+| Service | Description | Default port |
+| --- | --- | --- |
+| nexent-web | Web interface. Browser requests reach the backend through Gateway. | 3000 |
+| nexent-gateway | Common API entry point. Authenticates requests and forwards them to Management, Runtime, and Ops. | 5013 |
+| nexent-config | Management service for configuration, resource management, and Northbound APIs | 5010 |
 | nexent-runtime | Agent runtime API | 5014 |
 | nexent-mcp | MCP management and tool service | 5011/5015 |
-| nexent-web | Web frontend | 3000 |
-| nexent-data-process | Data processing service | 5012 |
-| nexent-northbound | Northbound API service | 5013 |
+| nexent-ops | Operations metrics and historical trace queries | 5016 |
 
-**Infrastructure Services:**
+**Infrastructure services**
+
 | Service | Description |
-|---------|-------------|
+| --- | --- |
 | nexent-postgresql | Relational database |
-| nexent-elasticsearch | Search and indexing engine |
+| nexent-elasticsearch | Search and indexing |
 | nexent-minio | S3-compatible object storage |
 | redis | Cache, distributed locks, and task message broker |
 
-**Optional Services:**
-| Service | Description |
-|---------|-------------|
-| nexent-openssh-server | SSH terminal for AI agents |
-| nexent-monitoring | Optional observability stack |
+**Optional services**
 
-**On-Demand Execution Environment:**
+| Service or component | Description |
+| --- | --- |
+| nexent-data-process | Data processing API (port 5012) and background processing jobs |
+| nexent-openssh-server | SSH terminal for agents |
+| monitoring | Installs the OpenTelemetry Collector and starts the monitoring services for the selected backend |
+
+**On-demand execution environment**
 
 | Component | Description |
-|---------|-------------|
-| nexent-sandbox | Isolated execution environment created by the Runtime service according to policy for running model-generated code and Skill scripts |
-
-Internal services communicate using the Docker internal network.
+| --- | --- |
+| nexent-sandbox | Isolated environment that Runtime creates according to policy to run model-generated code and Skill scripts |
 
 ## 💾 Data Persistence
 
-Nexent uses Docker volumes for data persistence:
+Docker deployments store database files, objects, and raw traces in host directories. The default root is `$HOME/nexent-data` for the user running the installer. Set `ROOT_DIR` in `deploy/env/.env` to use another location.
 
-| Data Type | Volume Name | Default Host Path |
-|-----------|------------------|-------------------|
-| PostgreSQL | nexent-postgresql-data | `{dataDir}/postgresql` |
-| Elasticsearch | nexent-elasticsearch-data | `{dataDir}/elasticsearch` |
-| Redis | nexent-redis-data | `{dataDir}/redis` |
-| MinIO | nexent-minio-data | `{dataDir}/minio` |
-| Agent runtime workspace | nexent-agent-workspace | Docker named volume configured by `NEXENT_SANDBOX_WORKSPACE_VOLUME` |
-
-Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `deploy/env/.env`).
+| Data | Default mount and location |
+| --- | --- |
+| PostgreSQL | Host directory `${ROOT_DIR}/postgresql/data` |
+| Elasticsearch | Host directory `${ROOT_DIR}/elasticsearch` |
+| Redis | Host directory `${ROOT_DIR}/redis` |
+| MinIO | Host directory `${ROOT_DIR}/minio/data` |
+| Conversation traces | Host directory `${ROOT_DIR}/trajectory`, mounted by default at `/mnt/nexent-data/trajectory` in Management, Runtime, and Ops |
+| Service logs | Host directory `${ROOT_DIR}/logs` |
+| Agent workspace | Docker named volume `nexent-agent-workspace`, configurable with `NEXENT_SANDBOX_WORKSPACE_VOLUME` |
 
 ### Uninstall Docker Deployment
 
@@ -227,26 +252,29 @@ bash uninstall.sh docker
 # Non-interactive uninstall that keeps data
 bash uninstall.sh docker --keep-volumes
 
-# Delete Docker volumes and Nexent data under ROOT_DIR
+# Remove volumes and deployment-managed data directories
 bash uninstall.sh docker --delete-volumes true
 
-# Full cleanup: containers plus persistent data
+# Remove containers, volumes, and deployment-managed data directories
 bash uninstall.sh docker delete-all
 ```
 
-The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and removes Compose resources. Data deletion removes service directories such as `postgresql`, `elasticsearch`, `redis`, `minio`, `volumes`, `openssh-server`, `scripts`, and `skills`; keep volumes when you plan to redeploy with existing data.
+Choose to keep the volumes if you plan to reuse the data. If you choose to delete the data, the script removes the database, object storage, Skill, and other service directories. The host retains `${ROOT_DIR}/trajectory` and `${ROOT_DIR}/logs`.
 
 ## 🔌 Port Mapping
+
+The table shows common host port mappings under the `development` policy. The `production` policy publishes Web, Gateway, and Ops ports by default, plus the Nginx port when HTTPS is enabled.
 
 | Service | Internal Port | External Port | Description |
 |---------|---------------|---------------|-------------|
 | Web Interface | 3000 | 3000 (`NEXENT_WEB_PORT`) | Main application access |
-| HTTPS Entry | 3100 | 3100 (`NEXENT_HTTPS_PORT`) | Optional encrypted entry via Nginx (when HTTPS is enabled) |
-| Backend API | 5010 | 5010 | Backend service |
+| HTTPS Entry | 3100 | 3100 | Optional encrypted entry via Nginx (when HTTPS is enabled) |
+| Gateway API | 5013 | 5013 | Entry point for Web and Northbound APIs |
+| Ops API | 5016 | 5016 | Operations and historical traces |
+| Management API | 5010 | 5010 | Configuration and management service |
 | Runtime API | 5014 | 5014 | Agent runtime service |
 | MCP API | 5011/5015 | 5011/5015 | MCP management and tool service |
 | Data Processing | 5012 | 5012 | Data processing API |
-| Northbound API | 5013 | 5013 | Northbound interface service (A2A/MCP integration) |
 | PostgreSQL | 5432 | 5434 | Database connection |
 | Elasticsearch | 9200 | 9210 | Search engine API |
 | MinIO API | 9000 | 9010 | Object storage API |
@@ -254,11 +282,11 @@ The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and re
 | Redis | 6379 | 6379 | Cache service |
 | SSH Server | 22 | 2222 | Terminal tool access |
 
-For complete port mapping details, see our [Dev Container Guide](../deployment/devcontainer.md#port-mapping).
+For port forwarding when using a development container, see the [Dev Container Guide](../deployment/devcontainer).
 
 ## 🔧 Advanced Configuration
 
-The v2.5.0 deployment template uses Docker sandboxes by default and reuses system-scoped containers to reduce cold-start time. The Runtime service exchanges uploaded and generated files through a dedicated workspace volume. Artifacts that must be retained are synchronized to MinIO after a run.
+The Docker deployment template uses a system-scoped sandbox by default, allowing Runtime to reuse containers across runs. The Runtime service exchanges uploaded and generated files through a dedicated workspace volume. Artifacts that must be retained are synchronized to MinIO after a run.
 
 Common settings are defined in `deploy/env/.env`:
 
@@ -280,54 +308,39 @@ Do not change the isolation level to `local` in production. Redeploy the Runtime
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, `MONITORING_DASHBOARD_URL`, OTLP endpoints, and provider defaults in `deploy/env/monitoring.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`. Configure `MONITORING_DASHBOARD_ALLOWED_ROLES` to choose which roles see the frontend monitoring entry; its default is `SU,SPEED`.
+The Operations Dashboard uses `OPS_MONITORING_TIMEZONE` to determine the date for daily statistics. For new installations, `deploy/env/.env.example` sets the timezone to `Asia/Shanghai`. Existing installations keep the timezone saved in `deploy/env/.env`.
+
+#### View local traces in the Observability Center
+
+When you deploy `application` with the default options, Runtime captures agent conversation traces and Ops serves historical queries. The default component selection is sufficient for the built-in Observability Center.
+
+1. Confirm that `LOCAL_FILE_MONITORING_ENABLED=true` in `deploy/env/.env` (the default). The installer copies this setting to `deploy/env/monitoring.env` and sets `TRAJECTORY_READ_ENABLED=true` there to enable historical queries.
+2. After deployment, run the following command to check the Ops container. A ready container reports `healthy`. By default, Config, Runtime, and Ops all mount the host's `${ROOT_DIR}/trajectory` at `/mnt/nexent-data/trajectory` and must be able to access the same files.
+
+   ```bash
+   docker inspect --format '{{.State.Health.Status}}' nexent-ops
+   ```
+
+3. Complete a turn in Agent Chat and copy the conversation ID at the top. Using an operations administrator or super administrator account with access to the page, search for the ID in the **Observability Center** and open the conversation details. See the [Observability Center guide](../user-guide/observability).
+
+To stop capturing new conversations while keeping historical traces available during their retention period, set `LOCAL_FILE_MONITORING_ENABLED=false` in `deploy/env/.env`, keep `TRAJECTORY_READ_ENABLED=true` in `deploy/env/monitoring.env`, and run `bash deploy.sh docker --defaults` to apply the changes.
+
+#### Export traces to a third-party platform
+
+To also send telemetry to another platform, select `monitoring` in the deployment menu and choose a destination. Local capture has its own setting. The following command adds Phoenix to the default component set.
 
 ```bash
-cd nexent
-bash deploy.sh docker
+bash deploy.sh docker --components infrastructure,application,data-process,monitoring --monitoring-provider phoenix
 ```
 
-If `deploy/docker/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
+| Destination | Access after deployment |
+| --- | --- |
+| `otlp` | Starts the OpenTelemetry Collector. Its debug exporter writes to the Collector log by default. |
+| `phoenix` | Runs Phoenix locally. Open `http://localhost:6006` on the deployment host. |
+| `langfuse` | Runs Langfuse locally. Open `http://localhost:3001` on the deployment host. |
+| `langsmith` | Sends traces to hosted LangSmith. Before deployment, set `LANGSMITH_API_KEY` in `deploy/env/monitoring.env` and set `LANGSMITH_PROJECT` if needed. |
 
-Supported providers:
-
-| Provider | Purpose | Default URL |
-|----------|---------|-------------|
-| `otlp` | OpenTelemetry Collector only, useful for forwarding to an external platform | No dashboard |
-| `phoenix` | Local Phoenix trace analysis | `http://localhost:6006` |
-| `langfuse` | Local Langfuse observability stack | `http://localhost:3001` |
-| `langsmith` | Forwarding to hosted LangSmith | `https://smith.langchain.com/` |
-| `grafana` | Local Grafana + Tempo | `http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
-| `zipkin` | Local Zipkin | `http://localhost:9411` |
-
-To change ports, image versions, or local Langfuse bootstrap credentials, copy and edit the monitoring environment file first:
-
-```bash
-cp deploy/env/monitoring.env.example deploy/env/monitoring.env
-```
-
-Common variables:
-
-| Variable | Description |
-|----------|-------------|
-| `MONITORING_PROVIDER` | Default monitoring provider; updated when you choose a provider in the deployment script |
-| `MONITORING_DASHBOARD_ALLOWED_ROLES` | Comma-separated roles that can see the monitoring dashboard entry; for example `SU,ADMIN,SPEED` |
-| `OTEL_COLLECTOR_HTTP_PORT` / `OTEL_COLLECTOR_GRPC_PORT` | Published OTLP HTTP/gRPC ports |
-| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith forwarding configuration |
-| `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
-| `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
-
-Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/env/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `deploy/env/monitoring.env`:
-
-```bash
-ENABLE_TELEMETRY=true
-MONITORING_PROVIDER=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http
-MONITORING_DASHBOARD_URL=
-```
-
-> **Production note**: Replace default passwords, secrets, and the Langfuse `ENCRYPTION_KEY`. Restrict dashboard and Collector access with a reverse proxy or firewall.
+`MONITORING_DASHBOARD_URL` controls the third-party dashboard URL. `MONITORING_DASHBOARD_ALLOWED_ROLES` specifies which roles can see its link. Remote users must be able to reach the URL from their browsers. To change the Phoenix or Langfuse port, edit `PHOENIX_PORT` or `LANGFUSE_PORT` in `deploy/env/monitoring.env`, update the dashboard URL, and redeploy.
 
 ### OAuth Login Configuration
 
@@ -395,6 +408,8 @@ For Docker, configure CAS in `deploy/env/.env`:
 ```bash
 CAS_ENABLED=true
 CAS_SERVER_URL=http://localhost:8080/cas
+# Optional internal CAS URL for backend containers. Leave empty to use CAS_SERVER_URL.
+CAS_INTERNAL_SERVER_URL=
 CAS_VALIDATE_PATH=/p3/serviceValidate
 CAS_CALLBACK_BASE_URL=http://localhost:3000
 
@@ -410,7 +425,7 @@ CAS_ROLE_ATTRIBUTE=role
 CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
 CAS_DEFAULT_TENANT_ID=tenant_id
-CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
+CAS_ROLE_MAP_JSON='{"cas-admin":"ADMIN","cas-user":"USER"}'
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
 CAS_HEARTBEAT_URL=
@@ -461,13 +476,13 @@ In production, keep `CAS_SSL_VERIFY=true`; for self-signed certificates, prefer 
 
 #### CAS Integration with ModelEngine
 
-When integrating with ModelEngine through the CAS protocol, deploy Nexent with the following configuration:
+Add the following settings to `deploy/env/.env`. Replace the placeholders in angle brackets with the values for your installation.
 
 ```bash
 CAS_ENABLED=true
-CAS_SERVER_URL=https://<ModelEngine IP>:5443/SSOSvr
+CAS_SERVER_URL='https://<ModelEngine IP>:5443/SSOSvr'
 CAS_VALIDATE_PATH=/p3/serviceValidate
-CAS_CALLBACK_BASE_URL=http://<Nexent IP>:3000
+CAS_CALLBACK_BASE_URL='http://<Nexent IP>:3000'
 CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=userName
 CAS_EMAIL_ATTRIBUTE=email
@@ -475,25 +490,23 @@ CAS_ROLE_ATTRIBUTE=userType
 CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
 CAS_DEFAULT_TENANT_ID=tenant_id
-CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
+CAS_ROLE_MAP_JSON='{"1":"ADMIN","3":"DEV"}'
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
-CAS_HEARTBEAT_URL=https://<ModelEngine IP>:5443/<heartbeat-path>
+CAS_HEARTBEAT_URL='https://<ModelEngine IP>:5443/<heartbeat-path>'
 CAS_HEARTBEAT_INTERVAL_SECONDS=300
-CAS_HEARTBEAT_COOKIE_NAME=<cookie-name>
+CAS_HEARTBEAT_COOKIE_NAME='<cookie-name>'
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
-CAS_LOGOUT_URL=/logout?service=http://<Nexent IP>:3000
+CAS_LOGOUT_URL='/logout?service=http://<Nexent IP>:3000'
 CAS_SSL_VERIFY=false
 CAS_CA_BUNDLE=
 ```
 
-You also need to add a CAS client service registration file in the OMS container. Use the following steps as a reference:
+Save the following JSON as `Nexent-10000001.json`, replacing `<Nexent IP>` with the actual address.
 
-```bash
-# Create the registration file, paste the JSON content into it, and save it.
-vim Nexent-10000001.json
+```json
 {
   "@class": "org.apereo.cas.services.CasRegisteredService",
   "serviceId": "http://<Nexent IP>:3000.*",
@@ -504,35 +517,22 @@ vim Nexent-10000001.json
   "logoutType": "BACK_CHANNEL",
   "logoutUrl": "http://<Nexent IP>:3000/api/user/cas/logout_callback"
 }
+```
 
-# Run the following command to copy the registration file into the container.
+From a terminal with access to the ModelEngine cluster, copy the registration file into the OMS container and set its owner.
+
+```bash
 kubectl cp Nexent-10000001.json model-engine/$(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}'):/opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
 kubectl exec -i -n model-engine $(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}') -- chown tomcat:fusioncube /opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
 ```
 
 ### Northbound Interface Configuration (NORTHBOUND_EXTERNAL_URL)
 
-If you need to use any of the following features, configure the `NORTHBOUND_EXTERNAL_URL` environment variable:
+Gateway serves the Northbound APIs on port `5013` by default. Nexent uses `NORTHBOUND_EXTERNAL_URL` to generate A2A agent addresses and external file links. The default is `http://localhost:5013/api`. If a third-party system connects from another host, set this variable in `deploy/env/.env` to a Gateway or reverse proxy address that system can reach. Keep the trailing `/api`, as in the following HTTPS example.
 
-1. **A2A Protocol Integration** - Third-party systems calling Nexent agents via A2A protocol
-2. **MCP Tool Access** - Using MCP protocol to access Nexent resources like documents
-
-**Configuration:**
-
-Set the publicly accessible URL in your `deploy/env/.env` file:
-
-```bash
-# Format: protocol://host:port/api
-# Local development (default):
-NORTHBOUND_EXTERNAL_URL=http://localhost:5013/api
-
-# Production - use your public IP or domain:
-NORTHBOUND_EXTERNAL_URL=http://your-public-ip:5013/api
-# or
+```dotenv
 NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
 ```
-
-> **Important**: The URL must include the `/api` suffix because the Northbound service uses FastAPI's `root_path="/api"` configuration.
 
 ## 🤖 Official Agent Deployment
 
