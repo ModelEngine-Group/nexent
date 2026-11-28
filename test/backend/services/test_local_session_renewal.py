@@ -110,7 +110,7 @@ def test_issue_signs_token_and_persists_only_refresh_digest(monkeypatch, clock, 
 
 
 def test_rotate_persists_one_successor_and_retry_returns_identical_tokens(monkeypatch, clock, row):
-    access = access_at(clock - 60)
+    access = access_at(clock - 60, lifetime=300)
     row["absolute_expires_at"] = clock + 600
     db = renewal_database(monkeypatch, row)
 
@@ -157,6 +157,19 @@ def test_rotate_persists_one_successor_and_retry_returns_identical_tokens(monkey
     db = renewal_database(monkeypatch, {**rotated, "retry_until": clock})
     with pytest.raises(UnauthorizedError, match="Invalid refresh token"):
         local_session.rotate_local_session(access, REFRESH, REQUEST_ID)
+    assert db.execute.call_count == 3
+
+    for seconds_later in (30, 60, 90):
+        monkeypatch.setattr(local_session.time, "time", lambda now=clock + seconds_later: now)
+        db = renewal_database(monkeypatch, rotated)
+        assert local_session.rotate_local_session(
+            result["access_token"], result["refresh_token"], f"activity-request-{seconds_later}",
+        ) is None
+        assert db.execute.call_count == 3
+
+    db = renewal_database(monkeypatch, rotated)
+    with pytest.raises(UnauthorizedError, match="Invalid refresh token"):
+        local_session.rotate_local_session(result["access_token"], "x" * 43, REQUEST_ID)
     assert db.execute.call_count == 3
 
 

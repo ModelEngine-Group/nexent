@@ -167,12 +167,29 @@ test("a rotation conflict keeps the session and invalid credentials expire it", 
   assert.equal(expirations, 1);
 });
 
-test("foreground activity starts renewal only inside the 30 minute window", async () => {
+test("foreground activity starts renewal inside the window and stops after the absolute limit response", async () => {
   const listeners = new Map();
   const effects = [];
-  const now = 1_000_000_000;
+  let now = 1_000_000_000;
   let expiresAt = now / 1_000 + 1_801;
+  const absoluteExpiresAt = now / 1_000 + 1_900;
   let requests = 0;
+  const service = loadRefreshService({
+    expiresAt: () => expiresAt,
+    fetch: async () => {
+      requests += 1;
+      if (requests === 1) {
+        expiresAt = absoluteExpiresAt;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: { session: { expires_at: expiresAt } } }),
+        };
+      }
+      return { ok: true, status: 204 };
+    },
+    onExpiry: () => assert.fail("unexpected logout"),
+  });
   const document = {
     hidden: false,
     addEventListener: (name, handler, options) =>
@@ -195,12 +212,7 @@ test("foreground activity starts renewal only inside the 30 minute window", asyn
     },
     "@/services/sessionService": {
       withLocalSessionLock: (callback) => callback(),
-      sessionService: {
-        discardPreviousRefreshAttempt: () => {},
-        refreshToken: async () => {
-          requests += 1;
-        },
-      },
+      sessionService: service,
     },
     "@/lib/authFlow": {
       authFlowState: { isExplicitLogoutInProgress: () => false },
@@ -242,4 +254,15 @@ test("foreground activity starts renewal only inside the 30 minute window", asyn
   assert.equal(requests, 0);
   await dispatch("keydown", true, true);
   assert.equal(requests, 1);
+  assert.equal(expiresAt, absoluteExpiresAt);
+
+  now += 100_000;
+  await dispatch("click");
+  assert.equal(requests, 2);
+  for (const type of ["keydown", "touchstart", "click"]) {
+    now += 30_000;
+    await dispatch(type);
+  }
+  assert.equal(requests, 2);
+  assert.equal(expiresAt, absoluteExpiresAt);
 });

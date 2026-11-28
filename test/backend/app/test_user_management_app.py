@@ -471,6 +471,17 @@ class TestRefreshToken:
             assert "session" in data["data"]
             mock_refresh.assert_called_once_with("old_token", "old_refresh_token", None)
 
+    def test_refresh_token_at_absolute_limit(self):
+        with patch("management.api.identity.user_management.refresh_user_token", return_value=None):
+            response = client.post(
+                "/user/refresh_token",
+                json={"refresh_token": "current_refresh_token"},
+                headers={"Authorization": "Bearer current_token"},
+            )
+
+        assert response.status_code == HTTPStatus.NO_CONTENT
+        assert response.content == b""
+
     def test_refresh_token_no_authorization(self):
         """Test token refresh without authorization header"""
         response = client.post(

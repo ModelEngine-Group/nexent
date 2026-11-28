@@ -11,7 +11,7 @@ from typing import Optional
 from contracts.errors.exceptions import AccountConflictError
 from dotenv import load_dotenv
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from contracts.constants.constants import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 from contracts.errors.codes import ErrorCode
@@ -141,6 +141,8 @@ async def user_refresh_token(request: Request):
         session_info = await refresh_user_token(
             extract_bearer_token(authorization), refresh_token, request.headers.get("X-Refresh-Request-Id"),
         )
+        if session_info is None:
+            return Response(status_code=HTTPStatus.NO_CONTENT)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": "Token refresh successful", "data": {"session": session_info}})
     except UnauthorizedError as e:

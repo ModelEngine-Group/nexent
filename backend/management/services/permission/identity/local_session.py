@@ -92,7 +92,8 @@ def _verified_claims(access_token: str) -> dict:
     return claims
 
 
-def rotate_local_session(access_token: str, refresh_token: str, request_id: str | None) -> dict:
+def rotate_local_session(access_token: str, refresh_token: str, request_id: str | None) -> dict | None:
+    """Rotate or replay credentials, or return None when the session cannot be extended."""
     if not isinstance(refresh_token, str) or not 32 <= len(refresh_token) <= 128:
         raise UnauthorizedError("Invalid refresh token")
     if request_id is not None and not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", request_id):
@@ -135,6 +136,9 @@ def rotate_local_session(access_token: str, refresh_token: str, request_id: str 
                                          row["access_expires_at"], row["idle_expires_at"])
                 raise RefreshConflict("Session refresh was already processed")
             raise UnauthorizedError("Invalid refresh token")
+
+        if claims["exp"] >= row["absolute_expires_at"]:
+            return None
 
         nonce = secrets.token_hex(16)
         replacement = _successor(refresh_token, sid, nonce)
