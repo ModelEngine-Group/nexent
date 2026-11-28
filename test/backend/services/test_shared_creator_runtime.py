@@ -58,6 +58,56 @@ async def test_creator_marks_only_full_generation_requests(preparation, query, w
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("request_text", "stage"), [
+    ("Create a research assistant.", "prepare"),
+    ("Update the description.", None),
+    (None, None),
+])
+async def test_clarification_uses_the_latest_user_request_to_resume_creation(preparation, request_text, stage):
+    clarification = json.dumps({
+        "type": "nl2agent_card_action", "subtype": "requirement_clarification", "agent_id": 42,
+    })
+    history = [{"role": "user", "content": request_text}] if request_text else []
+    history.extend([
+        {"role": "assistant", "content": "Create an agent?"},
+        {"role": "user", "content": clarification},
+    ])
+
+    payload = await creator_run.prepare_nl2agent_snapshot(
+        NL2AgentRunRequest(query=clarification, agent_id=42, history=history), ServicePrincipal("user", "tenant"), "en",
+    )
+
+    assert payload.generation_stage == stage
+
+
+@pytest.mark.asyncio
+async def test_accepted_prompt_resumes_only_the_remaining_creation_steps(preparation, mocker):
+    actor = ServicePrincipal("user", "tenant")
+    data = {"card_id": "approved", "prompt_revision": "revision"}
+    request = NL2AgentRunRequest(query=json.dumps({
+        "type": "nl2agent_card_action", "subtype": "prompt_generation", "agent_id": 42,
+        "action": "apply", "result": data,
+    }), agent_id=42)
+    payload = (await creator_run.prepare_nl2agent_snapshot(request, actor, "en")).model_copy(update={"conversation_id": 7})
+    mocker.patch.object(authorization, "require_agent_draft_edit")
+    apply_prompt = mocker.patch.object(nl2agent_prompt_service, "apply_action", return_value={
+        "saved": True, "resume": True, "card": {"subtype": "prompt_generation", "status": "applied"},
+    })
+
+    result, frames = await creator_run._apply_card_action(payload, actor, request)
+
+    apply_prompt.assert_awaited_once_with(ResourceScope("tenant", "user", 42, "7", payload.run_id), "apply", data,
+                                         resume_confirmation=False)
+    assert result.generation_stage == "finalize"
+    assert all(field in result.input.query for field in (
+        "greeting_message", "example_questions", "nl2a_validate_agent_generation_complete",
+    ))
+    assert [frame["type"] for frame in frames] == ["nl2a_state", "nl2a"]
+    assert json.loads(frames[0]["content"])["updated_fields"] == ["prompt"]
+    assert preparation.await_args.kwargs["prompt_scope"] is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(("purpose", "next_step", "validate_only", "expected_stage"), [
     ("generate", None, False, "generate_prompt"),
     ("generate", "generate_prompt", False, "generate_prompt"),

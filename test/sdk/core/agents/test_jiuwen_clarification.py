@@ -208,6 +208,23 @@ def test_only_bare_workbench_form_is_repaired():
     assert not c.has_workbench_form_text(f"Example:\n\x60\x60\x60json\n{body}\n\x60\x60\x60")
     assert not c.has_workbench_form_text(json.dumps(FORM))
     assert not control().has_workbench_form_text(body)
+    assert not c.has_workbench_form_text(json.dumps({"questions": [CREATION_QUESTION], "example": True}))
+    assert not c.has_workbench_form_text(json.dumps({"questions": [42, {"id": "ordinary"}, "workbench_creation_mode"]}))
+
+
+@pytest.mark.parametrize(("language", "instruction"), [
+    ("en", "For creation-mode confirmation"),
+    ("zh", "进入创建模式时"),
+])
+def test_workbench_confirmation_instructions_apply_only_to_native_workbench(language, instruction):
+    from nexent.core.agents.cores.jiuwen.clarification import JiuwenClarification
+
+    workbench = JiuwenClarification(set(), workbench=True)
+
+    guidance = workbench.instructions(language)
+    assert instruction in guidance and workbench.name in guidance
+    assert instruction not in workbench.instructions(language, text_protocol=True)
+    assert instruction not in control().instructions(language)
 
 
 @pytest.fixture

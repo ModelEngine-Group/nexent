@@ -91,14 +91,49 @@ def test_full_generation_advances_only_on_trusted_receipts():
     assert observer.pending_full_generation_action() == "discover_resources"
     send("nl2a_validate_agent_generation_complete", {"event": "agent_generation_completed"}, "early")
     assert observer.pending_full_generation_action() == "discover_resources"
+    observer.record_verification_result("discover_requirements", {"status": "success", "next_step": "prepare_search_queries"})
+    assert observer.pending_full_generation_action() == "prepare_search_queries"
+    observer.record_verification_result("discover_requirements", {"status": "success", "verification_batch_id": "batch"})
+    assert observer.pending_full_generation_action() == "verify_resources"
+    assert observer.has_pending_nl2agent_verification()
+    observer.record_verification_result("show_resource_card", "not a JSON observation")
+    observer.record_verification_result("verify_requirements", "[]")
+    observer.record_verification_result("verify_requirements", {"status": "error", "code": "verification_assessments_incomplete"})
+    assert observer.pending_full_generation_action() == "verify_resources"
+    observer.record_verification_result("verify_requirements", {"status": "success", "verification_batch_id": None})
+    assert observer.pending_full_generation_action() == "show_resource_card"
+    assert not observer.has_pending_nl2agent_verification()
     observer.record_verification_result("show_resource_card", {"status": "success", "card_required": False})
     assert observer.pending_full_generation_action() == "generate_prompt"
     send("nl2a_save_agent_draft_fields", {"event": "agent_draft_fields_saved", "updated_fields": ["prompt"]}, "prompt")
     assert observer.pending_full_generation_action() == "finalize"
     send("nl2a_validate_agent_generation_complete", {"event": "agent_generation_completed"}, "foreign", "other")
     assert observer.pending_full_generation_action() == "finalize"
+    send("nl2a_save_agent_draft_fields", {"event": "agent_draft_fields_saved", "updated_fields": ["greeting_message"]},
+         "greeting")
+    assert observer.pending_full_generation_action() == "finalize"
+    send("nl2a_save_agent_draft_fields", {"event": "agent_draft_fields_saved", "updated_fields": ["example_questions"]},
+         "questions")
+    assert observer.pending_full_generation_action() == "validate"
     send("nl2a_validate_agent_generation_complete", {"event": "agent_generation_completed"}, "validated")
     assert observer.pending_full_generation_action() is None
+
+
+def test_authorized_resource_card_pauses_full_generation_and_clears_pending_actions():
+    observer = runtime._Nl2AgentBoundaryObserver(
+        lang="en", stop_event=Event(), agent_id=7, run_id="run", conversation_id="9", generation_stage="prepare",
+    )
+    observer.record_verification_result("show_resource_card", {"status": "error", "code": "verification_incomplete"})
+    assert observer.has_pending_nl2agent_verification()
+    observer.on_mcp_tool_result("nl2a_show_resource_card", {NL2AGENT_RECEIPT_KEY: {
+        "event_id": "resource-card", "run_id": "run", "conversation_id": "9",
+        "payload": {"agent_id": 7, "subtype": "requirement_resources", "protocol_version": 2,
+                    "run_id": "run", "conversation_id": "9", "card_id": "card", "state_version": 2},
+    }})
+    assert observer.turn_complete
+    assert observer.pending_full_generation_action() is None
+    assert not observer.has_pending_nl2agent_verification()
+    assert [json.loads(item)["type"] for item in observer.get_cached_message()] == ["nl2a"]
 
 
 @pytest.mark.asyncio
