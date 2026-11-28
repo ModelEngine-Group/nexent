@@ -1286,8 +1286,9 @@ async def test_perform_connectivity_check_multi_embedding_dashscope():
 
 
 @pytest.mark.asyncio
-async def test_perform_connectivity_check_stt_volc():
-    """L249: STT with volcengine factory uses appid/access_token path"""
+@pytest.mark.parametrize("model_name", ["speech_istreaming", "volc.seedasr.sauc.duration"])
+async def test_perform_connectivity_check_stt_volc(model_name):
+    """Forward the selected Volcano STT model and its application credentials."""
     with mock.patch("runtime.model.health.get_voice_service") as mock_get_voice_service:
         mock_service_instance = mock.MagicMock()
         async_mock = mock.AsyncMock(return_value=True)
@@ -1295,15 +1296,16 @@ async def test_perform_connectivity_check_stt_volc():
         mock_get_voice_service.return_value = mock_service_instance
 
         result = await _perform_connectivity_check(
-            "some-stt-model", "stt", "https://volc.example.com", "test-key",
+            model_name, "stt", "https://volc.example.com", "test-key",
             model_factory="volcengine", model_appid="app-123", access_token="tok-456",
         )
 
         assert result is True
-        mock_service_instance.check_voice_connectivity.assert_called_once_with(
+        mock_service_instance.check_voice_connectivity.assert_awaited_once_with(
             model_type="stt",
             stt_config={
                 "model_factory": "volcengine",
+                "model": model_name,
                 "model_appid": "app-123",
                 "access_token": "tok-456",
                 "base_url": "https://volc.example.com",
