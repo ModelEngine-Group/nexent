@@ -111,9 +111,17 @@ async def provider(scenario, protocol):
                 call = calls[0] if calls else call
             if scenario.startswith("clarify"):
                 questions = [{"id": "birth", "type": "text", "title": "Please provide your birth date", "required": True}]
+                if scenario == "clarify_workbench_text":
+                    questions = [{"id": "workbench_creation_mode", "type": "single_choice", "title": "Create an Agent?",
+                        "options": [{"id": "agent_create", "label": "Create"},
+                                    {"id": "continue_chat", "label": "Continue chat"}]}]
+                    if not first:
+                        questions[0]["creation_request"] = "Summarize the supplied research reports."
                 if scenario == "clarify_bad":
                     questions = []
-                if scenario == "clarify_answered":
+                if scenario == "clarify_workbench_text" and first:
+                    content, calls = "Choose a mode.\n" + json.dumps({"questions": questions}), []
+                elif scenario == "clarify_answered":
                     content, calls = "ANSWER_USING_SUPPLIED_BIRTH_DATE", []
                 elif protocol == "native":
                     name = next((tool["function"]["name"] for tool in body.get("tools", [])
@@ -152,9 +160,13 @@ async def provider(scenario, protocol):
                     if scenario == "empty_call_id":
                         await frame({"tool_calls": [{"index": 0, "id": "", "type": "function",
                                                       "function": {"arguments": ""}}]})
-                    await frame({"tool_calls": [{"index": 0, "function": {
+                    continuation = {"index": 0, "function": {
                         "arguments": call["function"]["arguments"][len(call["function"]["arguments"])//2:] if scenario != "bad_args" else "",
-                    }}]})
+                    }}
+                    if scenario == "null_call_type":
+                        continuation.update(id=None, type=None)
+                        continuation["function"]["name"] = ""
+                    await frame({"tool_calls": [continuation]})
                     for index, additional in enumerate(calls[1:], 1):
                         await frame({"tool_calls": [{"index": index, **additional}]})
                 else:

@@ -101,6 +101,7 @@ def test_jiuwen_rejects_artifact_tools_before_model_acquisition():
 def test_creator_configs_follow_global_policy_and_target_prompt_contract(monkeypatch, core, language):
     from runtime.agentos import agent_creator_config as creation
     from runtime.agentos import prepared_skill_creator
+    from nexent.core.agents.cores.nl2agent_prompt import nl2agent_protocol
     monkeypatch.setattr(creation, "NEXENT_AGENT_CORE", core)
     monkeypatch.setattr(prepared_skill_creator, "NEXENT_AGENT_CORE", core)
     config = creation.create_nl2agent_agent_config(language, [])
@@ -108,10 +109,25 @@ def test_creator_configs_follow_global_policy_and_target_prompt_contract(monkeyp
     assert config.enable_protocol_repair_retry is (core == "smolagents")
     prompt = config.context_items[0].content["text"]
     assert "nl2agent_verified_state" in prompt and "agent_generation_completed" in prompt
+    assert "Core" in prompt
+    assert all(marker not in prompt for marker in ("<code>", "<final_answer>", "print(", "\\x3ccode>"))
     if core == "jiuwen":
-        assert "Core" in prompt
-        assert "\\x3ccode>" not in prompt
-        assert "Think-Code example" not in prompt and "思考-代码”示例" not in prompt
+        info = SimpleNamespace(agent_config=config, observer=MessageObserver(lang=language), history=[],
+                               parallel_child_mode=None)
+        adapter = JiuwenAdapter(info)
+        native = adapter._compile_context()
+        assert adapter._nl2agent_native
+        assert all(marker not in native for marker in ("<code>", "<final_answer>", "print(", "nexent_execute_python"))
+        assert '"fields": {"name": "research_assistant"}' in native
+        assert '"required": true' in native
+        adapter.text_protocol = True
+        text = adapter._compile_context()
+        assert not adapter._nl2agent_native
+        assert "<code>" in text and "print(saved)" in text and "<final_answer>" not in text
+    else:
+        text = nl2agent_protocol(config.context_items, language, "smolagents").content["text"]
+        assert "<code>" in text and "print(saved)" in text and "<final_answer>" in text
+    assert nl2agent_protocol([], language, "native") is None
     skill = prepared_skill_creator.create_nl2skill_agent_config("literal data", "model")
     assert skill.agent_core == core and skill.response_mode == "artifact"
     assert skill.tools == [] and skill.output_protocol == "final_envelope"

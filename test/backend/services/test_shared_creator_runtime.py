@@ -2,6 +2,7 @@
 
 """Keep the released creator, per-request tools, and edited draft separate."""
 
+import json
 from copy import deepcopy
 from unittest.mock import Mock
 
@@ -14,10 +15,13 @@ from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.agent_model_config import create_model_config_from_record
 from management.api.agent import creator
 from management.services.agent import creator_run
+from management.services.agent import authorization, nl2agent
 from management.services.conversation import creator_execution
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from runtime.agentos import creator_definition, prepared_agent_creator
 from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
+from services import nl2agent_prompt_service, nl2agent_resource_flow
+from services.nl2agent_state_service import ResourceScope
 from test.common.creator_runtime_boundary import isolate_creator_runtime
 from ..app.test_agentos_prepared_evaluation import model_record
 
@@ -29,12 +33,136 @@ def preparation(mocker):
         "input_budget": 4096, "context_window_tokens": 8192,
     })
     return mocker.patch.object(
-        creator_run, "_build_verified_bound_resources_context",
+        creator_run, "build_verified_bound_resources_context",
         side_effect=lambda **kwargs: ContextItemInput(
             id="system:bound", type=ContextItemType.SYSTEM,
             content={"text": f"{kwargs['tenant_id']}:{kwargs['agent_id']}"}, source=("database",),
         ),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("query", "workbench_config", "phase"), [
+    ("创建「文档资料整理助手」，整理工作文档。", {"mode": "agent_create"}, "prepare"),
+    ("Create a document assistant.", None, "prepare"),
+    ("只修改当前智能体的描述。", {"mode": "agent_create"}, None),
+    ("生成当前智能体的提示词。", None, None),
+])
+async def test_creator_marks_only_full_generation_requests(preparation, query, workbench_config, phase):
+    payload = await creator_run.prepare_nl2agent_snapshot(
+        NL2AgentRunRequest(query=query, agent_id=42, workbench_config=workbench_config),
+        ServicePrincipal("user", "tenant"), "zh",
+    )
+    assert payload.generation_stage == phase
+    assert ("generation_stage" in payload.model_dump()) is (phase is not None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("request_text", "stage"), [
+    ("Create a research assistant.", "prepare"),
+    ("Update the description.", None),
+    (None, None),
+])
+async def test_clarification_uses_the_latest_user_request_to_resume_creation(preparation, request_text, stage):
+    clarification = json.dumps({
+        "type": "nl2agent_card_action", "subtype": "requirement_clarification", "agent_id": 42,
+    })
+    history = [{"role": "user", "content": request_text}] if request_text else []
+    history.extend([
+        {"role": "assistant", "content": "Create an agent?"},
+        {"role": "user", "content": clarification},
+    ])
+
+    payload = await creator_run.prepare_nl2agent_snapshot(
+        NL2AgentRunRequest(query=clarification, agent_id=42, history=history), ServicePrincipal("user", "tenant"), "en",
+    )
+
+    assert payload.generation_stage == stage
+
+
+@pytest.mark.asyncio
+async def test_accepted_prompt_resumes_only_the_remaining_creation_steps(preparation, mocker):
+    actor = ServicePrincipal("user", "tenant")
+    data = {"card_id": "approved", "prompt_revision": "revision"}
+    request = NL2AgentRunRequest(query=json.dumps({
+        "type": "nl2agent_card_action", "subtype": "prompt_generation", "agent_id": 42,
+        "action": "apply", "result": data,
+    }), agent_id=42)
+    payload = (await creator_run.prepare_nl2agent_snapshot(request, actor, "en")).model_copy(update={"conversation_id": 7})
+    mocker.patch.object(authorization, "require_agent_draft_edit")
+    apply_prompt = mocker.patch.object(nl2agent_prompt_service, "apply_action", return_value={
+        "saved": True, "resume": True, "card": {"subtype": "prompt_generation", "status": "applied"},
+    })
+
+    result, frames = await creator_run._apply_card_action(payload, actor, request)
+
+    apply_prompt.assert_awaited_once_with(ResourceScope("tenant", "user", 42, "7", payload.run_id), "apply", data,
+                                         resume_confirmation=False)
+    assert result.generation_stage == "finalize"
+    assert all(field in result.input.query for field in (
+        "greeting_message", "example_questions", "nl2a_validate_agent_generation_complete",
+    ))
+    assert [frame["type"] for frame in frames] == ["nl2a_state", "nl2a"]
+    assert json.loads(frames[0]["content"])["updated_fields"] == ["prompt"]
+    assert preparation.await_args.kwargs["prompt_scope"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("purpose", "next_step", "validate_only", "expected_stage"), [
+    ("generate", None, False, "generate_prompt"),
+    ("generate", "generate_prompt", False, "generate_prompt"),
+    ("generate", "verify_resources", False, "verify_resources"),
+    ("generate", None, True, None),
+    ("bind", None, False, None),
+])
+async def test_confirmed_full_creation_uses_verified_prompt_basis(
+    preparation, mocker, purpose, next_step, validate_only, expected_stage,
+):
+    actor = ServicePrincipal("user", "tenant")
+    request = NL2AgentRunRequest(query=json.dumps({
+        "type": "nl2agent_card_action", "subtype": "requirement_resources", "agent_id": 42,
+        "action": "continue", "result": {"card_id": "card", "state_version": 2},
+    }), agent_id=42)
+    payload = await creator_run.prepare_nl2agent_snapshot(request, actor, "zh")
+    payload = payload.model_copy(update={"conversation_id": 7})
+    scope = ResourceScope("tenant", "user", 42, "7", payload.run_id)
+    mocker.patch.object(authorization, "require_agent_draft_edit")
+    apply_card = mocker.patch.object(nl2agent_resource_flow, "apply_card_action", return_value={
+        "purpose": purpose, "next_step": next_step, "action": "continue",
+    })
+    mocker.patch.object(creator_run, "build_verified_bound_resources_context",
+                        new=nl2agent_prompt_service.build_verified_bound_resources_context)
+    draft, resources = {"prompt": "Existing prompt"}, [{"resource_id": 9, "resource_type": "tool"}]
+    needs_basis = expected_stage == "generate_prompt"
+    generation_state = mocker.patch.object(nl2agent, "_load_verified_nl2agent_state", return_value=(
+        (draft, resources, "binding-revision") if needs_basis else (draft, resources)
+    ))
+    capture_basis = mocker.patch.object(nl2agent_prompt_service, "update_resource_state")
+    mocker.patch.object(nl2agent_prompt_service, "read_resource_state", return_value=None)
+
+    result, frames = await creator_run._apply_card_action(payload, actor, request, validate_only=validate_only)
+
+    assert not frames
+    assert apply_card.await_args.args[:3] == (scope, "requirement_resources", "continue")
+    assert result.generation_stage == expected_stage
+    if validate_only:
+        generation_state.assert_not_awaited()
+    else:
+        generation_state.assert_awaited_once()
+        model_state = json.loads(result.bound_resources.removeprefix("Verified database binding facts: "))
+        assert model_state["draft_fields"]["prompt"] == draft["prompt"]
+        assert model_state["bound_resources"] == resources
+        assert "binding_revision" not in model_state
+    if needs_basis:
+        capture_basis.assert_awaited_once()
+        key, update = capture_basis.await_args.args
+        assert key == nl2agent_prompt_service.PromptScope(
+            scope.tenant_id, scope.user_id, scope.agent_id, scope.conversation_id, scope.run_id,
+            suffix=f"run:{scope.run_id}",
+        )
+        assert update(None) == {"prompt": "Existing prompt", "bindings": "binding-revision", "complete_generation": True}
+    else:
+        capture_basis.assert_not_awaited()
 
 
 @pytest.mark.asyncio

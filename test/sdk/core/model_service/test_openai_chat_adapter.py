@@ -157,17 +157,29 @@ def test_unknown_finish_and_missing_usage_stay_unknown(profile):
 
 
 @pytest.mark.parametrize(
-    "arguments,parsed,diagnostic",
+    "arguments,normalized,parsed,diagnostic",
     [
-        ("{}", {}, None),
-        ('{"value":0,"flag":false}', {"value": 0, "flag": False}, None),
-        ("[1]", None, "arguments_not_object"),
-        ("{broken", None, "arguments_invalid_json"),
-        ('{"x":1,"x":2}', None, "arguments_duplicate_key"),
+        (" {} \n", None, {}, None),
+        ('{"value":0,"flag":false}', None, {"value": 0, "flag": False}, None),
+        ('{"x":"</tool_call>"}', None, {"x": "</tool_call>"}, None),
+        ('{"x":1}\n</tool_call> \r\n', '{"x":1}\n', {"x": 1}, None),
+        ("[1]", None, None, "arguments_not_object"),
+        ("{broken", None, None, "arguments_invalid_json"),
+        ('{"x":1,"x":2}', None, None, "arguments_duplicate_key"),
+        ('{"x":NaN}', None, None, "arguments_invalid_json"),
+        ('{"x":1e1000}', None, None, "arguments_invalid_json"),
+        ("[1]</tool_call>", None, None, "arguments_not_object"),
+        ("{broken</tool_call>", None, None, "arguments_invalid_json"),
+        ('{"x":1,"x":2}</tool_call>', None, None, "arguments_duplicate_key"),
+        ('{"x":NaN}</tool_call>', None, None, "arguments_invalid_json"),
+        ('{"x":1e1000}</tool_call>', None, None, "arguments_invalid_json"),
+        ("{}</tool_call></tool_call>", None, None, "arguments_invalid_json"),
+        ("<tool_call>{}</tool_call>", None, None, "arguments_invalid_json"),
+        ("{}</tool_call> extra", None, None, "arguments_invalid_json"),
     ],
 )
 def test_complete_tools_preserve_raw_provider_ids_and_invalid_arguments(
-    profile, arguments, parsed, diagnostic
+    profile, arguments, normalized, parsed, diagnostic
 ):
     raw = response(
         {
@@ -187,11 +199,9 @@ def test_complete_tools_preserve_raw_provider_ids_and_invalid_arguments(
     call = result.tool_calls[0]
     assert isinstance(call.local_call_id, UUID)
     assert call.provider_call_id == "provider-call-id-longer-than-local-uuid-" * 2
-    assert (
-        call.raw_arguments == arguments
-        and call.parsed_arguments == parsed
-        and call.argument_error == ("INVALID_TOOL_ARGUMENTS" if diagnostic else None)
-    )
+    assert call.raw_arguments == (arguments if normalized is None else normalized)
+    assert call.parsed_arguments == parsed
+    assert call.argument_error == ("INVALID_TOOL_ARGUMENTS" if diagnostic else None)
     assert call.argument_diagnostic == diagnostic and "argument_diagnostic" not in call.model_dump()
     assert result.content_parts == []
 
@@ -393,31 +403,6 @@ def test_native_tool_definitions_are_only_wire_schemas_and_stream_usage_is_reque
     ]
     assert body["stream_options"] == {"include_usage": True}
     assert prepared.stream_protocol == "sse"
-
-
-@pytest.mark.parametrize("arguments", ['{"x":NaN}', '{"x":1e1000}'])
-def test_nonfinite_tool_arguments_are_not_treated_as_valid_json(profile, arguments):
-    raw = response(
-        {
-            "role": "assistant",
-            "tool_calls": [
-                {
-                    "id": "call",
-                    "type": "function",
-                    "function": {"name": "search", "arguments": arguments},
-                }
-            ],
-        },
-        finish="tool_calls",
-    )
-    call = (
-        OpenAIChatAdapter()
-        .decode_response(raw, request(profile), profile)
-        .tool_calls[0]
-    )
-    assert call.argument_error == "INVALID_TOOL_ARGUMENTS"
-    assert call.parsed_arguments is None
-    assert call.raw_arguments == arguments
 
 
 def test_duplicate_complete_tool_ids_are_explicit_protocol_failure(profile):

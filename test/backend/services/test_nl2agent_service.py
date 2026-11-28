@@ -24,7 +24,6 @@ from management.services.agent.nl2agent import (
     Nl2AgentCompletionError,
     Nl2AgentDraftSaveError,
     Nl2AgentResourceError,
-    _build_verified_bound_resources_context,
     _load_internal_uninstalled_resource_catalog,
     _load_installed_resource_catalog,
     _normalize_skill_config,
@@ -55,6 +54,7 @@ from management.services.agent.nl2agent_tools import (
     SAVE_AGENT_DRAFT_FIELDS_NAME,
 )
 from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
+from services.nl2agent_prompt_service import build_verified_bound_resources_context
 
 
 
@@ -1503,7 +1503,7 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
         ],
     )
 
-    context = await _build_verified_bound_resources_context(
+    context = await build_verified_bound_resources_context(
         agent_id=42,
         tenant_id="tenant-a",
         user_id="user-a",

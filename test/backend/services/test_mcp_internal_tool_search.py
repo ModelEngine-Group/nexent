@@ -308,7 +308,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert tool.parameters["properties"]["keywords"]["items"]["type"] == "string"
     assert tool.parameters["required"] == ["keywords"]
     assert tool.meta == NL2AGENT_MCP_TOOL_META
-    assert "print(result)" in tool.description
+    assert "print(" not in tool.description
     assert tool.description == SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION
     assert resource_search_tool.description == SEARCH_INSTALLED_RESOURCES_DESCRIPTION
     assert resource_search_tool.name == SEARCH_INSTALLED_RESOURCES_LOCAL_NAME

@@ -33,7 +33,7 @@ class TestPromptTemplateUtils:
         assert set(template_config) == {"system_prompt"}
         parsed_template = Environment().parse(template_config["system_prompt"])
         assert meta.find_undeclared_variables(parsed_template) == {
-            "save_tool_name", "validate_completion_tool_name", "wrapper_name", "target_core",
+            "save_tool_name", "validate_completion_tool_name", "wrapper_name",
         }
 
 

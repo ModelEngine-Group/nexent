@@ -21,6 +21,13 @@ from pydantic import (
 
 from contracts.errors.exceptions import AgentDraftEditError, UnauthorizedError
 from contracts.nl2agent_resources import MAX_REQUIREMENTS
+from infrastructure.nl2agent_tool_config import (
+    NL2A_WRAPPER_DESCRIPTION,
+    SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
+    SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION,
+    SEARCH_INSTALLED_RESOURCES_DESCRIPTION,
+    VALIDATE_AGENT_GENERATION_COMPLETE_DESCRIPTION,
+)
 from management.services.permission.identity.session import authenticate_identity, get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -133,19 +140,6 @@ RESOURCE_REQUIREMENT_LIMIT_DESCRIPTION = (
     f"Use at most {MAX_RESOURCE_REQUIREMENTS_PER_SEARCH} requirements per search. "
     "If the batch exceeds the limit, ask the user to split the request or narrow its scope."
 )
-SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
-    "Search the current tenant's installed and available MCP tools using keywords. "
-    "Returns JSON text ordered by relevance. Decode the result with json.loads "
-    f"before passing it to {NL2A_WRAPPER_NAME}, preserve the decoded content unchanged, "
-    "and use print(result) to expose the decoded observation."
-)
-SEARCH_INSTALLED_RESOURCES_DESCRIPTION = (
-    "Search all current-user-visible installed Local Tools, MCP Tools, and Skills "
-    "for a structured set of capability requirements. Return no more than 12 "
-    "ranked candidates as JSON text. Decode the result with json.loads before "
-    "indexing it, and preserve the decoded candidates unchanged when calling "
-    f"{RECOMMEND_RESOURCES_NAME}. {RESOURCE_REQUIREMENT_LIMIT_DESCRIPTION}"
-)
 SEARCH_UNINSTALLED_RESOURCES_DESCRIPTION = (
     "Search installable Nexent Skills and tenant Skill/MCP repositories for "
     "structured capability requirements. Pass skipped candidate_ref values "
@@ -157,41 +151,6 @@ RECOMMEND_RESOURCES_DESCRIPTION = (
     "details. Pass unchanged candidates returned by resource searches and a "
     "unique recommended_refs subset. Decode the JSON result, then pass it "
     f"unchanged to {NL2A_WRAPPER_NAME} with the matching installation or binding subtype."
-)
-NL2A_WRAPPER_DESCRIPTION = (
-    "Build one NL2Agent output for the existing draft. Always pass the current "
-    "`agent_id` and `subtype`. For `requirement_clarification`, pass structured "
-    "`questions`. For resource installation or binding, pass `agent_id` and the "
-    "verified `resource_result`. JSON parameters must be decoded dictionaries, "
-    "never raw JSON strings. An empty installed-resource result returns a "
-    "non-interactive success result so Prompt generation can continue immediately. "
-    f"Call the tool as `result = {NL2A_WRAPPER_NAME}(...)`, then use `print(result)`."
-)
-SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
-    "Partially update the current tenant's existing ordinary agent draft. "
-    "Always pass the current agent_id and only whitelisted fields, never null. "
-    "Allowed fields: name, display_name, description, prompt, greeting_message, example_questions, "
-    "enable_protocol_repair_retry. "
-    "enable_protocol_repair_retry must be a boolean: explicit true enables strict output validation and silent "
-    "protocol repair for the target Agent, false disables it; omit it unless requested. "
-    "It does not control model-service retries or the NL2Agent creator itself. "
-    "prompt contains complete responsibilities, constraints, tool-use rules, output requirements and necessary few-shot. "
-    "For partial edits, read draft_fields.prompt, preserve unrelated instructions, and save the full merged prompt. "
-    "Before any prompt save, call nl2a_read_generation_context (goal=complete for full creation). "
-    "Save prompt separately. Existing prompts return pending_confirmation and a preview card; stop immediately "
-    "without saving dependent settings or reporting success until the user confirms. Empty prompts save directly. "
-    "greeting_message and example_questions are separate conversation settings; "
-    "example_questions must be a list of strings, never a newline-delimited string. "
-    "Only submit the fields determined by the current action. A save does not validate full generation. "
-    "The name field may be set only when the existing draft name is empty; "
-    "display_name may be set only alongside the first name on an empty Workbench Draft; "
-    "all other display names are immutable. Call the tool as "
-    f"`result = {SAVE_AGENT_DRAFT_FIELDS_NAME}(...)`, then use `print(result)` exactly once."
-)
-VALIDATE_AGENT_GENERATION_COMPLETE_DESCRIPTION = (
-    "Read the authorized target draft and validate full generation after all requested fields "
-    "have been saved. This tool does not write fields. Call only for full generation; "
-    f"use `result = {VALIDATE_AGENT_GENERATION_COMPLETE_NAME}()` and then `print(result)`."
 )
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
 MAX_REQUIREMENT_CLARIFICATION_QUESTIONS = 5

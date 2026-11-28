@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from management.services.agent import nl2agent_tools as tools
 from contracts.agent_prompt import normalize_imported_agent_prompt
+from services.nl2agent_prompt_service import build_verified_bound_resources_context
 
 
 @pytest.mark.parametrize("fields", [
@@ -95,7 +96,7 @@ async def test_verified_draft_context_exposes_only_the_unified_prompt(mocker):
         "few_shots_prompt": "LEGACY_EXAMPLE_POISON",
         "greeting_message": "Hello",
     }, []))
-    context = await nl2agent_service._build_verified_bound_resources_context(
+    context = await build_verified_bound_resources_context(
         agent_id=157, tenant_id="tenant-a", user_id="user-a",
     )
     text = context.content["text"]

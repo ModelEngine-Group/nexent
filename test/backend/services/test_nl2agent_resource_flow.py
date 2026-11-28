@@ -305,6 +305,23 @@ async def test_retry_accepts_the_same_selection_without_echoing_legacy_checked_r
         await flow.verify(scope, "batch", [VerificationCheck(requirement_id="r1", accepted=["tool:9"])])
 
 
+@pytest.mark.asyncio
+async def test_stale_batch_cannot_receive_current_candidates_or_advance_verification(mocker):
+    scope = ResourceScope("tenant", "user", 1, "4", "run")
+    mocker.patch.object(flow, "read_resource_state", return_value={
+        "conversation_id": "4", "run_id": "run", "batch": {"id": "current"}, "requirements": {},
+    })
+    read_current_candidates = mocker.patch.object(flow, "_authorized_batch_result")
+    persist = mocker.patch.object(flow, "update_resource_state")
+
+    with pytest.raises(ResourceStateError, match="verification_batch_stale") as outcome:
+        await flow.verify(scope, "previous", [])
+
+    assert not outcome.value.retryable
+    read_current_candidates.assert_not_awaited()
+    persist.assert_not_awaited()
+
+
 def test_resource_state_key_is_isolated_by_tenant_user_agent_and_conversation():
     base = ResourceScope("tenant", "user", 1, "conversation", "run")
     scopes = [base, ResourceScope("other", "user", 1, "conversation", "run"),

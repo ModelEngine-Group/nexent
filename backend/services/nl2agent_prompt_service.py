@@ -8,6 +8,7 @@ import json
 from dataclasses import dataclass
 from uuid import uuid4
 
+from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.concurrency import run_blocking
 
 from management.db.agent.repository import agent_draft_operation_lock, update_agent_draft_fields
@@ -63,7 +64,7 @@ async def begin_run(scope):
 
 
 async def refresh_basis(scope, state, *, complete_generation=False):
-    """An explicit context read establishes the latest facts used for generation."""
+    """Record the verified context supplied to the model as its generation basis."""
     basis = {"prompt": state["draft_fields"].get("prompt"), "bindings": state["binding_revision"]}
     pending = await read_resource_state(_key(scope))
     if (pending and pending.get("conversation_id") == scope.conversation_id
@@ -71,6 +72,33 @@ async def refresh_basis(scope, state, *, complete_generation=False):
         complete_generation = complete_generation or pending.get("resume", False)
     await update_resource_state(_key(scope, "run:" + scope.run_id),
                                 lambda _: {**basis, "complete_generation": complete_generation})
+
+
+async def build_verified_bound_resources_context(
+    *, agent_id: int, tenant_id: str, user_id: str, include_bindings: bool = True,
+    prompt_scope: ResourceScope | None = None,
+) -> ContextItemInput:
+    """Build model context from the verified draft and record its basis when generating a Prompt."""
+    from management.services.agent.nl2agent import read_generation_state
+
+    state = await read_generation_state(
+        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id, include_bindings=include_bindings,
+        include_binding_revision=prompt_scope is not None,
+    )
+    if prompt_scope is not None:
+        await refresh_basis(prompt_scope, state, complete_generation=True)
+        state.pop("binding_revision")
+    return ContextItemInput(
+        id="system:nl2agent_bound_resources",
+        type=ContextItemType.SYSTEM,
+        content={
+            "text": "Verified database binding facts: "
+            + json.dumps(state, ensure_ascii=False, separators=(",", ":")),
+        },
+        source=("database:agent_bindings",),
+        priority=85,
+        metadata={"authority": "tenant"},
+    )
 
 
 async def read_pending(scope):

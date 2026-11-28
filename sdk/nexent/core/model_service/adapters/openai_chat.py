@@ -103,9 +103,13 @@ def _tool_call(raw, index):
     arguments = function.get("arguments")
     if not isinstance(arguments, str):
         raise ModelAdapterError("MODEL_TOOL_CALL_INVALID")
+    json_arguments = arguments
+    trimmed_arguments = arguments.rstrip(" \t\r\n")
+    if trimmed_arguments.endswith("</tool_call>"):
+        json_arguments = trimmed_arguments.removesuffix("</tool_call>")
     parsed, diagnostic = None, None
     try:
-        parsed = parse_json(arguments)
+        parsed = parse_json(json_arguments)
     except _DuplicateJSONMember:
         diagnostic = "arguments_duplicate_key"
     except (ValueError, RecursionError):
@@ -113,6 +117,8 @@ def _tool_call(raw, index):
     else:
         if not isinstance(parsed, dict):
             parsed, diagnostic = None, "arguments_not_object"
+        else:
+            arguments = json_arguments
     try:
         return ToolCall(
             provider_call_id=raw.get("id"),

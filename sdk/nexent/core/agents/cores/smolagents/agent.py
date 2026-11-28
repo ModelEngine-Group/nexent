@@ -295,6 +295,7 @@ class NexentAgent(AgentResources):
                 message_format="codeagent",
             )
             from nexent.core.agents.prompt.policies import with_common_behavior
+            from nexent.core.agents.cores.nl2agent_prompt import nl2agent_protocol
 
             context_items = apply_model_visible_tool_schemas_to_context_items(
                 list(context_items_override)
@@ -302,6 +303,10 @@ class NexentAgent(AgentResources):
                 else list(getattr(agent_config, "context_items", None) or []),
                 tool_list,
             )
+            language = getattr(self.observer, "lang", "en")
+            creator_protocol = nl2agent_protocol(context_items, language, "smolagents")
+            if creator_protocol is not None:
+                context_items.append(creator_protocol)
             resolved_external = {agent.agent_id: agent for agent in external_a2a_agents}
             for index, item in enumerate(context_items):
                 item_type = getattr(item, "type", None)
@@ -331,7 +336,7 @@ class NexentAgent(AgentResources):
                     content={
                         "text": clarification_policy(
                             tool_name,
-                            language=getattr(self.observer, "lang", "en"),
+                            language=language,
                         )
                     },
                     source=("runtime:clarification_protocol",),
@@ -352,7 +357,7 @@ class NexentAgent(AgentResources):
                 )
             context_runtime = ManagedContextRuntime(
                 context_manager,
-                items=(with_common_behavior(context_items, self.observer.lang,
+                items=(with_common_behavior(context_items, language,
                        is_subagent=not root_clarification_allowed(
                            self.core_run_info, managed_context=_managed_context))
                        if any(item.type == ContextItemType.SYSTEM for item in context_items) else context_items),

@@ -4,8 +4,11 @@
 
 import i18next from "i18next";
 import { recordNl2AgentState } from "./nl2agent-state-history";
-import { messageExecutionStatus } from "@/lib/messageExecutionState";
 import { describeConversationRunError } from "@/lib/conversationRunError";
+import {
+  hasRootExecutionError,
+  messageExecutionStatus,
+} from "@/lib/messageExecutionState";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 import {
   persistModelDrafts,
@@ -2714,7 +2717,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return messageExecutionStatus(replayFallbackOutcome);
       // Legacy streams without a terminal event infer their outcome at EOF.
       return messageExecutionStatus(
-        contentParts.some((part) => part.isError) ? "failed" : "completed"
+        hasRootExecutionError(contentParts) ? "failed" : "completed"
       );
     };
 
@@ -3219,7 +3222,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               text: error?.text ?? chunk.content,
               ...(error?.reference && { errorReference: error.reference }),
               ...(chunk.type === "warning" && { isWarning: true }),
-              ...(chunk.type === "error" && { isError: true }),
+              ...(chunk.type === "error" && {
+                isError: true,
+                invocation_id: chunk.invocation_id,
+              }),
             };
             if (textMeta) {
               textPart.metadata = subAgentMetadataFor(textMeta);
@@ -3559,7 +3565,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 text: error?.text ?? chunk.content,
                 ...(error?.reference && { errorReference: error.reference }),
                 ...(chunk.type === "warning" && { isWarning: true }),
-                ...(chunk.type === "error" && { isError: true }),
+                ...(chunk.type === "error" && {
+                  isError: true,
+                  invocation_id: chunk.invocation_id,
+                }),
               };
               const textMeta = resolveSubAgent(chunk.invocation_id);
               if (textMeta)
@@ -3804,16 +3813,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           return;
         }
         if (saved?.state === "active" || custom?.resumePreviouslyActive) {
-          yield awaitingReplay(
-            buildStreamResult(collapseSubAgentParts(contentParts))
-          );
+          yield awaitingReplay(buildStreamResult(contentParts));
           return;
         }
       }
-      const finalResult = buildStreamResult(
-        collapseSubAgentParts(contentParts),
-        true
-      );
+      const finalResult = buildStreamResult(contentParts, true);
       const timingResult =
         storedTiming ??
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);

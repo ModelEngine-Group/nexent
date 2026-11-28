@@ -90,6 +90,29 @@ def construction(factory, mocker):
     return SimpleNamespace(factory=factory, executor=executor, core=core, cleanup=cleanup, config=config, build=build)
 
 
+@pytest.mark.parametrize("authority", ["platform", "tenant"])
+def test_smolagents_injects_nl2agent_code_protocol_only_for_the_platform_creator(construction, mocker, authority):
+    from nexent.core.agents.context import ContextItemInput, ContextItemType
+    from nexent.core.agents.cores.nl2agent_prompt import NL2AGENT_PROMPT_ID
+
+    c = construction
+    mocker.patch.object(c.factory, '_push_file_workspace_to_sandbox')
+    mocker.patch.object(c.factory, '_initialize_sandbox_workspaces')
+    context = ContextItemInput(
+        id=NL2AGENT_PROMPT_ID, type=ContextItemType.SYSTEM, source=("fixture",), content={"text": "Business rules"},
+        metadata={"authority": authority, "creator_tools": {"save_tool_name": "save_draft", "wrapper_name": "ask"}},
+    )
+
+    c.factory.create_single_agent(c.config, context_items_override=(context,))
+
+    items = c.core.call_args.kwargs["context_runtime"].items
+    protocol = next((item.content["text"] for item in items if item.id == "system:nl2agent_protocol"), None)
+    if authority == "platform":
+        assert all(marker in protocol for marker in ("<code>", "save_draft(", "<final_answer>"))
+    else:
+        assert protocol is None
+
+
 @pytest.mark.parametrize('error', [RuntimeError('warm failed'), CancelledError('cancelled')])
 def test_strict_warmup_failure_releases_acquired_executor(construction, error):
     c = construction

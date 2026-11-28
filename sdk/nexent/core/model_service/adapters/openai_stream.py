@@ -235,7 +235,9 @@ class OpenAIStreamDecoder:
                 self._fail("MODEL_TOOL_CALL_LIMIT")
             self._calls[index] = {"local_id": uuid4(), "id": None, "name": [], "arguments": []}
         state = self._calls[index]
-        if "type" in raw and raw["type"] != "function":
+        kind = raw.get("type", "function")
+        # SiliconFlow uses a null type on argument fragments after binding the call.
+        if kind != "function" and not (kind is None and state["id"] is not None):
             self._fail("MODEL_TOOL_CALL_INVALID")
         value = raw.get("id")
         # Some providers repeat an empty placeholder after establishing the call identity.

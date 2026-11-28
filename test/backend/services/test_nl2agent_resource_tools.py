@@ -139,6 +139,77 @@ async def test_show_card_attaches_server_receipt_only_when_needed(mocker, contex
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_verify_reports_all_missing_candidates_for_the_active_batch(mocker, context, authorized):
+    installed = {"candidate_ref": "tool:7", "capability_evidence": "installed_declaration"}
+    repository = {"candidate_ref": "tenant_mcp_repository:8", "capability_evidence": "repository_declaration"}
+    skill = {"candidate_ref": "skill:9", "capability_evidence": "installed_declaration"}
+    state = {
+        "run_id": "run", "conversation_id": "7", "batch": {"id": "second", "requirements": ["r2", "r3"]},
+        "requirements": {
+            "r2": {"query": "Search references", "installed": [installed], "installable": [repository],
+                   "verification_policy": "all_qualified"},
+            "r3": {"query": "Write a report", "installed": [skill], "installable": [],
+                   "verification_policy": "all_qualified"},
+        },
+    }
+    mocker.patch.object(tools.flow, "read_resource_state", return_value=state)
+    authorize = mocker.patch.object(
+        tools.flow, "_authorized_batch_result",
+        return_value=tools.flow._batch_result(state), side_effect=None if authorized else PermissionError(),
+    )
+    save = mocker.patch.object(tools.flow, "update_resource_state")
+    result = await tools.verify_requirements("second", [
+        {"requirement_id": "r2", "accepted": ["tool:7"],
+         "assessments": [{"candidate_ref": "tool:7", "satisfies": True, "reason": "Searches references."}]},
+        {"requirement_id": "r3", "accepted": [], "assessments": []},
+    ])
+    feedback = json.loads(result.content[0].text)
+    assert not result.meta
+    authorize.assert_awaited_once()
+    save.assert_not_called()
+    if authorized:
+        assert feedback["code"] == "verification_assessments_incomplete"
+        assert feedback["retryable"] and feedback["next_step"] == "verify_resources"
+        assert feedback["verification_batch_id"] == "second"
+        assert feedback["missing_assessments"] == [
+            {"requirement_id": "r2", "missing_candidate_refs": ["tenant_mcp_repository:8"]},
+            {"requirement_id": "r3", "missing_candidate_refs": ["skill:9"]},
+        ]
+        assert feedback["requirements"][0]["installable_candidates"] == [repository]
+    else:
+        assert feedback == {"status": "error", "code": "unauthorized", "retryable": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_early_resource_card_returns_only_the_authorized_pending_batch(mocker, context, authorized):
+    batch = {"id": "second-batch", "requirements": ["r1"]}
+    candidate = {"candidate_ref": "tool:1"}
+    state = {"run_id": "run", "conversation_id": "7", "batch": batch, "requirements": {"r1": {}}}
+    mocker.patch.object(tools.flow, "read_resource_state", return_value=state)
+    authorize = mocker.patch.object(
+        tools.flow, "_authorized_batch_result", new=AsyncMock(
+            return_value={"status": "success", "verification_batch_id": batch["id"],
+                          "requirements": [{"requirement_id": "r1", "installed_candidates": [candidate]}]},
+            side_effect=None if authorized else PermissionError(),
+        ),
+    )
+    save = mocker.patch.object(tools.flow, "update_resource_state")
+    result = await tools.show_resource_card()
+    content = json.loads(result.content[0].text)
+    assert not result.meta
+    authorize.assert_awaited_once()
+    save.assert_not_called()
+    if authorized:
+        assert content == {"status": "error", "code": "verification_incomplete", "retryable": True,
+                           "next_step": "verify_resources", "verification_batch_id": batch["id"],
+                           "requirements": [{"requirement_id": "r1", "installed_candidates": [candidate]}]}
+    else:
+        assert content == {"status": "error", "code": "unauthorized", "retryable": False}
+
+
+@pytest.mark.asyncio
 async def test_show_and_verify_propagate_authorization_error(mocker, context):
     context[2].side_effect = PermissionError()
     show = mocker.patch.object(tools.flow, "show_card", new=AsyncMock())

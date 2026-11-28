@@ -155,7 +155,7 @@ def test_ut_be_cftp_002_production_prompts_use_only_the_final_tag_contract():
     prompt_paths = [
         *template_dir.glob("*/agent/agent_manager.yaml"),
         *template_dir.glob("*/agent/agent_worker.yaml"),
-        *template_dir.glob("*/meta/nl2agent.yaml"),
+        *template_dir.glob("*/core/nl2agent.yaml"),
         *template_dir.glob("*/meta/nl2skill_*.yaml"),
         *template_dir.glob("*/meta/generate_prompt.yaml"),
     ]
@@ -167,6 +167,12 @@ def test_ut_be_cftp_002_production_prompts_use_only_the_final_tag_contract():
         assert "<final>" not in content, path
         assert "</final>" not in content, path
         assert "final_answer(" not in content, path
+    for language in ("en", "zh"):
+        business = load_prompt(language, "meta/nl2agent")["system_prompt"]
+        protocol = load_prompt(language, "core/nl2agent")
+        assert "<final_answer>" in protocol["smolagents_final"]
+        for content in (business, protocol["native"], protocol["native_examples"], protocol["jiuwen_final"]):
+            assert "<final_answer>" not in content
 
 
 def test_ut_be_dpr_004_orphan_yaml_field_is_rejected():

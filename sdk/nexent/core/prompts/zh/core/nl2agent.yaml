@@ -1,0 +1,68 @@
+native: |-
+  需要执行动作时，直接使用已注册的原生业务工具。每次只发出一次工具调用，参数使用符合工具 Schema 的 JSON，收到实际工具结果后再继续。结束本轮时直接返回总结文本。
+native_examples: |-
+  初始化名称时调用 {{ save_tool_name }}，参数为 {"agent_id": 1042, "fields": {"name": "research_assistant"}}。
+  需求澄清时调用 {{ wrapper_name }}，参数为 {"agent_id": 1042, "subtype": "requirement_clarification", "questions": [{"question_id": "expected_output", "question_type": "text", "title": "这个 Agent 应该产出什么？", "required": true, "allow_other": false, "other_input_expanded": false}]}。
+  示例中的 ID 和业务值应替换为已授权草稿和本轮请求中的实际值。
+text: |-
+  每个动作使用且仅使用一对字面量 <code>...</code>，不加 Markdown 围栏。用关键字参数调用一个已授权工具，并打印一次结果。不写控制流，闭合标签后立即结束本次响应，等待真实工具结果。工具返回 JSON 文本且下一步需要结构化参数时，使用 json.loads 解码。示例中的 ID 和业务值应替换为已授权草稿和本轮请求中的实际值。
+smolagents_final: |-
+  结束本轮时仅使用一对字面量 <final_answer>...</final_answer> 包住最终回复。
+jiuwen_final: |-
+  结束本轮时直接返回最终回复。
+text_examples: |-
+  初始化名称:
+  <code>
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={"name": "research_assistant"},
+  )
+  print(saved)
+  </code>
+
+  发起澄清:
+  <code>
+  wrapped = {{ wrapper_name }}(
+      subtype="requirement_clarification",
+      agent_id=1042,
+      questions=[
+          {"question_id": "expected_output", "question_type": "single_choice", "title": "这个 Agent 应该产出什么？", "required": True, "options": [{"option_id": "report", "label": "一份简洁报告"}], "allow_other": True, "other_input_expanded": True},
+      ],
+  )
+  print(wrapped)
+  </code>
+
+  保存描述:
+  <code>
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={
+          "description": "我是一个研究助手，负责收集可靠信息并生成简洁报告。",
+      },
+  )
+  print(saved)
+  </code>
+
+  保存提示词:
+  <code>
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={"prompt": "我是一个研究助手，负责核验用户提供的资料并生成清晰报告。先确认研究问题，再对照资料核验结论，最后输出结论、依据及不确定项。缺少资料时先向用户询问，不编造事实或来源。"},
+  )
+  print(saved)
+  </code>
+
+  保存含业务规则的提示词:
+  <code>
+  saved = {{ save_tool_name }}(agent_id=1042, fields={"prompt": "根据用户提供的订单号查询订单状态。未发货时说明是否可以退款。缺少订单号时先询问用户。"})
+  print(saved)
+  </code>
+
+  保存对话设置:
+  <code>
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={"greeting_message": "您好，请告诉我您需要整理的主题。", "example_questions": ["请整理我提供的资料。", "请核验这段材料的依据。", "请将这些结论汇总为报告。"]},
+  )
+  print(saved)
+  </code>

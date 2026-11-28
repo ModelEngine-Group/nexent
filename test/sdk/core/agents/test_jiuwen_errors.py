@@ -160,6 +160,25 @@ def test_failed_finalization_without_diagnostic_logs_turn(adapter, caplog):
     assert f"phase=finalization category=JIUWEN_EXECUTION_FAILED reason=execution_result_missing request_id={result.turn_id}" in caplog.text
 
 
+@pytest.mark.parametrize("payload", [
+    {"result_type": "error", "stop_reason": "MaxOuterRounds"},
+    {"result_type": "error", "output": "Max iterations reached without completion"},
+])
+def test_native_iteration_limit_takes_precedence_over_recoverable_tool_error(adapter, payload):
+    with adapter._observe_tool("local", {}):
+        adapter._resource_result({"status": "error", "retryable": True})
+
+    with pytest.raises(JiuwenExecutionError) as raised:
+        adapter.events.emit({"type": "answer", "payload": payload})
+    adapter.record_failure(raised.value)
+
+    result = adapter.events.finish("failed")
+    assert result.status == "failed"
+    assert result.end_reason == result.error.category == "JIUWEN_EXECUTION_FAILED"
+    assert result.error.diagnostic_code == "runner_round_limit"
+    assert "轮数上限" in result.error.safe_message
+
+
 def test_later_model_failure_takes_precedence_over_recoverable_resource_failure(adapter):
     with pytest.raises(ValueError):
         with adapter._observe_tool("local", {}):

@@ -25,8 +25,8 @@ case:
     action: Save conversation settings with a missing description, then explicitly validate and read back the row.
     expected: Both settings persist; the save succeeds, validation reports the missing description, and no completion event is emitted.
   - order: 3
-    action: Save the missing description and explicitly validate the complete draft in the same run.
-    expected: The stream emits the save before one completion event and then terminates normally.
+    action: Save the missing description and explicitly validate the complete draft using Smolagents and Jiuwen native tool calls.
+    expected: Both paths emit the save before one completion event and terminate normally. Jiuwen receives only native action instructions and can correct a text-formatted action without dispatching it.
   - order: 4
     action: Print fabricated completion and clarification markers, then call the real clarification tool.
     expected: The fabricated output stays text. The real tool produces one clarification card and ends the turn.
@@ -50,7 +50,7 @@ case:
   forbidden_side_effects:
   - Neither validation nor the prompt-only edit changes unrelated draft fields or publishes a version.
   integration_boundary:
-  - Real run HTTP endpoint, SDK code action, local MCP discovery/dispatch, draft database, and SSE observer; identity issuer and model output use controlled fixtures.
+  - Real run HTTP endpoint, SDK code action or native function call, signed creator callback, draft database, and SSE observer; identity issuer and model output use controlled fixtures.
   observations:
   - Ordered SSE state and terminal events, tool result codes, and draft and version rows read back from PostgreSQL.
   cleanup:

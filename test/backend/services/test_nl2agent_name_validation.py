@@ -11,7 +11,8 @@ import pytest
 from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from pydantic import ValidationError
 
-from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
+from nexent.core.agents.cores.nl2agent_prompt import nl2agent_protocol
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt, create_nl2agent_agent_config
 from contracts.errors.exceptions import AgentDraftEditError
 from contracts.agent import AgentInfoRequest
 from management.services.agent import nl2agent as service
@@ -128,7 +129,8 @@ def test_naming_prompt_is_self_contained_and_keeps_meaningful_example(language):
     initialization = prompt.split("### 变量名初始化" if language == "zh" else "### Variable Name Initialization", 1)[1].split("\n### ", 1)[0]
     assert "30" not in initialization
     names = []
-    for code in re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL):
+    protocol = nl2agent_protocol(create_nl2agent_agent_config(language, []).context_items, language, "smolagents")
+    for code in re.findall(r"<code>\n(.*?)\n</code>", protocol.content["text"], re.DOTALL):
         for node in ast.walk(ast.parse(code)):
             if not isinstance(node, ast.Call):
                 continue

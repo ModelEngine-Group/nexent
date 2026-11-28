@@ -126,7 +126,7 @@ def test_ut_sdk_fps_010_meta_and_agent_paths_replace_old_layout():
     """UT-SDK-FPS-010: renamed resources are unique and the old folders vanish."""
     expected = {
         "meta/generate_greeting", "meta/generate_prompt", "meta/optimize_prompt",
-        "meta/nl2agent", "meta/nl2skill",
+        "meta/nl2agent", "core/nl2agent", "meta/nl2skill",
         "agent/generate_chat_title", "agent/agent_worker", "agent/agent_manager",
     }
     from nexent.core.prompts import load_prompt
@@ -147,8 +147,7 @@ def test_ut_sdk_fps_011_languages_have_matching_paths_fields_and_jinja_variables
     en_paths = {p.relative_to(PROMPTS / "en") for p in (PROMPTS / "en").rglob("*.yaml")}
     zh_paths = {p.relative_to(PROMPTS / "zh") for p in (PROMPTS / "zh").rglob("*.yaml")}
     assert en_paths == zh_paths
-    assert len(en_paths) == 37
-    assert en_paths == zh_paths
+    assert len(en_paths) == 38
 
     def flatten(value, prefix=""):
         if isinstance(value, dict):

@@ -17,7 +17,11 @@ from openjiuwen.core.foundation.llm.schema.message import AssistantMessage, Usag
 from openjiuwen.core.foundation.llm.schema.message_chunk import AssistantMessageChunk
 from openjiuwen.core.foundation.llm.schema.tool_call import ToolCall as NativeToolCall
 
-from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested, InvalidClarification
+from nexent.core.agents.cores.jiuwen.clarification import (
+    WORKBENCH_CONFIRMATION_REQUIRED,
+    ClarificationRequested,
+    InvalidClarification,
+)
 from nexent.core.agents.cores.jiuwen.messages import resource_view
 from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, JiuwenProtocolError, parse_execution_blocks
 from nexent.core.agents.output.answer import AnswerBoundaryError, normalize_public_answer
@@ -29,6 +33,20 @@ from nexent.core.model_service.service import ModelServiceError
 
 
 logger = logging.getLogger(__name__)
+
+_VERIFICATION_PENDING = "NL2AGENT_VERIFICATION_PENDING"
+_GENERATION_PENDING = "NL2AGENT_GENERATION_PENDING"
+_GENERATION_ACTIONS = {
+    "prepare": "Follow the trusted draft state. Initialize the name only if missing, then save the description.",
+    "save_description": "The name is saved. Call nl2a_save_agent_draft_fields with only the description next.",
+    "discover_resources": "Call nl2a_discover_requirements for all resource needs in the original request next.",
+    "prepare_search_queries": "Call nl2a_discover_requirements with search_queries for the returned requirement IDs.",
+    "verify_resources": "Call nl2a_discover_requirements without arguments if needed and verify its current batch.",
+    "show_resource_card": "Call nl2a_show_resource_card to resolve whether the user needs a resource confirmation.",
+    "generate_prompt": "Read trusted bound resources with nl2a_read_generation_context and save the Prompt separately.",
+    "finalize": "Save any missing greeting_message and example_questions, then validate the completed draft.",
+    "validate": "Call nl2a_validate_agent_generation_complete now and wait for its actual result.",
+}
 _ARGUMENT_ERRORS = frozenset({
     "INVALID_TOOL_ARGUMENTS", "JIUWEN_NESTED_EXECUTION_BLOCK",
     "JIUWEN_INVALID_EXECUTION_BLOCK", "JIUWEN_EMPTY_EXECUTION_BLOCK", "JIUWEN_INVALID_CLARIFICATION",
@@ -46,7 +64,8 @@ class JiuwenServiceModel(Model):
 
     def __init__(self, service, profile, scope, *, prefix=(), run_id=None, deadline=None,
                  on_step=None, on_event=None, validate_input=None, prepare_messages=None,
-                 on_error=None, on_recovery=None, delegation=None, artifact_output=False, clarification=None):
+                 on_error=None, on_recovery=None, delegation=None, artifact_output=False, clarification=None,
+                 verification_pending=None, full_generation_pending=None):
         # Model's public invoke/stream seam is used without its provider-client constructor.
         self.service = service
         self.profile = ResolvedModelProfile.model_validate(profile.model_dump())
@@ -69,12 +88,17 @@ class JiuwenServiceModel(Model):
         self.on_recovery = on_recovery
         self.argument_corrections = 0
         self.response_corrections = 0
+        self.verification_pending = verification_pending
+        self._verification_correction_used = False
+        self.full_generation_pending = full_generation_pending
+        self._generation_corrections = set()
         self.logical_requests = 0
         self.delegation = delegation
         self.delegation_corrections = 0
         self._delegation_failure = None
         self.clarification = clarification
         self._clarification_form = None
+        self._workbench_confirmation_required = False
 
     def _check_cancelled(self):
         if self.scope.cancelled:
@@ -188,6 +212,10 @@ class JiuwenServiceModel(Model):
                                             arguments=json.dumps({"code": block.code}), index=0))
         if not calls and not content.strip():
             self._fail(request, "MODEL_EMPTY_RESPONSE")
+        if not calls and self.verification_pending is not None and self.verification_pending():
+            self._fail(request, _VERIFICATION_PENDING)
+        if not calls and self.full_generation_pending is not None and self.full_generation_pending():
+            self._fail(request, _GENERATION_PENDING)
         if not calls and not self.artifact_output:
             try:
                 normalize_public_answer(content)
@@ -204,6 +232,14 @@ class JiuwenServiceModel(Model):
                     "text" if self.text_protocol else "native", error.issues,
                 )
                 self._fail(request, str(error), reason=error.reason)
+            if not self.text_protocol:
+                if not calls and self.clarification.has_workbench_form_text(content):
+                    self._workbench_confirmation_required = True
+                if self._workbench_confirmation_required and (
+                    self._clarification_form is None
+                    or self._clarification_form.questions[0].id != "workbench_creation_mode"
+                ):
+                    self._fail(request, WORKBENCH_CONFIRMATION_REQUIRED)
         if self.delegation is not None and self._clarification_form is None:
             try:
                 self.delegation.validate_calls(calls)
@@ -299,6 +335,7 @@ class JiuwenServiceModel(Model):
         if self.on_error is not None:
             self.on_error(error)
         category = error.category
+        generation_action = None
         if category in _ARGUMENT_ERRORS:
             if step_corrections or self.argument_corrections >= 3:
                 return None
@@ -307,6 +344,7 @@ class JiuwenServiceModel(Model):
         elif category in {
             "MODEL_EMPTY_RESPONSE", "MODEL_RESPONSE_INCOMPLETE", "MODEL_STREAM_INCOMPLETE",
             "JIUWEN_INCOMPLETE_EXECUTION_BLOCK", "JIUWEN_TOOL_FINISH_MISMATCH", "JIUWEN_FINAL_OUTPUT_INVALID",
+            WORKBENCH_CONFIRMATION_REQUIRED,
         } or (
             category == "MODEL_PROTOCOL_ERROR"
             and error.diagnostic_code in {"MODEL_TOOL_CALL_INVALID", "MODEL_RESPONSE_INCOMPLETE"}
@@ -315,6 +353,17 @@ class JiuwenServiceModel(Model):
                 return None
             self.response_corrections += 1
             kind = "response"
+        elif category == _VERIFICATION_PENDING:
+            if self._verification_correction_used:
+                return None
+            self._verification_correction_used = True
+            kind = "verification"
+        elif category == _GENERATION_PENDING:
+            generation_action = self.full_generation_pending()
+            if generation_action not in _GENERATION_ACTIONS or generation_action in self._generation_corrections:
+                return None
+            self._generation_corrections.add(generation_action)
+            kind = "generation"
         elif category == "JIUWEN_DELEGATION_REQUIRED":
             if self.delegation is None or not self.delegation.allow_correction():
                 self._delegation_failure = error
@@ -325,9 +374,24 @@ class JiuwenServiceModel(Model):
             return None
         # Invalid calls never enter native history. Reuse only the authoritative, pre-step messages.
         current = [{"role": "user", "content": messages}] if isinstance(messages, str) else deepcopy(messages)
+        if category == _VERIFICATION_PENDING:
+            guidance = (
+                "Call nl2a_verify_requirements with the latest pending verification_batch_id and assessments "
+                "for every candidate in that batch. If the batch is missing from the observations, call "
+                "nl2a_discover_requirements without arguments to recover it. Do not finalize or ask for confirmation yet."
+            )
+        elif category == _GENERATION_PENDING:
+            guidance = (
+                "The user requested full Agent creation. Continue with the next authorized tool action. "
+                + _GENERATION_ACTIONS[generation_action]
+                + " A partial draft update is not a final response."
+            )
+        elif category == WORKBENCH_CONFIRMATION_REQUIRED:
+            guidance = self.clarification.workbench_repair_instruction()
+        else:
+            guidance = "Regenerate this model step with a complete answer or a complete authorized call matching its schema."
         current.insert(0, {"role": "system", "content": (
-            "The previous model response was rejected before any action was dispatched: " + category + ". "
-            "Regenerate this model step with a complete answer or a complete authorized call matching its schema. "
+            f"The previous model response was rejected before any action was dispatched: {category}. {guidance} "
             "Use the existing tool observations; do not repeat completed actions."
             + (" " + self.delegation.instruction if kind == "delegation" else "")
         )})
@@ -339,6 +403,7 @@ class JiuwenServiceModel(Model):
         return current
 
     async def invoke(self, messages, *, tools=None, **kwargs):
+        self._workbench_confirmation_required = False
         owner = getattr(self.prepare_messages, "__self__", None)
         begin_context_request = getattr(owner, "begin_request", None)
         if begin_context_request is not None:
@@ -355,6 +420,7 @@ class JiuwenServiceModel(Model):
                 messages = corrected
 
     async def stream(self, messages, *, tools=None, **kwargs):
+        self._workbench_confirmation_required = False
         owner = getattr(self.prepare_messages, "__self__", None)
         begin_context_request = getattr(owner, "begin_request", None)
         if begin_context_request is not None:

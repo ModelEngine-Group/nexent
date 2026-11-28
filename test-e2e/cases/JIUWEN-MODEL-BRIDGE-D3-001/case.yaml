@@ -29,20 +29,22 @@ case:
   - order: 2
     action: Run the actual Jiuwen adapter with a trusted snapshot and the selected protocol.
     expected: Text requests contain no native tools; actual tool observations reach the next request; native provider
-      IDs are preserved, including an empty-ID continuation placeholder after the same call index is already bound.
+      IDs are preserved through empty-ID and null-type continuation placeholders after the same call index is already bound.
   - order: 3
     action: Run missing-information clarification, malformed or mixed actions and a subsequent answered run in native/text/unknown
-      modes.
+      modes. Also run a native Workbench turn where the provider initially prints the creation confirmation as text.
     expected: Valid exclusive forms produce one public human_interaction and completed/awaiting_input after one
       model request; malformed/mixed calls dispatch no business tools and no form; a supplied-answer run completes
-      normally. All owned sessions, tools and threads are released.
+      normally. The Workbench turn regenerates the action once and produces one card when the provider returns a valid call.
+      All owned sessions, tools and threads are released.
   expected_results:
   - The actual factory/adapter/Jiuwen loop uses canonical ModelService and real local HTTP/SSE; native and text/unknown
     capability paths return one final result and one tool effect.
   - Text requests contain no native tools; actual tool observations reach the next request; native provider IDs
-    are preserved, including an empty-ID continuation placeholder after the same call index is already bound.
+    are preserved through empty-ID and null-type continuation placeholders after the same call index is already bound.
   - Valid exclusive forms produce one public human_interaction and completed/awaiting_input after one model request;
-    malformed/mixed calls dispatch no business tools and no form; a supplied-answer run completes normally. All
+    malformed/mixed calls dispatch no business tools and no form; a supplied-answer run completes normally.
+    Workbench creation confirmation printed as text is recovered through an exclusive native call on the next response. All
     owned sessions, tools and threads are released.
   forbidden_side_effects:
   - No native Jiuwen provider HTTP or CodeAgent loop; no unauthorized executable bindings, credentials or duplicate
