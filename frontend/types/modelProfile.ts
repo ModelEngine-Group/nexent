@@ -60,6 +60,7 @@ export type ThinkingControlFormat =
   "profile_default" | "enable_thinking" | "thinking_type" | "chat_template";
 
 export interface ModelProfileDraftRequest {
+  native_tool_call_supported?: boolean;
   thinking_control?: ThinkingControlFormat;
   thinking_mode?: ThinkingDegreeMode;
   selection_mode?: "auto" | "manual";
@@ -136,6 +137,7 @@ export interface ModelOutletProfile {
     concurrency_limit: number | null;
   };
   capabilities: {
+    tools?: { status: "supported" | "unsupported" | "unknown" };
     reasoning?: {
       status: "supported" | "unsupported" | "unknown";
       can_disable?: boolean | null;
@@ -172,6 +174,7 @@ export interface ModelOutletResponse {
 
 /** Omission preserves a value; delete_parameters explicitly removes it. */
 export interface ModelOutletPatchRequest {
+  native_tool_call_supported?: boolean;
   reset_parameters?: boolean;
   profile_selection?: {
     catalog_revision: string;

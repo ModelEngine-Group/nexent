@@ -12,6 +12,7 @@ acceptance_bindings:
   AC-04: [test_conversation_preferences_commit_lock_ownership_and_outlet_independence]
   AC-05: [test_draft_result_survives_actual_create_edit_and_request_change]
   AC-06: [test_explicit_profile_reselection_commits_one_identity_and_preserves_credentials]
+  AC-07: [test_custom_other_tool_status_round_trips_after_create_and_patch]
 preparation:
   families: []
   anchors: false

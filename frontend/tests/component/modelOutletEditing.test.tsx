@@ -2,7 +2,13 @@
 
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ModelOutletEditDialog } from "../../app/[locale]/models/components/model/ModelOutletEditDialog";
 import { ConversationModelParameters } from "../../components/model/ConversationModelParameters";
@@ -171,6 +177,29 @@ it("UI-LAYOUT-08 edits visible saved parameters and the displayed revision witho
   expect(screen.queryByText("modelProfile.clearKey")).not.toBeInTheDocument();
   expect(request.connection).not.toHaveProperty("credential_ref");
 }, 15000);
+
+it("restores the saved native tool switch and submits an explicit off value", async () => {
+  const saved = await api.getModelOutlet.getMockImplementation()?.();
+  saved.profile.capabilities.tools = { status: "supported" };
+  const success = vi.fn();
+  setup(
+    <ModelOutletEditDialog modelId={42} onClose={vi.fn()} onSuccess={success} />
+  );
+  const parameters = await screen.findByRole("region", {
+    name: "modelProfile.modelParameters",
+  });
+  const tools = await within(parameters).findByRole("switch", {
+    name: "modelProfile.nativeTools",
+  });
+  expect(tools).toBeChecked();
+  fireEvent.click(tools);
+  await waitForEditSaveReady();
+  fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+  await waitFor(() => expect(success).toHaveBeenCalledOnce());
+  expect(api.updateModelOutlet.mock.calls[0][1]).toMatchObject({
+    native_tool_call_supported: false,
+  });
+});
 
 it("keeps a conflicted edit open without retrying another revision", async () => {
   api.updateModelOutlet.mockRejectedValue(new Error("stale"));

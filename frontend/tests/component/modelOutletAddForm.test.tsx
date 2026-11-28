@@ -9,6 +9,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dialog, DialogContent, DialogTitle } from "../../components/ui/dialog";
@@ -355,7 +356,12 @@ it("opens advanced settings for Other without rewriting the requested model ID",
   setup();
   fillIdentity("deployment-custom-id");
   await waitForSaveReady();
-  fireEvent.mouseDown(screen.getByLabelText("modelProfile.modelProfile"));
+  expect(
+    screen.queryByRole("switch", { name: "modelProfile.nativeTools" })
+  ).not.toBeInTheDocument();
+  const profile = screen.getByLabelText("modelProfile.modelProfile");
+  fireEvent.mouseDown(profile);
+  fireEvent.change(profile, { target: { value: "deployment-custom-id" } });
   fireEvent.click(
     await screen.findByText("modelProfile.otherProfile", {
       selector: ".ant-select-item-option-content",
@@ -367,6 +373,15 @@ it("opens advanced settings for Other without rewriting the requested model ID",
   expect(screen.getByLabelText("modelProfile.requestModel")).toHaveValue(
     "deployment-custom-id"
   );
+  const parameters = screen.getByRole("region", {
+    name: "modelProfile.modelParameters",
+  });
+  const tools = within(parameters).getByRole("switch", {
+    name: "modelProfile.nativeTools",
+  });
+  expect(tools).not.toBeChecked();
+  fireEvent.click(tools);
+  expect(tools).toBeChecked();
   await waitForSaveReady();
   fireEvent.click(saveButton());
   await waitFor(() => expect(api.createModelOutlet).toHaveBeenCalledOnce());
@@ -374,6 +389,7 @@ it("opens advanced settings for Other without rewriting the requested model ID",
     selection_mode: "manual",
     model_profile: null,
     request_model_id: "deployment-custom-id",
+    native_tool_call_supported: true,
   });
 }, 15000);
 
@@ -440,6 +456,65 @@ it("keeps an unchanged batch draft ready when its parent recreates equivalent co
   await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
   expect(api.createModelOutlet).not.toHaveBeenCalled();
 }, 15000);
+
+it.each([true, false])(
+  "keeps the batch Other editor available for provider profile found=%s",
+  async (catalogued) => {
+    const provider = {
+      key: "vendor-route",
+      name: "Vendor route",
+      revision: "p1",
+    };
+    api.listProviderProfiles.mockResolvedValue({
+      items: catalogued ? [provider] : [],
+    });
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    const onApply = vi.fn();
+    render(
+      <QueryClientProvider client={client}>
+        <App>
+          <ModelOutletAddForm
+            configuration={{
+              draft: {
+                selection_mode: "manual",
+                request_model_id: "unlisted-model",
+                provider_info: {
+                  base_url: "https://models.invalid/v1",
+                  provider_id: provider.key,
+                },
+              },
+              onApply,
+            }}
+            onDone={vi.fn()}
+            onSuccess={vi.fn()}
+            onPendingChange={vi.fn()}
+          />
+        </App>
+      </QueryClientProvider>
+    );
+    const button = screen.getByRole("button", { name: "common.save" });
+    await waitFor(() => expect(button).toBeEnabled(), { timeout: 7000 });
+    const tools = screen.queryByRole("switch", {
+      name: "modelProfile.nativeTools",
+    });
+    if (catalogued) {
+      expect(tools).not.toBeInTheDocument();
+    } else {
+      expect(tools).toBeEnabled();
+    }
+    fireEvent.click(button);
+    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    expect(onApply.mock.calls[0][0].provider_profile).toEqual(
+      catalogued ? { key: provider.key, revision: provider.revision } : null
+    );
+  },
+  15000
+);
 
 it("suggests qwen3.8, exposes thinking controls and keeps capacity settings to two inputs", async () => {
   api.listModelProfiles.mockResolvedValue({

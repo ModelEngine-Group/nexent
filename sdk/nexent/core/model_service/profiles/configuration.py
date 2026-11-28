@@ -211,8 +211,9 @@ def build_outlet_draft(request, tenant_id, *, require_revision=False, catalog=No
             from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
 
             profile = LegacyInvocationOptions(configured).resolve(profile)
-        from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+        from nexent.core.model_service.profiles.outlet_controls import configure_native_tools, ensure_outlet_parameter_rules
 
+        profile = configure_native_tools(profile, request.native_tool_call_supported)
         profile = _clear_sampling_parameters(ensure_outlet_parameter_rules(profile), {
             key for key in ("temperature", "top_p")
             if key in request.parameter_values and request.parameter_values[key] is None
@@ -301,6 +302,9 @@ def reselect_outlet_profile(profile, request, *, compose=None):
     data.update(outlet_id=profile.outlet_id, config_revision=profile.config_revision)
     data["connection"]["credential_ref"] = profile.connection.credential_ref.model_dump(mode="json")
     data["capabilities"]["context"] = profile.capabilities.context.model_dump(mode="json")
+    if (profile.provider_key is None and profile.model_profile_key is None
+            and rebuilt.provider_key is None and rebuilt.model_profile_key is None):
+        data["capabilities"]["tools"]["status"] = profile.capabilities.tools.status
     data["context_configuration"] = profile.context_configuration.model_dump(mode="json")
     migration = profile.provenance.provider_metadata.get("migration")
     if isinstance(migration, dict):
@@ -331,9 +335,10 @@ def apply_outlet_patch(profile, request, *, compose=None):
         validate_sampling_parameters(submitted)
         from nexent.core.model_service.profiles.thinking_configuration import configure_outlet_policy
 
-        from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+        from nexent.core.model_service.profiles.outlet_controls import configure_native_tools, ensure_outlet_parameter_rules
 
         profile = ensure_outlet_parameter_rules(profile)
+        profile = configure_native_tools(profile, request.native_tool_call_supported)
         metadata = profile.provenance.provider_metadata if request.profile_selection is not None else {}
         control = request.thinking_control
         mode = request.thinking_mode

@@ -69,7 +69,7 @@ def database(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "backend"))
     apply_product_postgres_env()
     from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletDatabaseError
-    from management.db import client as client
+    from infrastructure.rdb import client
     from management.db.model import outlets as model_outlet_db
     from management.db.model.models import ModelRecord
 
@@ -150,7 +150,7 @@ def test_rollback_and_sanitized_actual_database_failure(database, caplog):
     with client.db_client.session_maker() as session:
         transient = create(db, session)
         changed = read(db, identifier, session)
-        changed.parameter_values["temperature"] = 3
+        changed.parameter_values["temperature"] = 2
         assert change(db, changed, session) == 2
         # Force a real server-side failure after both writes.
         with pytest.raises(DBAPIError) as failure:
@@ -314,3 +314,37 @@ def test_explicit_profile_reselection_commits_one_identity_and_preserves_credent
     assert reset_snapshot.parameter_values == {}
     with client.get_db_session() as session:
         assert session.execute(select(model.api_key).where(model.model_id == identifier)).scalar_one() == DUMMY
+
+
+def test_custom_other_tool_status_round_trips_after_create_and_patch(database):
+    from contracts.model import ModelOutletCreateRequest, ModelOutletPatchRequest
+    from management.services.model import profiles as service
+
+    client, db, model, conflict, _ = database
+    request = ModelOutletCreateRequest(
+        selection_mode="manual",
+        catalog_revision=service.get_model_profile_catalog().revision,
+        provider_info={"base_url": "https://fixture.invalid/v1"},
+        request_model_id="Unlisted/Model",
+        native_tool_call_supported=True,
+    )
+    identifier = service.create_model_outlet(request, "creator", "db-tenant-a")["model_id"]
+
+    def saved_status():
+        with client.get_db_session() as session:
+            return session.execute(
+                select(model.native_tool_call_supported).where(model.model_id == identifier)
+            ).scalar_one()
+
+    assert saved_status() is True
+    assert read(db, identifier).capabilities.tools.status == "supported"
+    patch = ModelOutletPatchRequest(expected_revision=1, native_tool_call_supported=False)
+    assert service.preview_outlet_patch(identifier, patch, "db-tenant-a")["capabilities"]["tools"]["status"] == "unsupported"
+    assert saved_status() is True
+    service.update_model_outlet(identifier, patch, "editor", "db-tenant-a")
+    with pytest.raises(conflict):
+        service.update_model_outlet(identifier, ModelOutletPatchRequest(
+            expected_revision=1, native_tool_call_supported=True), "editor", "db-tenant-a")
+    assert saved_status() is False
+    restored = read(db, identifier)
+    assert restored.config_revision == 2 and restored.capabilities.tools.status == "unsupported"

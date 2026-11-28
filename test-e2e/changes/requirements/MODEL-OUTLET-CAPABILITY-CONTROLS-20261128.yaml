@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-CAPABILITY-CONTROLS-20261128
+  change_type: requirement
+  requirement_id: MODEL-OUTLET-CAPABILITY-CONTROLS-20261128
+  title: Configure native tools for custom LLM outlets
+  description: Allow custom Other outlets to declare native tool support in the model parameters panel.
+  affected_features:
+    existing: [V5-PW-MODEL-01, BE-MODEL-OUTLET-PERSISTENCE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    added: []
+    modified: [MODEL-OUTLET-PERSISTENCE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - An explicit custom Other toggle survives outlet storage and controls native tool serialization, while omission preserves the previous state.
+    - Catalog-owned capabilities cannot be set by this operator input.
+    reason: Existing outlet and browser cases establish their general boundaries; focused traditional regressions prove the new input, storage guard, wire capability and form behavior.
+    test_selectors:
+    - test/backend/services/test_model_outlet_unified_editor.py
+    - test/backend/database/test_model_outlet_db.py
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+  notes: See the PR 4486 section of model-access-native-agent/SPEC.md for acceptance and proof boundaries. Reuse the formal cases for general regression and collect targeted deployed UI and runtime evidence for the new controls.

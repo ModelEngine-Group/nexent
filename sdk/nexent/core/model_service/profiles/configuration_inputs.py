@@ -51,6 +51,7 @@ class ModelProfilePreviewRequest(BaseModel):
     context_configuration: Optional[ModelOutletContextConfigurationPatch] = None
     thinking_control: Optional[ThinkingControlFormat] = None
     thinking_mode: Optional[Literal["default", "effort", "budget_tokens"]] = None
+    native_tool_call_supported: Optional[bool] = Field(default=None, strict=True)
 
 
 class ModelOutletProfileSelection(BaseModel):
@@ -86,3 +87,4 @@ class ModelOutletPatchRequest(BaseModel):
     context_configuration: Optional[ModelOutletContextConfigurationPatch] = None
     thinking_control: Optional[ThinkingControlFormat] = None
     thinking_mode: Optional[Literal["default", "effort", "budget_tokens"]] = None
+    native_tool_call_supported: Optional[bool] = Field(default=None, strict=True)
