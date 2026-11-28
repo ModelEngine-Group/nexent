@@ -85,31 +85,47 @@ Use the same API key as LLMs but typically a different endpoint (often `/v1/embe
 
 Use the same API key as LLMs but typically a different endpoint (often `/v1/rerank`).
 
-#### Speech Models
+### Speech Models
 
-Currently supports VolcEngine Voice and Aliyun Bailian voice models. VolcEngine requires `appid` and `token`, while Aliyun Bailian uses the same API key as the large language model.
+**Speech recognition (STT)** transcribes microphone input into chat text. **Speech synthesis (TTS)** reads assistant replies aloud. You can configure each model separately.
 
-**VolcEngine**
-- **Website**: [volcengine.com/product/voice-tech](https://www.volcengine.com/product/voice-tech)
-- **Free tier**: Available for individual use
-- **Highlights**: High-quality Chinese/English TTS
-- Recommended models: **Doubao Text-to-Speech Model 2.0** and **Large Model Streaming Speech Recognition**
-- **Getting started**:
+#### Alibaba Cloud Model Studio (DashScope)
 
-  1. Register a VolcEngine account.
-  2. Enable the Voice Technology service.
-  3. Create an app and generate `appid` and `token`.
-  4. Configure the TTS/STT settings in the Add Model page.
+1. Create an **API Key** in your Model Studio workspace. Use an endpoint in the same region as the key. [Model Studio API key guide](https://help.aliyun.com/en/model-studio/get-api-key)
+2. In Nexent, go to **Model Library → Add Model → Single** and select **Custom** as the provider. Enter the model type and name from the table, then enter the **API Key** in the main form.
 
-**Aliyun Bailian**
-- **Website**: [aliyun.com/benefit/scene/voice](https://www.aliyun.com/benefit/scene/voice)
-- Recommended models: **Qwen3-TTS-Instruct-Flash-Realtime / Qwen3-TTS-Flash-Realtime** and **Qwen3-ASR-Flash-Realtime**
-- **Getting started**:
+   | Model Type | Model Name | Base URL (China, Beijing) |
+   | --- | --- | --- |
+   | Speech-to-Text Model | `qwen3-asr-flash-realtime` | `wss://dashscope.aliyuncs.com/api-ws/v1/realtime` |
+   | Text-to-Speech Model | `qwen3-tts-flash-realtime` | `wss://dashscope.aliyuncs.com/api-ws/v1/realtime` |
 
-  1. Register an Aliyun account.
-  2. Enable the Qwen real-time voice service.
-  3. Create an app and generate an API Key.
-  4. Configure the TTS/STT settings in the Add Model page.
+3. To set the speech provider explicitly, open **Advanced Settings**, select `dashscope` under **STT Provider** or **TTS Provider**, then save the settings and verify connectivity.
+
+Use a `wss://` address for speech models. For speech recognition on a dedicated Beijing workspace domain, use `wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime` and replace `{WorkspaceId}` with your workspace ID. Enter the Base URL through `/realtime`. Nexent appends `?model=...` automatically. [Real-time speech recognition](https://help.aliyun.com/en/model-studio/qwen-asr-realtime-interaction-process) · [Real-time speech synthesis](https://help.aliyun.com/en/model-studio/interactive-process-of-qwen-tts-realtime-synthesis)
+
+#### Volcengine (Doubao Voice)
+
+1. Open the [Doubao Voice console](https://console.volcengine.com/speech/app) and switch to the legacy console using the dropdown in the upper left. In **API Service Center**, select an application with the required service enabled and copy its **App ID** and **Access Token** from the service authentication section. Nexent uses these credentials for Volcengine voice. [Volcengine console guide](https://docs.volcengine.com/docs/doubao-voice/console-guidance?lang=en)
+2. In Nexent, go to **Model Library → Add Model → Single** and select **Custom** as the provider. Use the row that matches the service enabled for your application.
+
+   | Model Type | Volcengine Service | Nexent Model Name | Base URL |
+   | --- | --- | --- | --- |
+   | Speech-to-Text Model | Doubao Streaming ASR 1.0 (hourly) | `speech_istreaming` | `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel` |
+   | Speech-to-Text Model | Doubao Streaming ASR 2.0 (hourly) | `volc.seedasr.sauc.duration` | `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async` |
+   | Text-to-Speech Model | Volcengine speech synthesis (built-in configuration) | `speech_tts` | `wss://openspeech.bytedance.com/api/v1/tts/ws_binary` |
+
+3. Open **Advanced Settings** and set **STT Provider** or **TTS Provider** to `volcengine`. Enter the **App ID** and **Access Token**, then select **Save**. Leave **API Key** in the main form blank.
+
+For speech recognition, **1.0** and **2.0** are service versions. **Hourly** refers to billing by the duration of recognized audio. Choose the model name that matches the version enabled for your application. Nexent sends the corresponding resource ID. [Volcengine real-time speech recognition API](https://docs.volcengine.com/docs/doubao-voice/bidirectional-streaming-automatic-speech-recognition-websocket?lang=en)
+
+The built-in `speech_tts` configuration uses resource ID `seed-tts-2.0` and the legacy WebSocket address in the table. Run the connectivity check to confirm that your application can access this endpoint. [Legacy Volcengine speech synthesis API](https://docs.volcengine.com/docs/doubao-voice/websocket-interface?lang=en)
+
+#### Verify and use speech models in chat
+
+1. Select **Verify Connectivity**, then **Add Model** once the check passes. If a Volcengine check fails, confirm that you saved Advanced Settings and that the enabled service version, model name, and Base URL match.
+2. Under **Default Configuration**, select the model in the **Speech-to-Text Model** or **Text-to-Speech Model** dropdown. This activates the model for chat after you add it to the library.
+3. For **voice input**, click the microphone by the chat input and grant microphone access if prompted. Click again when you finish speaking. You can edit the transcribed text before sending it.
+4. To **read a reply aloud**, select the speaker icon on the assistant reply. Select it again to stop. The button appears after you select a default speech synthesis model.
 
 ## 💡 Need Help
 
