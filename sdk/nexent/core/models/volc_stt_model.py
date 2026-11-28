@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import base64
 import datetime
@@ -12,6 +14,8 @@ from typing import Any, Dict, Optional
 
 import aiofiles
 import websockets
+
+from nexent.core.model_service.profiles.probe_diagnostics import record_connectivity_failure
 
 from .stt_model import BaseSTTModel
 
@@ -322,7 +326,7 @@ class VolcSTTModel(BaseSTTModel):
 
         headers = self.get_auth_headers()
         headers["X-Api-Connect-Id"] = reqid
-        logger.info(f"Connecting to {self.config.ws_url} with headers: {headers}")
+        logger.info("Connecting to the Volcano STT service")
 
         try:
             async with websockets.connect(self.config.ws_url, additional_headers=headers,
@@ -372,17 +376,19 @@ class VolcSTTModel(BaseSTTModel):
             return result
 
         except websockets.exceptions.ConnectionClosedError as e:
-            logger.error(f"WebSocket connection closed: {e.reason}")
+            if not record_connectivity_failure(e):
+                logger.error(f"WebSocket connection closed: {e.reason}")
             return {"error": f"Connection closed: {e.reason}"}
 
         except websockets.exceptions.WebSocketException as e:
-            logger.error(f"WebSocket error: {e}")
-            if hasattr(e, "status_code"):
-                logger.error(f"Status code: {e.status_code}")
-            if hasattr(e, "headers"):
-                logger.error(f"Headers: {e.headers}")
-            if hasattr(e, "response") and hasattr(e.response, "text"):
-                logger.error(f"Response: {e.response.text}")
+            if not record_connectivity_failure(e):
+                logger.error(f"WebSocket error: {e}")
+                if hasattr(e, "status_code"):
+                    logger.error(f"Status code: {e.status_code}")
+                if hasattr(e, "headers"):
+                    logger.error(f"Headers: {e.headers}")
+                if hasattr(e, "response") and hasattr(e.response, "text"):
+                    logger.error(f"Response: {e.response.text}")
             return {"error": f"WebSocket error: {str(e)}"}
 
         except Exception as e:
@@ -638,7 +644,7 @@ class VolcSTTModel(BaseSTTModel):
             True if connection successful, False otherwise
         """
         try:
-            logger.info(f"STT connectivity test started with config: ws_url={self.config.ws_url}")
+            logger.info("Volcano STT connectivity test started")
             logger.info(f"Test voice file path: {self.audio_file_path}")
 
             if not self.audio_file_path:
@@ -646,19 +652,19 @@ class VolcSTTModel(BaseSTTModel):
                 return False
 
             result = await self.process_audio_file(self.audio_file_path)
-            logger.info(f"STT process_audio_file result: {result}")
 
             is_success = self._is_stt_result_successful(result)
 
             if is_success:
                 logger.info("STT connectivity test successful")
-            else:
+            elif not record_connectivity_failure():
                 error_msg = self._extract_stt_error_message(result)
                 logger.error(f"STT connectivity test failed with error: {error_msg}")
 
             return is_success
         except Exception as e:
-            logger.error(f"STT connectivity test failed with exception: {str(e)}")
-            import traceback
-            logger.error(f"STT connectivity test exception traceback: {traceback.format_exc()}")
+            if not record_connectivity_failure(e):
+                logger.error(f"STT connectivity test failed with exception: {str(e)}")
+                import traceback
+                logger.error(f"STT connectivity test exception traceback: {traceback.format_exc()}")
             return False

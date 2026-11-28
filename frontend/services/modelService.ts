@@ -38,6 +38,7 @@ import {
 } from "@/const/modelConfig";
 import log from "@/lib/logger";
 import { runModelCheck } from "@/lib/modelCheckQueue";
+import { modelCheckFailure, type ModelCheckIssue } from "@/lib/modelCheckIssues";
 
 const mapOutletStateFromApi = (model: Record<string, unknown>) => ({
   profileSchemaVersion: model.profile_schema_version as number | undefined,
@@ -889,36 +890,47 @@ export const modelService = {
     }
   },
 
-  // Verify custom model connection
+  // Retain the boolean contract for existing callers.
   verifyCustomModel: async (
     displayName: string,
     modelType: string,
     signal?: AbortSignal
   ): Promise<boolean> => {
+    try {
+      const result = await modelService.verifyCustomModelDetail(
+        displayName,
+        modelType,
+        signal
+      );
+      return result.connectivity;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      return false;
+    }
+  },
+
+  verifyCustomModelDetail: async (
+    displayName: string,
+    modelType: string,
+    signal?: AbortSignal
+  ): Promise<{ connectivity: boolean; diagnostic?: ModelCheckIssue }> => {
     return runModelCheck(async () => {
-      try {
-        if (!displayName) return false;
-        const response = await authedFetch(
-          API_ENDPOINTS.model.customModelHealthcheck(displayName, modelType),
-          {
-            method: "POST",
-            headers: getAuthHeaders(),
-            signal,
-          }
+      if (!displayName) return { connectivity: false };
+      const response = await authedFetch(
+        API_ENDPOINTS.model.customModelHealthcheck(displayName, modelType),
+        { method: "POST", headers: getAuthHeaders(), signal }
+      );
+      if (response.status !== 200) {
+        throw new ModelError(
+          "Model connectivity check could not run",
+          response.status
         );
-        const result = await response.json();
-        if (response.status === 200 && result.data) {
-          return result.data.connectivity;
-        }
-        return false;
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          log.warn(`验证模型 ${displayName} 连接被取消`);
-          throw error;
-        }
-        log.error(`验证模型 ${displayName} 连接失败:`, error);
-        return false;
       }
+      const result = await response.json();
+      return {
+        connectivity: Boolean(result.data?.connectivity),
+        diagnostic: result.data?.diagnostic,
+      };
     }, signal);
   },
 
@@ -1083,6 +1095,7 @@ export const modelService = {
             error: result.data.connectivity
               ? undefined
               : result.data.error || result.detail || result.message,
+            diagnostic: result.data.diagnostic,
             capacitySuggestion: mapCapacitySuggestionFromApi(
               result.data.capacity_suggestion
             ),
@@ -1094,6 +1107,7 @@ export const modelService = {
           model_name: result.data?.model_name || "UNKNOWN_MODEL",
           error:
             result.detail || result.message || "Connection verification failed",
+          diagnostic: modelCheckFailure({ code: response.status }),
           capacitySuggestion: null,
         };
       } catch (error) {
@@ -1106,6 +1120,7 @@ export const modelService = {
           connectivity: false,
           model_name: "UNKNOWN_MODEL",
           error: error instanceof Error ? error.message : String(error),
+          diagnostic: modelCheckFailure(error),
           capacitySuggestion: null,
         };
       }

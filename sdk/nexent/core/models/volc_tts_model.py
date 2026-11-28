@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Volcano Engine TTS model implementation using proprietary protocol.
 """
@@ -11,6 +13,8 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, Optional, Union
 
 import websockets
+
+from nexent.core.model_service.profiles.probe_diagnostics import record_connectivity_failure
 
 from .tts_model import BaseTTSModel
 
@@ -112,7 +116,8 @@ class VolcTTSModel(BaseTTSModel):
             if (res[2] & 0x0f) == 1:
                 error_msg = gzip.decompress(error_msg)
             err_str = "Volc TTS Error " + str(code) + ": " + error_msg.decode('utf-8')
-            logger.error(err_str)
+            if not record_connectivity_failure():
+                logger.error(err_str)
             raise Exception(err_str)
         return True, None
 
@@ -161,7 +166,8 @@ class VolcTTSModel(BaseTTSModel):
                 logger.error("Volc TTS connectivity test failed: empty or invalid audio data")
             return is_success
         except Exception as e:
-            logger.error("Volc TTS connectivity test failed with exception: " + str(e))
-            import traceback
-            logger.error("Volc TTS connectivity test exception traceback: " + traceback.format_exc())
+            if not record_connectivity_failure(e):
+                logger.error("Volc TTS connectivity test failed with exception: " + str(e))
+                import traceback
+                logger.error("Volc TTS connectivity test exception traceback: " + traceback.format_exc())
             return False

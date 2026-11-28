@@ -855,6 +855,7 @@ async def manage_check_model_health(
             **({"persist_status": False} if read_only else {}),
          user_id=current_user.user_id)
         if read_only and not result.get("connectivity"):
+            result.pop("diagnostic", None)
             result["error"] = "Model connectivity check failed"
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Successfully checked model connectivity", "data": result}

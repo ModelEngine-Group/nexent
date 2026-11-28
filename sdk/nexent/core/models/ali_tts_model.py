@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Ali TTS model implementation supporting both CosyVoice and Qwen Realtime APIs.
 """
@@ -10,13 +12,15 @@ from typing import Any, AsyncGenerator, Dict, Optional, Union
 
 import websockets
 
-# Default WebSocket connection timeout (seconds)
-DEFAULT_WS_OPEN_TIMEOUT = 60
-DEFAULT_WS_CLOSE_TIMEOUT = 10
+from nexent.core.model_service.profiles.probe_diagnostics import record_connectivity_failure
 
 from .tts_model import BaseTTSModel
 
 logger = logging.getLogger(__name__)
+
+# Default WebSocket connection timeout (seconds)
+DEFAULT_WS_OPEN_TIMEOUT = 60
+DEFAULT_WS_CLOSE_TIMEOUT = 10
 
 
 class AliTTSError(Exception):
@@ -276,7 +280,8 @@ class AliTTSModel(BaseTTSModel):
         except AliTTSError:
             raise
         except Exception as e:
-            logger.error(f"CosyVoice TTS error: {str(e)}")
+            if not record_connectivity_failure(e):
+                logger.error(f"CosyVoice TTS error: {str(e)}")
             raise
 
         if len(buffer) == 0:
@@ -511,7 +516,8 @@ class AliTTSModel(BaseTTSModel):
         except AliTTSError:
             raise
         except Exception as e:
-            logger.error(f"Qwen Realtime TTS error: {str(e)}")
+            if not record_connectivity_failure(e):
+                logger.error(f"Qwen Realtime TTS error: {str(e)}")
             raise
 
         if len(buffer) == 0:
@@ -580,12 +586,14 @@ class AliTTSModel(BaseTTSModel):
                 logger.error("Ali TTS connectivity test failed: empty audio data")
             return is_success
         except AliTTSError as e:
-            error_msg = str(e)
-            logger.error(f"Ali TTS connectivity test failed: {error_msg}")
+            if not record_connectivity_failure(e):
+                error_msg = str(e)
+                logger.error(f"Ali TTS connectivity test failed: {error_msg}")
             return False
         except Exception as e:
-            logger.error(f"Ali TTS connectivity test failed with exception: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            if not record_connectivity_failure(e):
+                logger.error(f"Ali TTS connectivity test failed with exception: {str(e)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 

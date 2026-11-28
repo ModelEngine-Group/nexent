@@ -65,9 +65,11 @@ async def test_runtime_probe_reaps_provider_task_on_all_cancellation_paths(monke
             closed.set()
 
     async def disconnected():
+        await started.wait()
         if failure == "checker_error":
             raise RuntimeError("disconnect checker failed")
-        return failure == "disconnect" and started.is_set()
+        if failure == "caller_cancel":
+            await asyncio.Future()
 
     monkeypatch.setattr(profile_probe, "probe_model_profile", blocked)
     task = asyncio.create_task(profile_probe.probe_until_disconnect(profile, "key", {}, disconnected))

@@ -115,6 +115,21 @@ _PROVIDER_CODES = {
 }
 
 
+def model_http_error_category(status: int) -> str:
+    """Classify an upstream HTTP status without inspecting its response body."""
+    if status in (401, 403):
+        return "MODEL_AUTHENTICATION_ERROR"
+    if status == 404:
+        return "MODEL_NOT_FOUND"
+    if status == 429:
+        return "MODEL_RATE_LIMITED"
+    if 500 <= status < 600:
+        return "MODEL_SERVICE_UNAVAILABLE"
+    if status in (400, 422):
+        return "MODEL_REQUEST_INVALID"
+    return "MODEL_PROVIDER_ERROR" if 200 <= status < 300 else "MODEL_HTTP_ERROR"
+
+
 def normalize_model_error(
     error, *, request_id: str, attempt: int = 1, max_attempts: int = 1, will_retry: bool = False
 ) -> ModelError:
@@ -138,17 +153,7 @@ def normalize_model_error(
     if response is not None:
         scope = "provider"
         status = response.status_code
-        category = "MODEL_PROVIDER_ERROR" if 200 <= status < 300 else "MODEL_HTTP_ERROR"
-        if status in (401, 403):
-            category = "MODEL_AUTHENTICATION_ERROR"
-        elif status == 404:
-            category = "MODEL_NOT_FOUND"
-        elif status == 429:
-            category = "MODEL_RATE_LIMITED"
-        elif 500 <= status < 600:
-            category = "MODEL_SERVICE_UNAVAILABLE"
-        elif status in (400, 422):
-            category = "MODEL_REQUEST_INVALID"
+        category = model_http_error_category(status)
         detail = response.error_details()
         code = detail["code"]
         if code in _PROVIDER_CODES:

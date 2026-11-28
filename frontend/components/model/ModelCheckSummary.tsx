@@ -31,7 +31,7 @@ export function ModelCheckSummary({
   const { shared, models } = groupModelCheckIssues(issues);
   const count = shared.length + models.length;
   if (!count) return null;
-  const text = (issue: ModelCheckIssue) => {
+  const reason = (issue: ModelCheckIssue) => {
     const locale = (
       i18n?.resolvedLanguage ??
       i18n?.language ??
@@ -53,6 +53,14 @@ export function ModelCheckSummary({
       .filter(Boolean)
       .join(" · ");
   };
+  const text = (issue: ModelCheckIssue) =>
+    [
+      reason(issue),
+      issue.request_id &&
+        t("modelProfile.checkRequestId", { id: issue.request_id }),
+    ]
+      .filter(Boolean)
+      .join(" · ");
   return (
     <Popover>
       <PopoverTrigger asChild>

@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import type { ModelOutletValidationResponse } from "./modelProfile";
+
 // Model connection status type
 export type ModelConnectStatus =
   "not_detected" | "detecting" | "available" | "unavailable";
@@ -233,6 +235,7 @@ export interface ModelValidationResponse {
   connectivity: boolean;
   model_name: string;
   error?: string; // Error message when connectivity fails
+  diagnostic?: NonNullable<ModelOutletValidationResponse["error"]>;
   capacitySuggestion?: CapacitySuggestion | null;
 }
 

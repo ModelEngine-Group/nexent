@@ -19,6 +19,7 @@ from nexent.core.gateway.modality.embedding.embedding_adapter import (
     _is_multimodal,
 )
 from nexent.core.gateway.model_context import EmbeddingContext
+from nexent.core.model_service.profiles.probe_diagnostics import capture_connectivity_diagnostics
 
 
 def _ctx(**overrides):
@@ -396,6 +397,31 @@ async def test_multimodal_dimension_check_other_error():
     adapter = SiliconflowEmbeddingAdapter(_mctx(factory="siliconflow"))
     adapter.get_multimodal_embeddings = MagicMock(side_effect=RuntimeError("boom"))
     assert await adapter.dimension_check(timeout=1.0) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_class,context,operation", [
+    (OpenAICompatibleEmbeddingAdapter, _ctx, "get_embeddings"),
+    (JinaEmbeddingAdapter, _mctx, "get_multimodal_embeddings"),
+])
+@pytest.mark.parametrize("error_type,status,category", [
+    (requests.exceptions.Timeout, None, "MODEL_TIMEOUT"),
+    (requests.exceptions.ConnectionError, None, "MODEL_NETWORK_ERROR"),
+    (requests.exceptions.HTTPError, 401, "MODEL_AUTHENTICATION_ERROR"),
+])
+async def test_embedding_probe_retains_safe_diagnostics(
+    adapter_class, context, operation, error_type, status, category, caplog
+):
+    adapter = adapter_class(context())
+    error = error_type("private provider response")
+    if status is not None:
+        response = requests.Response()
+        response.status_code = status
+        error.response = response
+    with patch.object(adapter, operation, side_effect=error), capture_connectivity_diagnostics() as diagnostic:
+        assert await adapter.dimension_check() == []
+    assert (diagnostic.category, diagnostic.http_status) == (category, status)
+    assert "private provider response" not in caplog.text
 
 
 @pytest.mark.asyncio

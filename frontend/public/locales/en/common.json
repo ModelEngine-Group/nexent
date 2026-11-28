@@ -7147,11 +7147,13 @@
     "connectionSettings": "Connection settings",
     "checkFailed": "Check failed",
     "checkIssues": "{{count}} issues found",
+    "checkRequestId": "Request ID {{id}}",
     "checkIssueDetails": "Check issues",
     "retryCheck": "Retry check",
     "unrecognizedError": "Unrecognized error (source not provided):",
     "originalServiceError": "Original model service error:",
     "checkErrors": {
+      "MODEL_PROBE_FAILED": "The service did not provide a specific failure reason.",
       "MODEL_AUTHENTICATION_ERROR": "Service authentication failed. Check the API key or HTTP headers.",
       "MODEL_NOT_FOUND": "Service address or route not found. Check the base URL.",
       "MODEL_REQUEST_INVALID": "The model rejected the request parameters. Check its configuration.",

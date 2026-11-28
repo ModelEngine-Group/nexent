@@ -42,6 +42,39 @@ def _safe_result(value):
     return value
 
 
+_PROBE_DIAGNOSTIC_TEXT_FIELDS = (
+    "category", "diagnostic_code", "message_source", "message", "scope", "request_id", "parameter",
+)
+
+
+def _public_probe_diagnostic(value):
+    if value is None:
+        return None
+    diagnostic = {
+        field: value[field] for field in _PROBE_DIAGNOSTIC_TEXT_FIELDS if isinstance(value.get(field), str)
+    }
+    http_status = value.get("http_status")
+    if type(http_status) is int and 100 <= http_status <= 599:
+        diagnostic["http_status"] = http_status
+    messages = value.get("messages")
+    if isinstance(messages, dict):
+        diagnostic["messages"] = {
+            locale: messages[locale] for locale in ("en", "zh") if isinstance(messages.get(locale), str)
+        }
+    return diagnostic
+
+
+def _safe_profile_probe_result(result):
+    return {"ok": result["ok"], "error": _public_probe_diagnostic(result["error"])}
+
+
+def _safe_legacy_probe_result(result):
+    safe = _safe_result(result)
+    if "diagnostic" in result:
+        safe["diagnostic"] = _public_probe_diagnostic(result["diagnostic"])
+    return safe
+
+
 async def _probe(payload: ModelProbe, actor):
     config = payload.model_dump(exclude={"probe_model_id"})
     if payload.probe_model_id is not None and payload.api_key in (None, "", "sk-no-api-key"):
@@ -78,10 +111,15 @@ async def _profile_probe(payload, actor, request):
     profile = ResolvedModelProfile.model_validate(payload.profile)
     if profile.identity.tenant_id != actor.tenant_id:
         raise ValueError("Model profile tenant does not match the authenticated actor")
-    return await probe_until_disconnect(profile, payload.api_key, payload.http_headers, request.is_disconnected)
+    async def wait_for_disconnect():
+        # A blocking receive lets ASGI middleware forward the disconnect across checkpoints.
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+
+    return await probe_until_disconnect(profile, payload.api_key, payload.http_headers, wait_for_disconnect)
 
 
-def _endpoint(schema, call, *, request_aware=False):
+def _endpoint(schema, call, *, request_aware=False, serialize=_safe_result):
     async def endpoint(request: Request):
         actor = request.scope.get(PRINCIPAL_KEY)
         if actor is None:
@@ -101,7 +139,7 @@ def _endpoint(schema, call, *, request_aware=False):
         except Exception as exc:
             logger.warning("AgentOS model administration failed (%s)", type(exc).__name__)
             return JSONResponse({"code": "MODEL_REQUEST_FAILED"}, status_code=502)
-        return {"result": jsonable_encoder(_safe_result(result))}
+        return {"result": jsonable_encoder(serialize(result))}
 
     return endpoint
 
@@ -129,13 +167,16 @@ def create_model_administration_router() -> APIRouter:
         (ModelAdministrationOperation.PROBE, ModelProbe, _probe),
     )
     for operation, schema, call in operations:
+        serialize = _safe_legacy_probe_result if operation in {
+            ModelAdministrationOperation.HEALTHCHECK, ModelAdministrationOperation.PROBE,
+        } else _safe_result
         router.add_api_route(
-            operation.value, _endpoint(schema, call), methods=["POST"],
+            operation.value, _endpoint(schema, call, serialize=serialize), methods=["POST"],
             include_in_schema=False, name=f"model_{operation.name.lower()}",
         )
     router.add_api_route(
         ModelAdministrationOperation.PROFILE_PROBE.value,
-        _endpoint(ModelProfileProbe, _profile_probe, request_aware=True),
+        _endpoint(ModelProfileProbe, _profile_probe, request_aware=True, serialize=_safe_profile_probe_result),
         methods=["POST"], include_in_schema=False, name="model_profile_probe",
     )
     return router

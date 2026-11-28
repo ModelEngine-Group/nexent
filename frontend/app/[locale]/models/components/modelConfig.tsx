@@ -663,13 +663,17 @@ export const ModelConfigSection = forwardRef<
         connected = result.ok;
         issue = result.error;
       } else {
-        connected = await modelService.verifyCustomModel(
-          modelName, modelType, signal
+        const result = await modelService.verifyCustomModelDetail(
+          modelName,
+          modelType,
+          signal
         );
+        connected = result.connectivity;
+        issue = result.diagnostic ?? null;
       }
       completed = true;
       if (!connected && !issue)
-        issue = { category: "MODEL_HTTP_ERROR", scope: "model" };
+        issue = { category: "MODEL_PROBE_FAILED", scope: "model" };
     } catch (error) {
       if (!isCurrent()) return;
       if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {

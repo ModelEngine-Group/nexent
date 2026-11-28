@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for Volcano TTS model.
 
@@ -11,6 +13,8 @@ import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import sys as _sys
+
+from nexent.core.model_service.profiles.probe_diagnostics import capture_connectivity_diagnostics
 
 _models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../sdk/nexent/core/models"))
 _core_dir = os.path.dirname(_models_dir)
@@ -703,6 +707,15 @@ class TestVolcTTSModelCheckConnectivity:
         with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await volc_model.check_connectivity()
             assert result is False
+
+    @pytest.mark.asyncio
+    async def test_capture_probe_timeout_without_logging_raw_exception(self, volc_model, caplog):
+        with patch.object(volc_model, "generate_speech", side_effect=TimeoutError("private-test-value")):
+            with capture_connectivity_diagnostics() as diagnostic:
+                assert not await volc_model.check_connectivity()
+
+        assert diagnostic.category == "MODEL_TIMEOUT"
+        assert "private-test-value" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_check_connectivity_no_audio_file_path(self):

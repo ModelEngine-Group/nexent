@@ -2,6 +2,7 @@
 
 "use client";
 
+import { useModelConfigProbe } from "@/hooks/model/useModelConfigProbe";
 import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -417,9 +418,12 @@ function SingleAddForm({
     undefined
   );
   // Optional connectivity probe; valid configurations can be saved unchecked.
-  const [probe, setProbe] = useState<
-    "idle" | "checking" | "available" | "unavailable"
-  >("idle");
+  const {
+    status: probe,
+    issue: probeIssue,
+    check: checkProbe,
+    reset: resetProbe,
+  } = useModelConfigProbe();
 
   // Auto-detect capacity + reasoning capability whenever name and URL are
   // filled (debounced); user-saved overrides (the gear) win over suggestions.
@@ -493,24 +497,17 @@ function SingleAddForm({
 
   async function handleCheck() {
     if (probe === "checking" || !name.trim() || !baseUrl.trim()) return;
-    setProbe("checking");
-    try {
-      const result = await modelService.verifyModelConfigConnectivity({
-        modelName: name.trim(),
-        modelType: type,
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
-        modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
-        ...(effective?.settings
-          ? buildInferenceParamsPayload(effective.settings)
-          : {}),
-        // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
-        ...buildVoiceCredentialParams(type, effective?.settings),
-      });
-      setProbe(result.connectivity ? "available" : "unavailable");
-    } catch {
-      setProbe("unavailable");
-    }
+    await checkProbe({
+      modelName: name.trim(),
+      modelType: type,
+      baseUrl: baseUrl.trim(),
+      apiKey: apiKey.trim(),
+      modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
+      ...(effective?.settings
+        ? buildInferenceParamsPayload(effective.settings)
+        : {}),
+      ...buildVoiceCredentialParams(type, effective?.settings),
+    });
   }
 
   async function submit() {
@@ -611,7 +608,7 @@ function SingleAddForm({
               value={type}
               onValueChange={(v) => {
                 setType(v as ModelType);
-                setProbe("idle");
+                resetProbe();
               }}
             >
               <SelectTrigger className="w-full data-[size=default]:h-10">
@@ -642,7 +639,7 @@ function SingleAddForm({
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
-                setProbe("idle");
+                resetProbe();
                 // The name is the model identity: manual gear settings saved
                 // for a previous name must not silently apply to the new
                 // model. Catalog suggestions re-run automatically.
@@ -686,7 +683,7 @@ function SingleAddForm({
               value={baseUrl}
               onChange={(e) => {
                 setBaseUrl(e.target.value);
-                setProbe("idle");
+                resetProbe();
               }}
               placeholder="https://api.example.com/v1"
               autoComplete="off"
@@ -710,7 +707,7 @@ function SingleAddForm({
               value={apiKey}
               onChange={(e) => {
                 setApiKey(e.target.value);
-                setProbe("idle");
+                resetProbe();
               }}
               placeholder="sk-..."
               autoComplete="new-password"
@@ -793,6 +790,7 @@ function SingleAddForm({
               {t("model.status.available", { defaultValue: "可用" })}
             </span>
           )}
+          {probeIssue && <ModelCheckSummary issues={{ [name]: probeIssue }} />}
           {probe === "unavailable" && (
             <span className="flex items-center gap-1.5 text-xs text-red-500">
               <span className="size-2 rounded-full bg-red-500" />
@@ -825,11 +823,11 @@ function SingleAddForm({
           reasoningCapability={capability}
           onModelTypeChange={(next) => {
             setType(next);
-            setProbe("idle");
+            resetProbe();
           }}
           onSave={(next) => {
             setOverride(next);
-            setProbe("idle");
+            resetProbe();
             setShowSettings(false);
           }}
           onClose={() => setShowSettings(false)}
@@ -1229,10 +1227,10 @@ function BatchAddForm({
           rowOverrides[row.id]?.settings
         ),
       });
-      apply(result.connectivity, {
-        category: "MODEL_HTTP_ERROR",
-        scope: "connection",
-      });
+      apply(
+        result.connectivity,
+        result.diagnostic ?? { category: "MODEL_PROBE_FAILED", scope: "model" }
+      );
     } catch (error) {
       apply(false, modelCheckFailure(error));
     }

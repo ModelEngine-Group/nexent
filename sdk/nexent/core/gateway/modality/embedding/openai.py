@@ -11,6 +11,7 @@ from typing import List
 import httpx
 import requests
 
+from nexent.core.model_service.profiles.probe_diagnostics import record_connectivity_failure
 from nexent.core.concurrency import run_blocking
 
 from nexent.monitor import record_model_call
@@ -132,14 +133,17 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
                     "Hello, nexent!",
                     timeout=timeout,
                 )
-        except requests.exceptions.Timeout:
-            logging.error(f"OpenAI embedding connection timed out ({timeout}s)")
+        except requests.exceptions.Timeout as error:
+            if not record_connectivity_failure(error):
+                logging.error(f"OpenAI embedding connection timed out ({timeout}s)")
             return []
-        except requests.exceptions.ConnectionError:
-            logging.error("OpenAI embedding connection error")
+        except requests.exceptions.ConnectionError as error:
+            if not record_connectivity_failure(error):
+                logging.error("OpenAI embedding connection error")
             return []
-        except Exception:
-            logging.exception("OpenAI embedding connection failed")
+        except Exception as error:
+            if not record_connectivity_failure(error):
+                logging.exception("OpenAI embedding connection failed")
             return []
 
     async def invoke(self, request: EmbeddingRequest):

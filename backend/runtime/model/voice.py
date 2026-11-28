@@ -3,6 +3,7 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 
+from nexent.core.model_service.profiles.probe_diagnostics import record_connectivity_failure
 from nexent.core.models.stt_model import BaseSTTModel
 from nexent.core.models.tts_model import BaseTTSModel
 from nexent.core.models.volc_stt_model import VolcSTTConfig, VolcSTTModel
@@ -506,7 +507,8 @@ class VoiceService:
         except STTConnectionException:
             raise
         except Exception as e:
-            logger.error(f"STT connectivity check failed: {str(e)}")
+            if not record_connectivity_failure(e):
+                logger.error(f"STT connectivity check failed: {str(e)}")
             raise STTConnectionException(f"STT connectivity check failed: {str(e)}") from e
 
     async def check_tts_connectivity(
@@ -557,7 +559,8 @@ class VoiceService:
         except TTSConnectionException:
             raise
         except Exception as e:
-            logger.error(f"TTS connectivity check failed: {str(e)}")
+            if not record_connectivity_failure(e):
+                logger.error(f"TTS connectivity check failed: {str(e)}")
             raise TTSConnectionException(f"TTS connectivity check failed: {str(e)}") from e
 
     async def check_voice_connectivity(
@@ -626,7 +629,8 @@ class VoiceService:
         except (STTConnectionException, TTSConnectionException):
             raise
         except Exception as e:
-            logger.error(f"Voice service connectivity check failed: {str(e)}")
+            if not record_connectivity_failure(e):
+                logger.error(f"Voice service connectivity check failed: {str(e)}")
             raise VoiceServiceException(f"Voice service connectivity check failed: {str(e)}") from e
 
 

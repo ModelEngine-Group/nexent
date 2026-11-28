@@ -1536,3 +1536,30 @@ async def test_perform_connectivity_check_embedding_empty_base_url():
 
         assert result is False
         mock_build.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status", "category"), [
+    (401, "MODEL_AUTHENTICATION_ERROR"),
+    (404, "MODEL_NOT_FOUND"),
+    (429, "MODEL_RATE_LIMITED"),
+    (None, "MODEL_TIMEOUT"),
+])
+async def test_image_probe_returns_and_logs_classified_failure(status, category, caplog):
+    config = {"model_name": "image", "model_type": "vlm2", "base_url": "https://example.test/v1",
+              "api_key": "private-probe-value", "ssl_verify": False}
+    with mock.patch("runtime.model.health.httpx.AsyncClient") as client:
+        post = client.return_value.__aenter__.return_value.post
+        if status is None:
+            post.side_effect = httpx.ReadTimeout("private-probe-value")
+        else:
+            post.return_value = httpx.Response(status, text="private-probe-value")
+        result = await verify_model_config_connectivity(config)
+
+    assert result["connectivity"] is False
+    diagnostic = result["diagnostic"]
+    assert diagnostic["category"] == category
+    assert diagnostic.get("http_status") == status
+    assert diagnostic["request_id"] in caplog.text
+    assert caplog.text.count("event=model_connectivity_failed") == 1
+    assert "private-probe-value" not in caplog.text

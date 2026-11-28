@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """OpenAI-compatible rerank adapter (flat OpenAI or DashScope wrapper format)."""
 
 from __future__ import annotations
@@ -8,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from nexent.core.model_service.profiles.probe_diagnostics import record_connectivity_failure
 from nexent.core.concurrency import run_blocking
 
 from ...model_context import ModelContext
@@ -198,14 +201,17 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
                 self.rerank, "test query", ["test document"], top_n=1
             )
             return True
-        except requests.exceptions.Timeout:
-            logging.error(f"Rerank API connection test timed out ({timeout} seconds)")
+        except requests.exceptions.Timeout as error:
+            if not record_connectivity_failure(error):
+                logging.error(f"Rerank API connection test timed out ({timeout} seconds)")
             return False
-        except requests.exceptions.ConnectionError:
-            logging.error("Rerank API connection error, unable to establish connection")
+        except requests.exceptions.ConnectionError as error:
+            if not record_connectivity_failure(error):
+                logging.error("Rerank API connection error, unable to establish connection")
             return False
-        except Exception:
-            logging.exception("Rerank API connectivity check failed")
+        except Exception as error:
+            if not record_connectivity_failure(error):
+                logging.exception("Rerank API connectivity check failed")
             return False
 
     # ---- adapter interface ----
