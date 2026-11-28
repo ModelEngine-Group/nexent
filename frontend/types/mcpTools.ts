@@ -192,6 +192,7 @@ export interface McpServiceItem {
   groupIds?: string;
   ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   sharedFields?: Record<string, boolean>;
+  sslVerify?: boolean;
 }
 
 export interface McpTagStat {
@@ -219,6 +220,7 @@ export interface AddMcpServicePayload {
   ingroup_permission?: string;
   shared_fields?: Record<string, boolean>;
   skip_health_check?: boolean;
+  ssl_verify?: boolean;
 }
 
 export interface UpdateMcpServicePayload {
@@ -235,6 +237,7 @@ export interface UpdateMcpServicePayload {
   group_ids?: string;
   ingroup_permission?: string;
   shared_fields?: Record<string, boolean>;
+  ssl_verify?: boolean;
 }
 
 export interface ToggleMcpServicePayload {
@@ -283,6 +286,7 @@ export interface LocalAddMcpDraft {
   groupIds?: number[];
   ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   sharedFields?: Record<string, boolean>;
+  sslVerify?: boolean;
 }
 
 /**

@@ -50,6 +50,7 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
 
     authorization_token = record.get("authorization_token")
     custom_headers = record.get("custom_headers")
+    ssl_verify = record.get("ssl_verify", True)
 
     from management.services.tool.discovery import get_tool_from_remote_mcp_server
 
@@ -59,6 +60,7 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
         tenant_id=tenant_id,
         authorization_token=authorization_token,
         custom_headers=custom_headers,
+        ssl_verify=ssl_verify,
     )
     return [tool.__dict__ for tool in tools_info]
 
@@ -94,6 +96,7 @@ async def refresh_mcp_service_tool_count(
 
     authorization_token = record.get("authorization_token")
     custom_headers = record.get("custom_headers")
+    ssl_verify = record.get("ssl_verify", True)
 
     # Skip MCP protocol check for API-type MCPs (they use OpenAPI JSON, not MCP)
     config_json = record.get("config_json")
@@ -106,7 +109,7 @@ async def refresh_mcp_service_tool_count(
     if custom_headers:
         headers.update(custom_headers)
 
-    tool_names = await _mcp_protocol_health_check(server_url, headers)
+    tool_names = await _mcp_protocol_health_check(server_url, headers, ssl_verify=ssl_verify)
     if not tool_names:
         raise MCPConnectionError(
             "MCP server is unreachable or does not support MCP protocol"
@@ -128,6 +131,7 @@ async def refresh_mcp_service_tool_count(
                 tenant_id=tenant_id,
                 authorization_token=authorization_token,
                 custom_headers=custom_headers,
+                ssl_verify=ssl_verify,
             )
             break
         except MCPConnectionError:

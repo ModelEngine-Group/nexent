@@ -167,6 +167,7 @@ feature_overrides:
   CHAT-SIDEBAR: runtime
   CHAT-TRAJECTORY: observability
   FAF-001: runtime
+  MCP-REMOTE-SSL-VERIFY: mcp
   MSRF-001: model
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config

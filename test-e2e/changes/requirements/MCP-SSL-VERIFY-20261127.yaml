@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: MCP-SSL-VERIFY-20261127
+  change_type: requirement
+  requirement_id: MCP-SSL-VERIFY-20261127
+  title: Per-server TLS certificate verification switch for remote MCP services
+  description: Remote MCP records gain a per-server ssl_verify field (default true, A2A-agent pattern). The flag is honored by MCP-space create/update/test-connection, management-side tool discovery, health checks and tool refresh, and Runtime agent materialization. Disabling verification reuses the existing internal skip-verification HTTP client factory; enabling keeps the verified default client. Stored MCP binding revisions are unaffected.
+  affected_features:
+    existing: []
+    added: [MCP-REMOTE-SSL-VERIFY]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Add/Update/TestConnection request contracts default ssl_verify to true, preserve explicit values, reject null on strict models, and treat update omission as keep-current.
+    - create/update persistence round-trips ssl_verify, including None-keeps-current on update and name/url lookup of the stored flag.
+    - Management health check, connection test and tool discovery select the verified or skip-verification httpx client factory from the record or request flag.
+    - Registration and update services forward the request flag into the connectivity check and the persisted record; enable-flow health checks read the stored flag.
+    - Remote MCP list and record read APIs return ssl_verify.
+    - Prepared MCP materialization injects the skip-verification factory only for disabled records after revision validation, and the computed binding revision is unchanged.
+    reason: A new dedicated boundary suite covers contract, persistence, service and materialization behavior; the existing remote-MCP app/db/service and prepared-evaluation suites are strengthened with forwarding and regression assertions. No new formal Case; the proof surface is unit-level plumbing of a configuration field.
+    test_selectors:
+    - test/backend/services/test_mcp_ssl_verify.py
+    - test/backend/database/test_remote_mcp_db.py
+    - test/backend/app/test_remote_mcp_app.py
+    - test/backend/services/test_remote_mcp_service.py
+    - test/backend/services/test_tool_configuration_service.py
+    - test/backend/services/test_mcp_internal_tool_search.py
+    - test/backend/app/test_agentos_prepared_evaluation.py
+  notes: The sibling documentation checkout is absent; this record carries the acceptance obligations. Default true aligns with A2A agents, CAS and OAuth switches. Management-side checks change from never-verify to verify-by-default; self-signed servers must disable the switch once, surfaced at registration time.

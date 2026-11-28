@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Button,
   Card,
+  Checkbox,
   Form,
   Input,
   InputNumber,
@@ -106,6 +107,7 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
   tags: [],
   groupIds: [],
   ingroupPermission: "READ_ONLY",
+  sslVerify: true,
 });
 
 interface AddMcpServiceLocalSectionProps {
@@ -371,6 +373,20 @@ export default function AddMcpServiceLocalSection({
                           />
                         </Form.Item>
                       </div>
+                      <Form.Item
+                        className="mb-0"
+                        style={{ marginBottom: 0 }}
+                        extra={t("mcpConfig.addServer.sslVerifyHelp")}
+                      >
+                        <Checkbox
+                          checked={draft.sslVerify ?? true}
+                          onChange={(e) =>
+                            patchDraft({ sslVerify: e.target.checked })
+                          }
+                        >
+                          {t("mcpConfig.addServer.sslVerify")}
+                        </Checkbox>
+                      </Form.Item>
                     </>
                   ) : null}
 

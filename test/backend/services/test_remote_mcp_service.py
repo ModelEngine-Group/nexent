@@ -500,6 +500,7 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         mock_health_check.assert_called_once_with(
             'https://srv/mcp',
             {"Authorization": "tok", "X-Custom-Auth": "header-value"},
+            ssl_verify=True,
         )
 
         # Verify custom_headers stored in database
@@ -1264,6 +1265,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
             remote_mcp_server='https://srv/mcp',
             authorization_token='tok',
             custom_headers={"X-Enabling-Custom": "value"},
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
@@ -1288,6 +1290,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
             remote_mcp_server='https://srv/mcp',
             authorization_token='tok',
             custom_headers=None,
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
@@ -1477,6 +1480,88 @@ class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
 
 # ============================================================================
+# ssl_verify preference tests
+# ============================================================================
+
+class TestUpdateMcpServiceSslVerify(unittest.TestCase):
+    """update_mcp_service forwards the TLS verification preference."""
+
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    def test_explicit_preference_is_persisted(self, mock_get, mock_check, mock_update):
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='new-name', description=None,
+            server_url='https://new.url', authorization_token=None,
+            custom_headers=None, tags=None, config_json=None, market_id=None,
+            ssl_verify=False,
+        )
+
+        self.assertIs(mock_update.call_args.kwargs["ssl_verify"], False)
+
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    def test_omission_keeps_stored_value(self, mock_get, mock_check, mock_update):
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='new-name', description=None,
+            server_url='https://new.url', authorization_token=None,
+            custom_headers=None, tags=None, config_json=None, market_id=None,
+        )
+
+        self.assertIsNone(mock_update.call_args.kwargs["ssl_verify"])
+
+
+class TestGetRemoteMcpServerListSslVerify(unittest.IsolatedAsyncioTestCase):
+    """get_remote_mcp_server_list reports the stored verification preference."""
+
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    async def test_list_reports_ssl_verify_with_true_default(self, mock_get):
+        mock_get.return_value = [
+            {
+                "mcp_name": "verify-off", "mcp_server": "https://srv1/mcp",
+                "status": True, "mcp_id": 1, "ssl_verify": False,
+            },
+            {
+                "mcp_name": "legacy-row", "mcp_server": "https://srv2/mcp",
+                "status": True, "mcp_id": 2,
+            },
+        ]
+
+        result = await get_remote_mcp_server_list('tid', is_need_auth=True)
+
+        self.assertIs(result[0]["ssl_verify"], False)
+        self.assertIs(result[1]["ssl_verify"], True)
+
+
+class TestGetMcpRecordByIdSslVerify(unittest.IsolatedAsyncioTestCase):
+    """get_mcp_record_by_id returns the stored verification preference."""
+
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    async def test_get_record_reports_ssl_verify(self, mock_get_record):
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "https://test.com/mcp",
+            "authorization_token": None,
+            "custom_headers": None,
+            "ssl_verify": False,
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        self.assertIsNotNone(result)
+        self.assertIs(result["ssl_verify"], False)
+
+
+# ============================================================================
 # check_mcp_health_and_update_db - custom_headers tests (lines 901-905, 910-911)
 # ============================================================================
 
@@ -1507,6 +1592,7 @@ class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCas
             remote_mcp_server='https://srv',
             authorization_token='Bearer token123',
             custom_headers={"X-Health-Custom": "health-value"},
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service.update_mcp_status_by_name_and_url')
@@ -1527,6 +1613,7 @@ class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCas
             remote_mcp_server='https://srv',
             authorization_token='Bearer token123',
             custom_headers=None,
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service.update_mcp_status_by_name_and_url')
@@ -1571,6 +1658,7 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
             remote_mcp_server="https://srv/mcp",
             authorization_token="tok",
             custom_headers={"X-Service-Custom": "service-value"},
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
@@ -1592,6 +1680,7 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
             remote_mcp_server="https://srv/mcp",
             authorization_token="tok",
             custom_headers=None,
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service._mcp_protocol_health_check', new_callable=AsyncMock)
@@ -1637,6 +1726,7 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
             tenant_id='tid',
             authorization_token='tok',
             custom_headers={"X-Tools-Custom": "tools-value"},
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.tool.discovery.get_tool_from_remote_mcp_server', new_callable=AsyncMock)
@@ -1661,6 +1751,7 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
             tenant_id='tid',
             authorization_token='tok',
             custom_headers=None,
+            ssl_verify=True,
         )
 
 
@@ -2061,6 +2152,7 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
         mock_connect.assert_called_once_with(
             "https://srv/mcp",
             {"Authorization": "Bearer tok"},
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
@@ -2078,6 +2170,7 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
         mock_connect.assert_called_once_with(
             "https://srv/mcp",
             {"X-Custom": "val"},
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
@@ -2096,6 +2189,7 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
         mock_connect.assert_called_once_with(
             "https://srv/mcp",
             {"Authorization": "tok", "X-Custom": "val"},
+            ssl_verify=True,
         )
 
     @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
@@ -2107,7 +2201,7 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
         result = await test_mcp_connection("https://srv/mcp")
 
         self.assertTrue(result)
-        mock_connect.assert_called_once_with("https://srv/mcp", {})
+        mock_connect.assert_called_once_with("https://srv/mcp", {}, ssl_verify=True)
 
     @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
     async def test_connection_failure_returns_false(self, mock_connect):
@@ -2128,7 +2222,7 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
         result = await test_mcp_connection("  https://srv/mcp  ")
 
         self.assertTrue(result)
-        mock_connect.assert_called_once_with("https://srv/mcp", {})
+        mock_connect.assert_called_once_with("https://srv/mcp", {}, ssl_verify=True)
 
 
 # ============================================================================
@@ -2272,6 +2366,7 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
         mock_health.assert_called_once_with(
             "https://srv/mcp",
             {"Authorization": "Bearer tok", "X-Custom": "val"},
+            ssl_verify=True,
         )
         mock_update.assert_called_once_with(
             mcp_id=1, tenant_id="tid", user_id="uid",
@@ -2741,7 +2836,9 @@ async def test_uploaded_mcp_remains_deletable_after_disable(
     mock_manager.assert_not_called()
     if reenable:
         await update_mcp_service_enabled(**target, enabled=True)
-        mock_health.assert_awaited_once_with(remote_mcp_server=url, authorization_token=None, custom_headers=None)
+        mock_health.assert_awaited_once_with(
+            remote_mcp_server=url, authorization_token=None, custom_headers=None, ssl_verify=True
+        )
         mock_enabled.assert_called_with(**target, enabled=True)
         mock_fields.assert_not_called()
         mock_manager.assert_not_called()

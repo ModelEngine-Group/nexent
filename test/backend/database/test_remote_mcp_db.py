@@ -87,7 +87,7 @@ install_shared_contract_stub(exceptions_mock, 'exceptions')
 install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 # Now import the functions to be tested
-from management.db.mcp.remote import create_mcp_record, delete_mcp_record_by_name_and_url, delete_mcp_record_by_container_id, update_mcp_status_by_name_and_url, update_mcp_record_by_name_and_url, update_mcp_record_manage_fields_by_id, update_mcp_record_enabled_by_id, update_mcp_record_status_by_id, update_mcp_record_container_fields_by_id, delete_mcp_record_by_id, get_mcp_records_by_tenant, get_mcp_records_by_container_port, get_mcp_server_by_name_and_tenant, get_mcp_authorization_token_by_name_and_url, get_mcp_record_by_id_and_tenant, get_mcp_custom_headers_by_name_and_url, check_mcp_name_exists, check_enabled_mcp_name_exists, update_mcp_record_market_id_by_id, clear_mcp_record_market_id, update_mcp_record_registry_json_by_id
+from management.db.mcp.remote import create_mcp_record, delete_mcp_record_by_name_and_url, delete_mcp_record_by_container_id, update_mcp_status_by_name_and_url, update_mcp_record_by_name_and_url, update_mcp_record_manage_fields_by_id, update_mcp_record_enabled_by_id, update_mcp_record_status_by_id, update_mcp_record_container_fields_by_id, delete_mcp_record_by_id, get_mcp_records_by_tenant, get_mcp_records_by_container_port, get_mcp_server_by_name_and_tenant, get_mcp_authorization_token_by_name_and_url, get_mcp_record_by_id_and_tenant, get_mcp_custom_headers_by_name_and_url, get_mcp_ssl_verify_by_name_and_url, check_mcp_name_exists, check_enabled_mcp_name_exists, update_mcp_record_market_id_by_id, clear_mcp_record_market_id, update_mcp_record_registry_json_by_id
 from management.db.mcp import remote as remote_mcp_db
 
 
@@ -178,6 +178,38 @@ def test_create_mcp_record_with_custom_headers(monkeypatch, mock_session):
     create_mcp_record(mcp_data, "tenant1", "user1")
 
     assert captured_kwargs.get("custom_headers") == custom_headers
+
+
+def test_create_mcp_record_with_ssl_verify(monkeypatch, mock_session):
+    """ssl_verify is an allowed insert field for both True and False values."""
+    session, _ = mock_session
+    session.add = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.remote.filter_property", lambda data, model: data)
+
+    captured_kwargs = {}
+
+    def mock_mcp_record(**kwargs):
+        captured_kwargs.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr("management.db.mcp.remote.McpRecord", mock_mcp_record)
+
+    create_mcp_record(
+        {"mcp_name": "test_mcp", "mcp_server": "http://test.server.com", "ssl_verify": False},
+        "tenant1", "user1",
+    )
+    assert captured_kwargs.get("ssl_verify") is False
+
+    captured_kwargs.clear()
+    create_mcp_record(
+        {"mcp_name": "test_mcp", "mcp_server": "http://test.server.com", "ssl_verify": True},
+        "tenant1", "user1",
+    )
+    assert captured_kwargs.get("ssl_verify") is True
 
 
 def test_create_mcp_record_failure(monkeypatch, mock_session):
@@ -515,6 +547,55 @@ def test_update_mcp_record_manage_fields_by_id_with_shared_fields(monkeypatch, m
     assert call_args["shared_fields"] == shared
 
 
+@pytest.mark.parametrize("value", [True, False])
+def test_update_mcp_record_manage_fields_by_id_with_ssl_verify(monkeypatch, mock_session, value):
+    """An explicit ssl_verify overwrites the stored value."""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
+
+    update_mcp_record_manage_fields_by_id(
+        mcp_id=1, tenant_id="tid", user_id="uid",
+        name="n", server_url="u", description=None,
+        tags=None, source="local", authorization_token=None,
+        custom_headers=None, config_json=None,
+        market_id=None, ssl_verify=value,
+    )
+    call_args = mock_update.call_args[0][0]
+    assert call_args["ssl_verify"] is value
+
+
+def test_update_mcp_record_manage_fields_by_id_keeps_ssl_verify_when_none(monkeypatch, mock_session):
+    """Omitting ssl_verify keeps the stored value (key absent from the update)."""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
+
+    update_mcp_record_manage_fields_by_id(
+        mcp_id=1, tenant_id="tid", user_id="uid",
+        name="n", server_url="u", description=None,
+        tags=None, source="local", authorization_token=None,
+        custom_headers=None, config_json=None,
+        market_id=None,
+    )
+    call_args = mock_update.call_args[0][0]
+    assert "ssl_verify" not in call_args
+
+
 # ============================================================================
 # update_mcp_record_enabled_by_id (NEW)
 # ============================================================================
@@ -776,6 +857,51 @@ def test_get_mcp_custom_headers_by_name_and_url_empty_headers(monkeypatch, mock_
 
     result = get_mcp_custom_headers_by_name_and_url("test_mcp", "http://test.server.com", "tenant1")
     assert result is None
+
+
+# ============================================================================
+# get_mcp_ssl_verify_by_name_and_url
+# ============================================================================
+
+@pytest.mark.parametrize("value", [True, False])
+def test_get_mcp_ssl_verify_by_name_and_url_success(monkeypatch, mock_session, value):
+    """The stored verification flag is returned for an existing record."""
+    session, query = mock_session
+    mock_mcp = MockMcpRecord()
+    mock_mcp.ssl_verify = value
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_mcp
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
+
+    result = get_mcp_ssl_verify_by_name_and_url("test_mcp", "http://test.server.com", "tenant1")
+    assert result is value
+
+
+def test_get_mcp_ssl_verify_by_name_and_url_not_found(monkeypatch, mock_session):
+    """A missing record fails safe to verification enabled."""
+    session, query = mock_session
+
+    mock_first = MagicMock()
+    mock_first.return_value = None
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("management.db.mcp.remote.get_db_session", lambda: mock_ctx)
+
+    result = get_mcp_ssl_verify_by_name_and_url("nonexistent", "http://test.server.com", "tenant1")
+    assert result is True
 
 
 # ============================================================================
