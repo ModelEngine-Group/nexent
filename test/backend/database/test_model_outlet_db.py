@@ -69,6 +69,21 @@ def test_missing_rows_do_not_construct_a_snapshot(database):
     )
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_custom_outlet_native_tool_setting_is_written_in_optimistic_update(database, profile, enabled):
+    from nexent.core.model_service.profiles.outlet_controls import configure_native_tools
+
+    db, _, _ = database
+    session = MagicMock()
+    read_result, write_result = MagicMock(), MagicMock()
+    read_result.mappings.return_value.first.return_value = row(profile)
+    write_result.scalar_one_or_none.return_value = 2
+    session.execute.side_effect = [read_result, write_result]
+    proposed = configure_native_tools(profile, enabled)
+    assert update(db, proposed, session) == 2
+    assert statement(session, 1).params["native_tool_call_supported"] is enabled
+
+
 @pytest.mark.parametrize("api_key", [None, "updated-dummy", ""])
 def test_update_is_one_atomic_cas_write_with_optional_credential(
     database, profile, api_key, monkeypatch

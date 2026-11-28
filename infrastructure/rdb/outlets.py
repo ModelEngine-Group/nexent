@@ -146,6 +146,7 @@ def get_resolved_model_record(
 
 
 def _validate_update(current, proposed, *, api_key=_UNSET):
+    from nexent.core.model_service.profiles.outlet_controls import configure_native_tools
     from nexent.core.model_service.profiles.thinking_configuration import (
         configure_outlet_policy,
     )
@@ -169,6 +170,9 @@ def _validate_update(current, proposed, *, api_key=_UNSET):
             thinking_control=selected("operator_thinking", "preset", "profile_default"),
             thinking_mode=selected("operator_thinking_degree", "mode", "default"),
             has_credential=bool(api_key and api_key.strip()) if api_key is not _UNSET else None)
+        tool_status = proposed.capabilities.tools.status
+        if tool_status != expected.capabilities.tools.status and tool_status in {"supported", "unsupported"}:
+            expected = configure_native_tools(expected, tool_status == "supported")
     except (ParameterValidationError, ValueError, TypeError):
         raise ModelOutletValidationError() from None
     for key in (

@@ -8,8 +8,13 @@ from pydantic import ValidationError
 from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError
 from contracts.model import ModelOutletCreateRequest, ModelOutletPatchRequest, ModelProfilePreviewInput, ModelProfilePreviewRequest
 from management.services.model import profiles as service
+from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
+from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile, encode_resolved_model_profile
 from nexent.core.model_service.profiles.protocol_parameters import connectivity_request
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+from nexent.core.model_service.registry import model_service_references
+from nexent.core.model_service.resource_conversion import ResourceRequestConverter
+from test.sdk.core.model_service.resource_fixtures import resources
 
 
 def draft(provider="alibaba-cn", **changes):
@@ -36,6 +41,56 @@ def saved(request=None):
 def selection(request):
     return {"catalog_revision": request.catalog_revision,
             "model_profile": request.model_profile, "provider_profile": request.provider_profile}
+
+
+@pytest.mark.parametrize("enabled,status", [(True, "supported"), (False, "unsupported"), (None, "unknown")])
+def test_custom_other_native_tool_setting_survives_storage_and_routes_the_wire_request(enabled, status):
+    current = saved(draft(provider=None, model_profile=None, request_model_id="custom",
+                          native_tool_call_supported=enabled))
+    references = model_service_references()
+    row = encode_resolved_model_profile(current, registered_references=references)
+    assert row["native_tool_call_supported"] is enabled
+    restored = decode_resolved_model_profile(row, registered_references=references)
+    edited = service.apply_outlet_patch(restored, ModelOutletPatchRequest(expected_revision=1))
+    assert edited.capabilities.tools.status == status
+    for agent_native in (True, False):
+        converted = ResourceRequestConverter(native=agent_native).convert(resources(), edited)
+        body = OpenAIChatAdapter().prepare_http_request(converted.request, edited).json_body
+        expected_native = agent_native and enabled is True
+        assert converted.tool_protocol == ("native" if expected_native else "text_block")
+        assert ("tools" in body) is expected_native
+
+
+def test_custom_other_native_tool_edit_explicitly_disables_and_preserves_when_omitted():
+    request = draft(provider=None, model_profile=None, request_model_id="custom",
+                    native_tool_call_supported=True)
+    current = saved(request)
+    reselected = service.apply_outlet_patch(current, ModelOutletPatchRequest(
+        expected_revision=1, profile_selection=selection(request), request_model_id="renamed-custom"))
+    assert reselected.capabilities.tools.status == "supported"
+    updated = service.apply_outlet_patch(reselected, ModelOutletPatchRequest(
+        expected_revision=1, native_tool_call_supported=False))
+    assert updated.capabilities.tools.status == "unsupported"
+
+
+@pytest.mark.parametrize("known", ["model", "provider"])
+def test_native_tool_override_cannot_replace_catalog_capabilities(known):
+    request = (draft(provider=None) if known == "model" else
+               draft(model_profile=None, request_model_id="custom", parameter_values={}))
+    current = saved(request)
+    for configure in (
+        lambda: saved(request.model_copy(update={"native_tool_call_supported": True})),
+        lambda: service.apply_outlet_patch(current, ModelOutletPatchRequest(
+            expected_revision=1, native_tool_call_supported=False)),
+    ):
+        with pytest.raises(ModelOutletValidationError) as captured:
+            configure()
+        assert captured.value.category == "MODEL_PROFILE_CAPABILITY_LOCKED"
+
+
+def test_native_tool_setting_rejects_non_boolean_json():
+    with pytest.raises(ValidationError):
+        ModelOutletPatchRequest.model_validate({"expected_revision": 1, "native_tool_call_supported": "false"})
 
 
 def test_aeu_catalog_only_preview_matches_complete_configuration():

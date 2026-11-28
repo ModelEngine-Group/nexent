@@ -18,7 +18,7 @@ import { parseRequestParameters } from "@/components/model/RequestParametersEdit
 import { ModelRequestSettings } from "@/components/model/ModelRequestSettings";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Form, Input, Select } from "antd";
+import { Alert, App, Button, Form, Input, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ShieldCheck } from "lucide-react";
@@ -87,6 +87,7 @@ export function ModelOutletAddForm({
     if (!editing) return configuration?.draft;
     const p = editing.profile;
     const refs = p.provenance?.atomic_refs;
+    const toolsStatus = p.capabilities.tools?.status;
     return {
       selection_mode: "manual",
       model_profile: refs?.model
@@ -102,6 +103,13 @@ export function ModelOutletAddForm({
       context_limits: p.capabilities.context,
       context_configuration: p.context_configuration,
       extra_api_parameters: p.extra_api_parameters,
+      native_tool_call_supported:
+        !refs?.model &&
+        !refs?.provider &&
+        toolsStatus &&
+        toolsStatus !== "unknown"
+          ? toolsStatus === "supported"
+          : undefined,
       thinking_control:
         p.provenance?.provider_metadata?.operator_thinking?.preset ??
         "profile_default",
@@ -128,6 +136,9 @@ export function ModelOutletAddForm({
   const [modelKey, setModelKey] = useState<string | undefined>(
     initial?.model_profile?.key ??
       (initial?.selection_mode === "manual" ? "__other__" : undefined)
+  );
+  const [nativeTools, setNativeTools] = useState(
+    initial?.native_tool_call_supported
   );
   const [advanced, setAdvanced] = useState<string[]>(
     !editing && initial?.selection_mode === "manual" && !initial.model_profile
@@ -177,6 +188,7 @@ export function ModelOutletAddForm({
     maskedKey ? "__saved_key__" : apiKey,
     providerKey,
     modelKey,
+    nativeTools,
     sslVerify,
     timeout,
     values,
@@ -203,6 +215,11 @@ export function ModelOutletAddForm({
   const provider = providers.data?.items.find(
     (item) => item.key === providerKey
   );
+  const showNativeTools =
+    providerKey === "__custom__" &&
+    modelKey === "__other__" &&
+    !provider &&
+    !configuration?.draft.provider_info.provider_id;
   const model = useMemo(
     () =>
       modelKey
@@ -224,6 +241,9 @@ export function ModelOutletAddForm({
       model_profile: model
         ? { key: model.key, revision: model.revision }
         : null,
+      native_tool_call_supported: showNativeTools
+        ? (nativeTools ?? (editing ? undefined : false))
+        : undefined,
       provider_info: {
         ...initial?.provider_info,
         base_url: baseUrl.trim(),
@@ -259,6 +279,8 @@ export function ModelOutletAddForm({
       editing,
       resetParameters,
       modelKey,
+      showNativeTools,
+      nativeTools,
       provider,
       model,
       baseUrl,
@@ -309,6 +331,7 @@ export function ModelOutletAddForm({
     context_configuration: request.context_configuration,
     thinking_control: request.thinking_control,
     thinking_mode: request.thinking_mode,
+    native_tool_call_supported: request.native_tool_call_supported,
     extra_api_parameters: request.extra_api_parameters,
     ...(keyEdited && !maskedKey ? { api_key: apiKey.trim() || null } : {}),
     ...(headersEdited ? { http_headers: headers } : {}),
@@ -839,6 +862,7 @@ export function ModelOutletAddForm({
                 allowClear
                 showSearch
                 filterOption={(input, option) => {
+                  if (option?.value === "__other__") return true;
                   const item = models.data?.items.find(
                     (item) => item.key === option?.value
                   );
@@ -1086,6 +1110,22 @@ export function ModelOutletAddForm({
                   }
                 />
               </div>
+            }
+            tools={
+              showNativeTools ? (
+                <Form.Item
+                  label={t("modelProfile.nativeTools")}
+                  tooltip={t("modelProfile.nativeToolsHelp")}
+                  className="!mb-0"
+                >
+                  <Switch
+                    aria-label={t("modelProfile.nativeTools")}
+                    checked={nativeTools === true}
+                    disabled={save.isPending}
+                    onChange={setNativeTools}
+                  />
+                </Form.Item>
+              ) : undefined
             }
             capacity={
               <ModelCapacityFields

@@ -4,6 +4,7 @@
 
 from functools import lru_cache
 
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
 
 
@@ -14,6 +15,18 @@ def _model_shutdown_preferences():
     catalog = load_profile_catalog()
     return {key: atom.capabilities["reasoning"]["can_disable"] for key, atom in catalog.models.items()
             if atom.capabilities["reasoning"]["can_disable"] is not None}
+
+
+def configure_native_tools(profile, enabled: bool | None):
+    """Allow an operator declaration only for an outlet without either catalog profile."""
+    if enabled is None:
+        return profile
+    if (profile.identity.model_type != "llm"
+            or profile.provider_key is not None or profile.model_profile_key is not None):
+        raise ParameterValidationError("MODEL_PROFILE_CAPABILITY_LOCKED", "/native_tool_call_supported")
+    data = profile.model_dump(mode="json")
+    data["capabilities"]["tools"]["status"] = "supported" if enabled else "unsupported"
+    return profile.__class__.model_validate(data)
 
 
 def custom_thinking_rule():

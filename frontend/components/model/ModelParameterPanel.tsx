@@ -8,6 +8,7 @@ import {
   Layers,
   RotateCcw,
   SlidersHorizontal,
+  Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Card, Button } from "antd";
@@ -20,6 +21,7 @@ export function ModelParameterPanel({
   onReset,
   sampling,
   thinking,
+  tools,
   capacity,
 }: {
   source?: string;
@@ -28,6 +30,7 @@ export function ModelParameterPanel({
   onReset?: () => void;
   sampling: ReactNode;
   thinking: ReactNode;
+  tools?: ReactNode;
   capacity: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -71,25 +74,28 @@ export function ModelParameterPanel({
             [
               ["samplingGroup", SlidersHorizontal, sampling],
               ["thinkingGroup", BrainCircuit, thinking],
+              ["toolsGroup", Wrench, tools],
               ["capacityGroup", Layers, capacity],
             ] as const
-          ).map(([key, Icon, content]) => (
-            <Card
-              key={key}
-              variant="outlined"
-              role="region"
-              aria-label={t(`modelProfile.${key}`)}
-              className="!mb-3 !bg-background shadow-sm [&_.ant-card-body]:!p-4"
-            >
-              <h4 className="mb-3 flex items-center gap-2 text-sm font-medium">
-                <span className="text-primary">
-                  <Icon size={16} />
-                </span>
-                {t(`modelProfile.${key}`)}
-              </h4>
-              {content}
-            </Card>
-          ))}
+          )
+            .filter(([, , content]) => content != null)
+            .map(([key, Icon, content]) => (
+              <Card
+                key={key}
+                variant="outlined"
+                role="region"
+                aria-label={t(`modelProfile.${key}`)}
+                className="!mb-3 !bg-background shadow-sm [&_.ant-card-body]:!p-4"
+              >
+                <h4 className="mb-3 flex items-center gap-2 text-sm font-medium">
+                  <span className="text-primary">
+                    <Icon size={16} />
+                  </span>
+                  {t(`modelProfile.${key}`)}
+                </h4>
+                {content}
+              </Card>
+            ))}
         </>
       )}
     </section>
