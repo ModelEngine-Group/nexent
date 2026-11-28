@@ -937,6 +937,95 @@ curl "https://your-nexent-domain.com/nb/v1/file/download/knowledge_base/42/abc12
 
 > `ignore` 模式返回的预签名 URL 在有效期内**任何人**凭 URL 都能下载，请像保管密码一样保管，不要写入日志或前端可见的位置。
 
+## 📊 监控面板接口
+
+北向监控面复用平台监控面板（Ops 仪表盘）的 24 个数据接口，路径前缀为
+`/nb/v1/monitoring`。调用方只能读取**自己 API Key 所属租户**的监控数据：
+传入 `tenant_id` 且与所属租户不匹配时返回 `403`。
+
+### 接口列表
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/nb/v1/monitoring/models` | GET | 模型监控列表（分页、搜索、排序） |
+| `/nb/v1/monitoring/models/summary` | GET | 模型监控汇总 |
+| `/nb/v1/monitoring/models/rankings` | GET | 模型调用量 Top 5 |
+| `/nb/v1/monitoring/models/trends` | GET | 模型用量趋势 |
+| `/nb/v1/monitoring/models/refresh` | POST | 提交模型监控重算等待令牌（202） |
+| `/nb/v1/monitoring/models/refreshes/{refresh_id}` | GET | 查询源版本发布进度 |
+| `/nb/v1/monitoring/skills` | GET | 技能监控列表 |
+| `/nb/v1/monitoring/skills/summary` | GET | 技能监控汇总 |
+| `/nb/v1/monitoring/skills/rankings` | GET | 技能用量 Top 5 |
+| `/nb/v1/monitoring/skills/trends` | GET | 技能用量趋势 |
+| `/nb/v1/monitoring/skills/refresh` | POST | 提交技能监控重算等待令牌（202） |
+| `/nb/v1/monitoring/skills/refreshes/{refresh_id}` | GET | 查询源版本发布进度 |
+| `/nb/v1/monitoring/agents` | GET | Agent 监控列表 |
+| `/nb/v1/monitoring/agents/summary` | GET | Agent 监控汇总（含 Token 用量） |
+| `/nb/v1/monitoring/agents/trends` | GET | Agent 执行趋势 |
+| `/nb/v1/monitoring/agents/rankings` | GET | Agent 执行量 Top 5 |
+| `/nb/v1/monitoring/mcp-tools` | GET | MCP 工具监控列表（支持 tools/services 维度） |
+| `/nb/v1/monitoring/mcp-tools/summary` | GET | MCP 监控汇总 |
+| `/nb/v1/monitoring/mcp-tools/rankings` | GET | MCP 调用量 Top 5 |
+| `/nb/v1/monitoring/mcp-tools/trends` | GET | MCP 调用趋势 |
+| `/nb/v1/monitoring/mcp-tools/catalog` | GET | MCP 服务目录（筛选项数据） |
+| `/nb/v1/monitoring/mcp-tools/overview` | GET | 平台总览（按租户的服务清单与调用趋势） |
+| `/nb/v1/monitoring/mcp-tools/refresh` | POST | 提交 MCP 监控重算等待令牌（202） |
+| `/nb/v1/monitoring/mcp-tools/refreshes/{refresh_id}` | GET | 查询源版本发布进度 |
+
+### 通用查询参数
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `start_date` / `end_date` | date | 是 | 统计区间（跨度须小于 366 天） |
+| `group_ids` | int[] | 否 | 用户组过滤（最多 100 个） |
+| `model_id` / `model_type` / `agent_id` / `skill_id` / `skill_name` / `server_id` / `server_type` / `tool_name` | — | 否 | 各维度专用过滤 |
+| `page` / `page_size` / `search` / `sort_by` / `descending` | — | 否 | 列表分页与排序（`page_size` ≤ 100） |
+
+### 响应格式
+
+成功响应为统一信封，`data` 内携带监控面板原生响应体（含 `data` 结果字段与
+`data_as_of` / `coverage_state` / `is_stale` 数据覆盖状态字段）：
+
+```json
+{
+  "message": "success",
+  "requestId": "req-uuid-here",
+  "data": {
+    "data": { "..." : "面板原生结果" },
+    "data_as_of": "2026-11-27T00:00:00Z",
+    "coverage_state": "covered",
+    "is_stale": false
+  }
+}
+```
+
+### 重算等待令牌的语义
+
+`POST .../refresh` **不创建重算任务**：它读取所选区间当前的源数据版本
+（`source_revision`）并签发一个轮询令牌。调用方随后用
+`GET .../refreshes/{refresh_id}` 轮询，直到该源版本被发布为可查询的统计结果
+（“读己之写”语义）。若签发时源版本已发布，首次轮询即返回 `completed`；
+若区间无已确认的源数据，POST 返回 `409 MONITORING_DATES_UNCOVERED`
+（含 `missing_dates`）。等待期间状态为 `running`，超时判定为 `timed_out`。
+
+错误响应为三段式结构 `{code, message, status, requestId}`，常见错误：
+`403 HTTP_403`（租户越界）、`404 HTTP_404`（令牌不存在或不属于本租户）、
+`409 MONITORING_DATES_UNCOVERED`（重算区间无数据源）、`422 HTTP_422`（参数校验失败）、
+`429 RATE_LIMIT_EXCEEDED`（重算动作超过每租户限流，默认 120 次/分钟）、
+`503 HTTP_503`（监控服务暂不可用）。
+
+### 示例
+
+```bash
+curl -X GET "https://your-nexent-domain.com/nb/v1/monitoring/models/summary?start_date=2026-11-20&end_date=2026-11-27" \
+  -H "Authorization: Bearer your-access-key-here"
+
+curl -X POST "https://your-nexent-domain.com/nb/v1/monitoring/models/refresh" \
+  -H "Authorization: Bearer your-access-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{"start_date": "2026-11-20", "end_date": "2026-11-27"}'
+```
+
 ## ⚠️ 错误码说明
 
 业务错误统一使用三字段信封 `{code, message, status, requestId}`。`code` 为稳定字符串，客户端应优先按 `code` 分支，HTTP 状态码仅作兜底。

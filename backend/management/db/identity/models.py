@@ -2,18 +2,16 @@
 
 from sqlalchemy import (
     TIMESTAMP,
-    Boolean,
     Column,
     Index,
     Integer,
     Sequence,
     String,
     UniqueConstraint,
-    text,
 )
 
 
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY
 
 from management.db.base import SCHEMA, SimpleTableBase, TableBase
 from infrastructure.rdb.account_record import (
@@ -22,6 +20,10 @@ from infrastructure.rdb.account_record import (
     UserTenant as UserTenant,
     TenantGroupInfo as TenantGroupInfo,
 )
+# The usage ledger backs northbound accounting from every exposing service,
+# so the model lives in the shared storage adapter layer. Re-exported here so
+# the existing management call sites keep working.
+from infrastructure.rdb.token_usage import UserTokenUsageLog as UserTokenUsageLog
 
 
 class PartnerMappingId(TableBase):
@@ -116,34 +118,6 @@ class UserTokenInfo(TableBase):
     access_key = Column(String(100), nullable=False, doc="Access Key (AK)")
     user_id = Column(String(100), nullable=False,
                      doc="User ID who owns this token")
-
-
-class UserTokenUsageLog(TableBase):
-    """
-    User token usage log table
-    """
-    __tablename__ = "user_token_usage_log_t"
-    __table_args__ = (
-        Index(
-            "ix_user_token_usage_active_token_time",
-            "token_id",
-            text("create_time DESC"),
-            postgresql_include=["token_usage_id"],
-            postgresql_where=text("delete_flag = 'N'"),
-        ),
-        {"schema": SCHEMA},
-    )
-
-    token_usage_id = Column(Integer, Sequence("user_token_usage_log_t_token_usage_id_seq", schema=SCHEMA),
-                            primary_key=True, nullable=False, doc="Token usage log ID, unique primary key")
-    token_id = Column(Integer, nullable=False,
-                      doc="Foreign key to user_token_info_t.token_id")
-    call_function_name = Column(
-        String(100), doc="API function name being called")
-    related_id = Column(
-        Integer, doc="Related resource ID (e.g., conversation_id)")
-    meta_data = Column(
-        JSONB, doc="Additional metadata for this usage log entry, stored as JSON")
 
 
 class UserOAuthAccount(TableBase):

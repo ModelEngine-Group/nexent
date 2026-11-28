@@ -12,23 +12,41 @@ from struct import pack, unpack
 from typing import Annotated, Literal
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from infrastructure.monitoring.contracts import McpServerType
 from pydantic import BaseModel, Field
 
+from backend.http.server.northbound import is_northbound_path
+from backend.http.server.request_context import get_request_id
+from contracts.authentication import AuthenticatedIdentity, CredentialKind
 from contracts.constants.environment import JWT_SECRET
-from infrastructure.monitoring.contracts import McpServerType
+from contracts.errors.exceptions import UnauthorizedError
+from gateway.identity.context import trusted_identity
 from infrastructure.rdb.account_access import filter_tenant_group_ids
 from management.services.permission.identity.session import authenticate
 from ops.monitoring.agent_tokens import read_agent_tokens
-from ops.monitoring.model import summarize
 from ops.monitoring.mcp_tool import summarize as summarize_mcp_tool
-from ops.monitoring.query import (ResourceGroup, days_inclusive, is_local_mcp_tool, mcp_server_catalog, mcp_server_rows,
-                                  mcp_services_by_tenant, mcp_tool_rows, metric_value, model_rows,
-                                  read_agent_views, read_agents, read_mcp_tools, read_models, read_skills,
-                                  skill_metric_value, skill_rows)
+from ops.monitoring.model import summarize
+from ops.monitoring.query import (
+    ResourceGroup,
+    days_inclusive,
+    is_local_mcp_tool,
+    mcp_server_catalog,
+    mcp_server_rows,
+    mcp_services_by_tenant,
+    mcp_tool_rows,
+    metric_value,
+    model_rows,
+    read_agent_views,
+    read_agents,
+    read_mcp_tools,
+    read_models,
+    read_skills,
+    skill_metric_value,
+    skill_rows,
+)
 from permissions.models import CurrentUser
 from permissions.operations import operations_scope
-
 
 logger = logging.getLogger(__name__)
 ops_router = APIRouter(prefix="/ops/v1/monitoring", tags=["model monitoring"])
@@ -75,8 +93,110 @@ def selection(start_date: date, end_date: date, tenant_id: str | None = None,
                      skill_name=skill_name)
 
 
-def ops_tenant(scope: Annotated[Selection, Depends(selection)], user: Annotated[CurrentUser, Depends(authenticate)]):
-    return operations_scope(user, scope.tenant_id)
+class OpsPrincipal:
+    """Lane-resolved caller: API-key identity on northbound mounts, session user otherwise."""
+
+    __slots__ = ("identity", "kind", "user")
+
+    def __init__(self, *, kind: str, user: CurrentUser | None = None,
+                 identity: AuthenticatedIdentity | None = None):
+        self.kind = kind
+        self.user = user
+        self.identity = identity
+
+
+def _request_path(request: Request) -> str:
+    scope_path = request.scope.get("path") if request is not None else ""
+    return scope_path or (request.url.path if request is not None else "")
+
+
+def _submit_api_key_usage(principal: AuthenticatedIdentity, request: Request) -> None:
+    """Queue usage accounting on this process's control-io lane; fail-open.
+
+    The ops process owns its own thread manager, so the accounting lands on
+    ``app.state.thread_manager`` instead of the management config manager.
+    The writer itself is the shared Web-layer function, so the ledger stays
+    identical to the management gates' without importing management source.
+    """
+    from nexent.core.concurrency import ManagedTaskSpec
+
+    from backend.http.server.northbound import record_api_key_usage
+
+    manager = getattr(request.app.state, "thread_manager", None)
+    if manager is None:
+        return
+    try:
+        manager.submit("control-io", ManagedTaskSpec(task_name="record-api-key-usage", owner="ops"),
+                       record_api_key_usage, principal, request)
+    except Exception as exc:
+        logger.warning("API key usage accounting dropped: %s", exc)
+
+
+def _resolve_session_user(request: Request, authorization: str | None) -> CurrentUser:
+    """Resolve the session user the way FastAPI would, honoring dependency overrides.
+
+    The principal dependency calls ``authenticate`` directly, so the same
+    ``dependency_overrides`` lookup FastAPI applies is mirrored here; test
+    fixtures that override ``authenticate`` keep working unchanged. Overrides
+    declaring their own parameters are not supported at this call site.
+    """
+    override = request.app.dependency_overrides.get(authenticate)
+    if override is not None:
+        return override()
+    return authenticate(authorization, _credentials=None)
+
+
+def ops_principal(request: Request, authorization: str | None = Header(None)) -> OpsPrincipal:
+    """Single identity dependency for both mounts of the monitoring router.
+
+    ``/nb`` requests are northbound API-key callers. The gateway is the only
+    path to that surface (its credential policy verifies the API key at the
+    edge and never lets /nb traffic bypass authentication), so the principal
+    is the gateway-signed identity verified by this app's identity middleware
+    — the same ``trusted_identity`` read the runtime voice routes use. Usage
+    is accounted here, so business code never participates in accounting.
+    Every other path keeps the browser session.
+    """
+    if is_northbound_path(_request_path(request)):
+        record = trusted_identity()
+        if record is None or record.get("kind") != CredentialKind.API_KEY.value:
+            raise UnauthorizedError("Northbound monitoring requires a gateway-verified API key")
+        if not record.get("user_id") or not record.get("tenant_id"):
+            raise UnauthorizedError("Authenticated principal is incomplete")
+        principal = AuthenticatedIdentity(
+            user_id=record["user_id"], tenant_id=record["tenant_id"],
+            token_id=record.get("token_id"), kind=CredentialKind.API_KEY,
+        )
+        request.state.authenticated_identity = principal
+        request.state.request_id = get_request_id(request)
+        _submit_api_key_usage(principal, request)
+        return OpsPrincipal(kind="api_key", identity=principal)
+    return OpsPrincipal(kind="session", user=_resolve_session_user(request, authorization))
+
+
+def ops_scoped_tenant(principal: OpsPrincipal, tenant_id: str | None = None,
+                      permission: str = "ops.dashboard:read") -> str | None:
+    """One tenant resolution per lane: northbound callers are locked to their key's tenant."""
+    if principal.kind == "api_key":
+        locked = principal.identity.tenant_id
+        if tenant_id is not None and tenant_id != locked:
+            raise HTTPException(403, "Northbound monitoring is limited to the API key's tenant")
+        return locked
+    return operations_scope(principal.user, tenant_id, permission)
+
+
+async def nb_action_guard(request: Request,
+                          principal: Annotated[OpsPrincipal, Depends(ops_principal)]) -> None:
+    """Per-tenant rate limit for northbound action routes; query routes stay unthrottled."""
+    if principal.kind == "api_key":
+        from backend.http.server.northbound import check_and_consume_rate_limit
+
+        await check_and_consume_rate_limit(principal.identity.tenant_id)
+
+
+def ops_tenant(scope: Annotated[Selection, Depends(selection)],
+               principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
+    return ops_scoped_tenant(principal, scope.tenant_id)
 
 
 def _resource_group(scope, tenant: str | None) -> ResourceGroup | None:
@@ -254,8 +374,8 @@ def agent_selection(
 
 @ops_router.get("/agents/summary", tags=["agent monitoring"])
 def agent_summary(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
-                  user: Annotated[CurrentUser, Depends(authenticate)]):
-    tenant = operations_scope(user, scope.tenant_id)
+                  principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
+    tenant = ops_scoped_tenant(principal, scope.tenant_id)
     resource_group = _resource_group(scope, tenant)
     service = getattr(request.app.state, "monitoring", None)
     if service is None:
@@ -271,8 +391,8 @@ def agent_summary(request: Request, scope: Annotated[AgentSelection, Depends(age
     return {"data": values, **status, "tokens": token_usage.tokens, "token_status": token_usage.status}
 
 
-def _read_agent_views(request, scope, user, *, include_tokens=True):
-    tenant = operations_scope(user, scope.tenant_id)
+def _read_agent_views(request, scope, principal, *, include_tokens=True):
+    tenant = ops_scoped_tenant(principal, scope.tenant_id)
     resource_group = _resource_group(scope, tenant)
     service = getattr(request.app.state, "monitoring", None)
     if service is None:
@@ -318,11 +438,11 @@ def _agent_items(items, metric, search="", descending=True):
 
 @ops_router.get("/agents", tags=["agent monitoring"])
 def agents(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
-           user: Annotated[CurrentUser, Depends(authenticate)],
+           principal: Annotated[OpsPrincipal, Depends(ops_principal)],
            page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
            search: Annotated[str, Query(max_length=100)] = "", sort_by: AgentMetric | Literal["name"] = "execution_count",
            descending: bool = True):
-    items, current_count, _, status = _read_agent_views(request, scope, user)
+    items, current_count, _, status = _read_agent_views(request, scope, principal)
     items = _agent_items(items, sort_by, search, descending)
     start = (page - 1) * page_size
     return {"data": {"items": items[start:start + page_size], "total": len(items),
@@ -331,16 +451,16 @@ def agents(request: Request, scope: Annotated[AgentSelection, Depends(agent_sele
 
 @ops_router.get("/agents/trends", tags=["agent monitoring"])
 def agent_trends(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
-                 user: Annotated[CurrentUser, Depends(authenticate)]):
-    _, _, history, status = _read_agent_views(request, scope, user)
+                 principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
+    _, _, history, status = _read_agent_views(request, scope, principal)
     return {"data": history, **status}
 
 
 @ops_router.get("/agents/rankings", tags=["agent monitoring"])
 def agent_rankings(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
-                   user: Annotated[CurrentUser, Depends(authenticate)],
+                   principal: Annotated[OpsPrincipal, Depends(ops_principal)],
                    metric: Literal["execution_count", "total_tokens", "success_rate"] = "execution_count"):
-    items, _, _, status = _read_agent_views(request, scope, user, include_tokens=metric == "total_tokens")
+    items, _, _, status = _read_agent_views(request, scope, principal, include_tokens=metric == "total_tokens")
     ordered = _agent_items(items, metric)
     ranked = [item for item in ordered if _agent_metric_value(item, metric) is not None][:5]
     if metric == "success_rate":
@@ -361,8 +481,8 @@ def _refresh_key(kind="model"):
 
 @ops_router.post("/models/refresh", status_code=202)
 def refresh_models(request: Request, scope: RefreshSelection,
-                   user: Annotated[CurrentUser, Depends(authenticate)]):
-    tenant = operations_scope(user, scope.tenant_id, "ops.dashboard:update")
+                   principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
+    tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
     if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
         raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
     service = getattr(request.app.state, "monitoring", None)
@@ -392,7 +512,7 @@ def refresh_models(request: Request, scope: RefreshSelection,
 
 @ops_router.get("/models/refreshes/{refresh_id}")
 def model_refresh_status(request: Request, refresh_id: str,
-                         user: Annotated[CurrentUser, Depends(authenticate)]):
+                         principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
     service = getattr(request.app.state, "monitoring", None)
     if service is None or not JWT_SECRET:
         raise HTTPException(503, "Model monitoring refresh is unavailable")
@@ -413,7 +533,10 @@ def model_refresh_status(request: Request, refresh_id: str,
             revisions = dict(zip(dates, versions, strict=True))
     except (jwt.InvalidTokenError, KeyError, TypeError, ValueError, StructError):
         raise HTTPException(404, "Monitoring refresh was not found") from None
-    tenant = operations_scope(user, tenant_id, "ops.dashboard:update")
+    if principal.kind == "api_key" and tenant_id != principal.identity.tenant_id:
+        # A foreign tenant's token stays indistinguishable from a missing one.
+        raise HTTPException(404, "Monitoring refresh was not found")
+    tenant = ops_scoped_tenant(principal, tenant_id, permission="ops.dashboard:update")
     try:
         rows = service.store.states(tenant, "model", start, end)
     except Exception:
@@ -432,8 +555,8 @@ def model_refresh_status(request: Request, refresh_id: str,
 
 @ops_router.post("/skills/refresh", status_code=202, tags=["skill monitoring"])
 def refresh_skills(request: Request, scope: RefreshSelection,
-                   user: Annotated[CurrentUser, Depends(authenticate)]):
-    tenant = operations_scope(user, scope.tenant_id, "ops.dashboard:update")
+                   principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
+    tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
     if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
         raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
     service = getattr(request.app.state, "monitoring", None)
@@ -461,7 +584,7 @@ def refresh_skills(request: Request, scope: RefreshSelection,
 
 @ops_router.get("/skills/refreshes/{refresh_id}", tags=["skill monitoring"])
 def skill_refresh_status(request: Request, refresh_id: str,
-                         user: Annotated[CurrentUser, Depends(authenticate)]):
+                         principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
     service = getattr(request.app.state, "monitoring", None)
     if service is None or not JWT_SECRET:
         raise HTTPException(503, "Skill monitoring refresh is unavailable")
@@ -483,7 +606,10 @@ def skill_refresh_status(request: Request, refresh_id: str,
             revisions = dict(zip(dates, versions, strict=True))
     except (jwt.InvalidTokenError, KeyError, TypeError, ValueError, StructError):
         raise HTTPException(404, "Monitoring refresh was not found") from None
-    tenant = operations_scope(user, tenant_id, "ops.dashboard:update")
+    if principal.kind == "api_key" and tenant_id != principal.identity.tenant_id:
+        # A foreign tenant's token stays indistinguishable from a missing one.
+        raise HTTPException(404, "Monitoring refresh was not found")
+    tenant = ops_scoped_tenant(principal, tenant_id, permission="ops.dashboard:update")
     try:
         rows = service.store.states(tenant, "skill", start, end)
     except Exception:
@@ -636,8 +762,8 @@ def _tool_refresh_key():
 
 @ops_router.post("/mcp-tools/refresh", status_code=202)
 def refresh_mcp_tools(request: Request, scope: RefreshSelection,
-                      user: Annotated[CurrentUser, Depends(authenticate)]):
-    tenant = operations_scope(user, scope.tenant_id, "ops.dashboard:update")
+                      principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
+    tenant = ops_scoped_tenant(principal, scope.tenant_id, permission="ops.dashboard:update")
     if tenant is None or not 0 <= (scope.end_date - scope.start_date).days < 366:
         raise HTTPException(422, "Refresh requires a single tenant and a valid date range")
     service = getattr(request.app.state, "monitoring", None)
@@ -666,7 +792,7 @@ def refresh_mcp_tools(request: Request, scope: RefreshSelection,
 
 @ops_router.get("/mcp-tools/refreshes/{refresh_id}")
 def mcp_tool_refresh_status(request: Request, refresh_id: str,
-                            user: Annotated[CurrentUser, Depends(authenticate)]):
+                            principal: Annotated[OpsPrincipal, Depends(ops_principal)]):
     service = getattr(request.app.state, "monitoring", None)
     if service is None or not JWT_SECRET:
         raise HTTPException(503, "MCP tool monitoring refresh is unavailable")
@@ -688,7 +814,10 @@ def mcp_tool_refresh_status(request: Request, refresh_id: str,
             revisions = dict(zip(dates, versions, strict=True))
     except (jwt.InvalidTokenError, KeyError, TypeError, ValueError, StructError):
         raise HTTPException(404, "Monitoring refresh was not found") from None
-    tenant = operations_scope(user, tenant_id, "ops.dashboard:update")
+    if principal.kind == "api_key" and tenant_id != principal.identity.tenant_id:
+        # A foreign tenant's token stays indistinguishable from a missing one.
+        raise HTTPException(404, "Monitoring refresh was not found")
+    tenant = ops_scoped_tenant(principal, tenant_id, permission="ops.dashboard:update")
     try:
         rows = service.store.states(tenant, "mcp_tool", start, end)
     except Exception:
@@ -706,12 +835,12 @@ def mcp_tool_refresh_status(request: Request, refresh_id: str,
 
 
 @ops_router.get("/mcp-tools/catalog")
-def mcp_tools_catalog(user: Annotated[CurrentUser, Depends(authenticate)],
+def mcp_tools_catalog(principal: Annotated[OpsPrincipal, Depends(ops_principal)],
                       tenant_id: Annotated[str | None, Query(max_length=100)] = None,
                       group_ids: Annotated[list[int] | None, Query(max_length=100)] = None):
     if any(group <= 0 for group in group_ids or ()):
         raise HTTPException(422, "Invalid monitoring group ID")
-    tenant = operations_scope(user, tenant_id)
+    tenant = ops_scoped_tenant(principal, tenant_id)
     return {"data": mcp_server_catalog(tenant, group_ids)}
 
 

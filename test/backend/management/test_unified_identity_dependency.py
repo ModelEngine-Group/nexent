@@ -20,15 +20,18 @@ from contracts.errors.exceptions import (
     UnauthorizedError,
 )
 from management.services.permission.identity import dependency as dep
+from backend.http.server import northbound as shared_nb
 from management.services.permission.identity import northbound as nb
 
 
 def make_request(path="/nb/v1/automations", method="GET", headers=None):
+    # Starlette headers are case-insensitive; normalize the fake the same way
+    # so request-id lookups behave like the real request.
     return SimpleNamespace(
         scope={"path": path},
         url=SimpleNamespace(path=path),
         method=method,
-        headers=headers or {},
+        headers={str(k).lower(): v for k, v in (headers or {}).items()},
         state=SimpleNamespace(),
     )
 
@@ -157,7 +160,7 @@ def test_get_user_and_tenant_requires_membership(monkeypatch):
 )
 def test_usage_accounting_excludes_hot_paths(monkeypatch, path):
     logged = []
-    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    monkeypatch.setattr(shared_nb, "log_token_usage", lambda **kw: logged.append(kw))
     principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
     nb.record_api_key_usage(principal, make_request(path=path))
     assert logged == []
@@ -165,7 +168,7 @@ def test_usage_accounting_excludes_hot_paths(monkeypatch, path):
 
 def test_usage_accounting_skips_without_token_id(monkeypatch):
     logged = []
-    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    monkeypatch.setattr(shared_nb, "log_token_usage", lambda **kw: logged.append(kw))
     principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=0)
     nb.record_api_key_usage(principal, make_request())
     assert logged == []
@@ -175,7 +178,7 @@ def test_usage_accounting_is_fail_open(monkeypatch):
     def boom(**kw):
         raise RuntimeError("ledger down")
 
-    monkeypatch.setattr(nb, "log_token_usage", boom)
+    monkeypatch.setattr(shared_nb, "log_token_usage", boom)
     principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
     # Must not raise: accounting never blocks an authenticated request.
     nb.record_api_key_usage(principal, make_request(headers={"X-Request-Id": "req-1"}))
@@ -183,7 +186,7 @@ def test_usage_accounting_is_fail_open(monkeypatch):
 
 def test_usage_accounting_records_request_id(monkeypatch):
     logged = []
-    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    monkeypatch.setattr(shared_nb, "log_token_usage", lambda **kw: logged.append(kw))
     principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
     nb.record_api_key_usage(principal, make_request(headers={"X-Request-Id": "req-9"}))
     assert logged[0]["metadata"]["request_id"] == "req-9"
@@ -194,7 +197,7 @@ def test_usage_accounting_stores_route_template_not_long_object_path(monkeypatch
     """P2 regression: call_function_name is VARCHAR(100); a long object path
     must be stored as the stable route template, with the raw path in JSONB."""
     logged = []
-    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    monkeypatch.setattr(shared_nb, "log_token_usage", lambda **kw: logged.append(kw))
     principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
     long_path = "/nb/v1/file/download/" + "segment/" * 40 + "file.bin"
     request = make_request(path=long_path)
@@ -206,7 +209,7 @@ def test_usage_accounting_stores_route_template_not_long_object_path(monkeypatch
 
 def test_usage_accounting_truncates_when_no_route_template(monkeypatch):
     logged = []
-    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    monkeypatch.setattr(shared_nb, "log_token_usage", lambda **kw: logged.append(kw))
     principal = AuthenticatedIdentity("u1", "t1", kind=CredentialKind.API_KEY, token_id=7)
     long_path = "/nb/v1/file/download/" + "x" * 200
     nb.record_api_key_usage(principal, make_request(path=long_path))
@@ -271,7 +274,7 @@ def test_submit_api_key_usage_end_to_end_records_through_lane(monkeypatch):
     from management.thread_management import config_thread_manager
 
     logged = []
-    monkeypatch.setattr(nb, "log_token_usage", lambda **kw: logged.append(kw))
+    monkeypatch.setattr(shared_nb, "log_token_usage", lambda **kw: logged.append(kw))
     monkeypatch.setattr(
         config_thread_manager, "submit",
         lambda lane, spec, fn, *a, **k: fn(*a, **k),

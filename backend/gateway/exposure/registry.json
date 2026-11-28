@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "generated-681-rows",
+  "revision": "generated-705-rows",
   "routes": [
     {
       "method": "GET",
@@ -7203,6 +7203,294 @@
       "target": "management",
       "source": "backend/management/api/northbound.py",
       "route_id": "route-8a04feb31fc1d67f",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/agents",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_agents",
+      "route_id": "route-287cf7c45cbc239e",
+      "capability_id": "monitoring.agents.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/agents/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_agents_rankings",
+      "route_id": "route-ea412170dcc3b712",
+      "capability_id": "monitoring.agents.rankings",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/agents/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_agents_summary",
+      "route_id": "route-45a22dc2d024f6d1",
+      "capability_id": "monitoring.agents.summary",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/agents/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_agents_trends",
+      "route_id": "route-55393db495076e25",
+      "capability_id": "monitoring.agents.trends",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/mcp-tools",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_mcp_tools",
+      "route_id": "route-ad8740532f52c1f7",
+      "capability_id": "monitoring.mcp_tools.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/mcp-tools/catalog",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_mcp_tools_catalog",
+      "route_id": "route-d8aace18bbdf414c",
+      "capability_id": "monitoring.mcp_tools.catalog",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/mcp-tools/overview",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_mcp_tools_overview",
+      "route_id": "route-11f92e0b36e65db8",
+      "capability_id": "monitoring.mcp_tools.overview",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/mcp-tools/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_mcp_tools_rankings",
+      "route_id": "route-d0350719e51ab48d",
+      "capability_id": "monitoring.mcp_tools.rankings",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/monitoring/mcp-tools/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_mcp_tools_refresh",
+      "route_id": "route-bcd66513598e04ca",
+      "capability_id": "monitoring.mcp_tools.refresh",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/mcp-tools/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_mcp_tools_refresh_status",
+      "route_id": "route-5ba017f3dc571a58",
+      "capability_id": "monitoring.mcp_tools.refresh_status",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/mcp-tools/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_mcp_tools_summary",
+      "route_id": "route-99a8e6a57553abc5",
+      "capability_id": "monitoring.mcp_tools.summary",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/mcp-tools/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_mcp_tools_trends",
+      "route_id": "route-b89a292d4d9cdb32",
+      "capability_id": "monitoring.mcp_tools.trends",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/models",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_models",
+      "route_id": "route-60bff71b1bb68afe",
+      "capability_id": "monitoring.models.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/models/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_models_rankings",
+      "route_id": "route-c9ba4c8b2a9faed4",
+      "capability_id": "monitoring.models.rankings",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/monitoring/models/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_models_refresh",
+      "route_id": "route-5ff433b5a30df0c5",
+      "capability_id": "monitoring.models.refresh",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/models/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_models_refresh_status",
+      "route_id": "route-9b3b2b40d3943a1c",
+      "capability_id": "monitoring.models.refresh_status",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/models/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_models_summary",
+      "route_id": "route-418383a330a0b4ef",
+      "capability_id": "monitoring.models.summary",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/models/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_models_trends",
+      "route_id": "route-1d974623f5af1ade",
+      "capability_id": "monitoring.models.trends",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/skills",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_skills",
+      "route_id": "route-476c09d35615d93b",
+      "capability_id": "monitoring.skills.list",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/skills/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_skills_rankings",
+      "route_id": "route-fe9da91a9a9a616a",
+      "capability_id": "monitoring.skills.rankings",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/monitoring/skills/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_skills_refresh",
+      "route_id": "route-c73ee44516a1e98f",
+      "capability_id": "monitoring.skills.refresh",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/skills/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_skills_refresh_status",
+      "route_id": "route-6122eaf17be3e48f",
+      "capability_id": "monitoring.skills.refresh_status",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/skills/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_skills_summary",
+      "route_id": "route-9f30a04bbbed9d85",
+      "capability_id": "monitoring.skills.summary",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/monitoring/skills/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "ops.api.northbound_gates.monitoring.nb_skills_trends",
+      "route_id": "route-598fbd0ae6feb730",
+      "capability_id": "monitoring.skills.trends",
       "credential_kinds": [
         "api_key"
       ]
