@@ -197,6 +197,7 @@ interface AgentConfigProps {
   onManualUnlock: () => void;
   onToggleDebug: () => void;
   actionAreaRef?: React.Ref<HTMLDivElement>;
+  versionAction?: ReactNode;
   onPublished?: () => void;
   debugVisible?: boolean;
   onConfigure?: () => void;
@@ -213,6 +214,7 @@ export default function AgentConfig({
   onManualUnlock,
   onToggleDebug,
   actionAreaRef,
+  versionAction,
   onPublished,
   debugVisible = false,
   onConfigure = () => undefined,
@@ -539,6 +541,7 @@ export default function AgentConfig({
           onPublish={handlePublish}
           onManualUnlock={onManualUnlock}
           actionAreaRef={actionAreaRef}
+          versionAction={versionAction}
         />
         {publicationVisible && (
           <ConfigProvider componentDisabled={false}>

@@ -1,7 +1,7 @@
 # Quick Setup
 
 ::: warning Legacy Setup Flow: Consolidation Pending
-This page remains available at its existing URL but is no longer a separate guide module. The homepage Quick Setup shortcut currently opens agent configuration; see [Agent Configuration](./agent-development). The former three-step wizard and screenshots below need review. Knowledge bases and memory are optional, depending on the task.
+This page remains available at its existing URL but is no longer a separate guide module. The homepage Quick Setup shortcut currently opens agent configuration; see [Agent Configuration](./agent-configuration). The former three-step wizard and screenshots below need review. Knowledge bases and memory are optional, depending on the task.
 :::
 
 Quick Setup provides a guided path that walks you through the recommended setup order. Follow the three steps—model management, knowledge bases, and agent development—to get the platform ready fast.
@@ -17,7 +17,7 @@ Configure basic app information and connect AI models:
 - **App configuration:** Set the icon, name, and description.
 - **Model configuration:** Add large language models, embedding models, and vision-language models.
 
-Learn more: [Model Management](./agent-development/model-configuration.md)
+Learn more: [Model Management](./model-configuration.md)
 
 ### Step 2: Knowledge Base
 
@@ -27,7 +27,7 @@ Create knowledge bases and upload documents:
 - **Upload files:** Support for multiple file formats.
 - **Generate summaries:** Create concise knowledge-base descriptions.
 
-Learn more: [Knowledge Base](./agent-development/knowledge-configuration.md)
+Learn more: [Knowledge Base](./knowledge-configuration.md)
 
 ### Step 3: Agent Development
 
@@ -42,7 +42,7 @@ Publish agent:
 - **Publish agent:** Published agents will be visible to selected user groups and listed in Agent Space and the Start Chat selection box.
 - **Version management:** Track iteration history of agents, support viewing, rolling back to historical versions, and creating new versions.
 
-Learn more: [Agent Development](./agent-development.md)
+Learn more: [Agent Development](./agent-configuration.md)
 
 ## 🎯 Tips
 
@@ -55,8 +55,8 @@ Learn more: [Agent Development](./agent-development.md)
 
 After finishing Quick Setup:
 
-1. Visit **[Agent Space](./agent-development.md)** to review and manage agents.
+1. Visit **[Agent Space](./agent-configuration.md)** to review and manage agents.
 2. Use **[Start Chat](./start-chat)** to talk to your agents.
-3. Configure **[Memory Management](./agent-development/memory-configuration.md)** to give agents persistent memory.
+3. Configure **[Memory Management](./memory-configuration.md)** to give agents persistent memory.
 
 Need help? Check the **[FAQ](../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

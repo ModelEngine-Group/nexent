@@ -143,4 +143,4 @@ Import does not inherit the original author's knowledge base permissions; retrie
 
 - [Agent Publishing](./agents-publish) — Publish Agent as an externally callable service
 - [Agent Integration](../integration-in/agents) — Integrate third-party Agents via A2A protocol
-- [Agent Configuration](../../user-guide/agent-development/agent-configuration) — Agent configuration details
+- [Agent Configuration](../../user-guide/agent-configuration) — Agent configuration details

@@ -177,11 +177,10 @@ Each service card displays the following status:
 
 ### Assigning to Agents
 
-1. Navigate to **Agent Development** page
-2. In "Select Agent's Tools", switch to **MCP** tab
-3. Find the added MCP service and expand to view tool list
-4. Select needed tools and configure necessary parameters
-5. Save Agent configuration
+1. Open the agent you want to edit and go to **Configuration**.
+2. Under **Tools**, click **Add a tool** and switch to **MCP Service**.
+3. Expand the connected service and select the tools you need.
+4. Fill in the required parameters, confirm the selection, and check the agent's tool list. For details, see [Add MCP tools](../../user-guide/local-tools/index.md#configure-mcp-tools).
 
 ### Tool Testing
 
@@ -234,6 +233,6 @@ See [MCP Tool Development](../../backend/tools/mcp) documentation.
 ## Related Resources
 
 - [MCP Repository](../../user-guide/resource-repository/mcp-repository) — Browse, install, and manage MCP services
-- [Agent Configuration](../../user-guide/agent-development/agent-configuration) — Use MCP tools in Agents
+- [Agent Configuration](../../user-guide/agent-configuration) — Use MCP tools in Agents
 - [MCP Tool Development](../../backend/tools/mcp) — Develop custom MCP services
 - [MCP Ecosystem](../../mcp-ecosystem/overview) — Learn more about MCP ecosystem

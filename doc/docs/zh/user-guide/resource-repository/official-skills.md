@@ -81,4 +81,4 @@ Nexent 内置了一组可直接安装的官方技能，安装后即可在智能�
 
 - [Skill 仓库](./skill-repository.md)
 - [技能系统概览](/zh/backend/skills/overview)
-- [智能体配置](../agent-development/agent-configuration.md)
+- [智能体配置](../agent-configuration.md)

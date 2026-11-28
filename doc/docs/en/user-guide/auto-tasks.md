@@ -14,8 +14,8 @@ For example, you can ask an agent to:
 
 Before creating a task, make sure that:
 
-1. a working language model is configured under [Model Configuration](./agent-development/model-configuration);
-2. an agent is created and saved under [Agent Configuration](./agent-development);
+1. a working language model is configured under [Model Configuration](./model-configuration);
+2. an agent is created and saved under [Agent Configuration](./agent-configuration);
 3. the agent has the tools, knowledge bases, Skills, memory, or other agents required by the task;
 4. you can access the conversation used to create the task.
 
@@ -266,5 +266,5 @@ No. Deleting a task stops future runs but keeps the linked conversation. However
 ## Next Steps
 
 - [Agent Chat](./start-chat): select an agent and create an automation task in natural language.
-- [Agent Configuration](./agent-development): configure the model, tools, knowledge bases, Skills, and memory required by the task.
-- [Model Configuration](./agent-development/model-configuration): verify the language model used by the task.
+- [Agent Configuration](./agent-configuration): configure the model, tools, knowledge bases, Skills, and memory required by the task.
+- [Model Configuration](./model-configuration): verify the language model used by the task.

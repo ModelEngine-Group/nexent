@@ -13,9 +13,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { App, Button, Modal, Spin, Tag } from "antd";
+import { App, Button, Spin, Tooltip } from "antd";
 import {
-  GitBranch,
   History,
   RefreshCw,
   Sparkles,
@@ -158,17 +157,11 @@ function AgentSetupContent({
   const [isPublicationVisible, setIsPublicationVisible] = useState(false);
   const [isCompareMode, setIsCompareMode] = useState(false);
   const [isDebugFullscreen, setIsDebugFullscreen] = useState(false);
-  const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
-    useState(false);
-  const panesBeforeFullscreen = useRef<{
-    generation: boolean;
-    versions: boolean;
-  } | null>(null);
+  const generationBeforeFullscreen = useRef<boolean | null>(null);
   const restoreDebugLayout = () => {
-    if (panesBeforeFullscreen.current) {
-      setIsGenerationVisible(panesBeforeFullscreen.current.generation);
-      setIsShowVersionManagePanel(panesBeforeFullscreen.current.versions);
-      panesBeforeFullscreen.current = null;
+    if (generationBeforeFullscreen.current !== null) {
+      setIsGenerationVisible(generationBeforeFullscreen.current);
+      generationBeforeFullscreen.current = null;
     }
     setIsDebugFullscreen(false);
   };
@@ -198,6 +191,10 @@ function AgentSetupContent({
     agentInfo?.current_version_no ?? null,
     shouldFetchVersionDetail
   );
+  const currentVersionName = agentInfo?.current_version_no
+    ? agentVersionDetail?.version.version_name ||
+      `V${agentInfo.current_version_no}`
+    : null;
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
   const {
     agentId: flowAgentId,
@@ -503,37 +500,6 @@ function AgentSetupContent({
                 rightAction={
                   <div className="flex min-w-0 max-w-full grow items-center gap-2">
                     <Button
-                      type="text"
-                      icon={<GitBranch size={16} />}
-                      aria-label={t("agent.version.manage")}
-                      className="shrink-0"
-                      onClick={onManageVersions}
-                    />
-                    {agentInfo?.current_version_no && total > 0 ? (
-                      <div className="flex min-w-0 items-center gap-1">
-                        <History size={16} className="shrink-0" />
-                        <span className="shrink-0 whitespace-nowrap">
-                          {t("agent.version.current")}:
-                        </span>
-                        <Tag
-                          color="cyan"
-                          variant="outlined"
-                          title={
-                            agentVersionDetail?.version.version_name ||
-                            `V${agentInfo.current_version_no}`
-                          }
-                          className="!m-0 min-w-0 cursor-pointer truncate rounded-md font-mono text-sm"
-                          onClick={() => setIsShowVersionManagePanel(true)}
-                        >
-                          {agentVersionDetail?.version.version_name ||
-                            `V${agentInfo.current_version_no}`}
-                        </Tag>
-                        <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
-                          / {t("agent.version.totalVersions", { count: total })}
-                        </span>
-                      </div>
-                    ) : null}
-                    <Button
                       icon={<Sparkles size={16} />}
                       onClick={() =>
                         setIsGenerationVisible((visible) => !visible)
@@ -554,6 +520,22 @@ function AgentSetupContent({
                     }}
                     published={Boolean(agentInfo?.current_version_no)}
                     actionAreaRef={actionAreaRef}
+                    versionAction={
+                      <Tooltip
+                        title={
+                          currentVersionName
+                            ? `${t("agent.version.current")}: ${currentVersionName}`
+                            : t("agent.version.manage")
+                        }
+                      >
+                        <Button
+                          icon={<History size={16} />}
+                          aria-label={t("agent.version.manage")}
+                          disabled={currentAgentId === null}
+                          onClick={onManageVersions}
+                        />
+                      </Tooltip>
+                    }
                     canManualUnlock={canManualUnlock}
                     onManualUnlock={handleManualUnlock}
                     onToggleDebug={() => {
@@ -584,12 +566,9 @@ function AgentSetupContent({
                             if (isDebugFullscreen) {
                               restoreDebugLayout();
                             } else {
-                              panesBeforeFullscreen.current = {
-                                generation: isGenerationVisible,
-                                versions: isShowVersionManagePanel,
-                              };
+                              generationBeforeFullscreen.current =
+                                isGenerationVisible;
                               setIsGenerationVisible(false);
-                              setIsShowVersionManagePanel(false);
                               setIsDebugFullscreen(true);
                             }
                           }}
@@ -614,29 +593,6 @@ function AgentSetupContent({
                 </div>
               </PanelCard>
 
-              {isShowVersionManagePanel && (
-                <PanelCard
-                  title={t("agent.version.manage")}
-                  className="flex-1"
-                  rightAction={
-                    <button
-                      type="button"
-                      aria-label={t("agent.page.panel.debug.closeAria")}
-                      onClick={() => setIsShowVersionManagePanel(false)}
-                      className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                    >
-                      <X size={18} />
-                    </button>
-                  }
-                >
-                  <div className="min-h-0 flex-1 overflow-hidden">
-                    <AgentVersion
-                      currentVersionNo={agentInfo?.current_version_no}
-                      onRefreshAgentInfo={refetchAgentInfo}
-                    />
-                  </div>
-                </PanelCard>
-              )}
             </div>
           </AgentEditorSplit>
         </div>
@@ -721,19 +677,12 @@ export default function AgentEditor() {
           />
         </Nl2AgentFlowProvider>
       </div>
-      <Modal
-        centered
-        width={900}
+      <AgentVersion
+        currentVersionNo={agentInfo?.current_version_no}
+        onRefreshAgentInfo={refetchAgentInfo}
         open={isVersionManageOpen}
-        title={t("agent.version.manage")}
-        onCancel={() => setIsVersionManageOpen(false)}
-        footer={null}
-      >
-        <AgentVersion
-          currentVersionNo={agentInfo?.current_version_no}
-          onRefreshAgentInfo={refetchAgentInfo}
-        />
-      </Modal>
+        onClose={() => setIsVersionManageOpen(false)}
+      />
     </div>
   );
 }

@@ -35,6 +35,7 @@ import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-
 import { Composer, type ChatMode } from "@/app/newchat/assistant-ui/composer";
 import { ModelSelector } from "@/app/newchat/ui/model-selector";
 import { DebugConversation } from "./debug-conversation";
+import { AgentComparisonLayout } from "../../../components/agent-comparison-layout";
 
 const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
   if (!config?.modelName) return false;
@@ -341,56 +342,45 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
   }
 
   return (
-    <div className="flex h-full w-full flex-col">
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div
-          className="flex min-h-0 flex-1 overflow-hidden"
-          data-testid="compare-results"
-        >
-          <div
-            className="flex min-h-0 flex-1 flex-col border-r border-gray-200"
-            data-testid="compare-result-left"
-          >
-            {compareLeftModelId != null && (
-              <SideThread
-                onSourcesPanelOpen={onSourcesPanelOpen}
-                sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
-                clearEpoch={clearEpoch}
-                agent={debugAgent}
-                modelId={compareLeftModelId}
-                enablePlan={chatMode === "planning"}
-                chatMode={chatMode}
-                isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
-                composerPortalTarget={composerPortalTarget}
-                rightRuntimeRef={rightRuntimeRef}
-                onChatModeChange={setChatMode}
-                onRuntimeReady={handleLeftRuntimeReady}
-                onSelectQuestion={handleSelectQuestion}
-              />
-            )}
-          </div>
-          <div
-            className="flex min-h-0 flex-1 flex-col"
-            data-testid="compare-result-right"
-          >
-            {compareRightModelId != null && (
-              <SideThread
-                onSourcesPanelOpen={onSourcesPanelOpen}
-                sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
-                clearEpoch={clearEpoch}
-                agent={debugAgent}
-                modelId={compareRightModelId}
-                enablePlan={chatMode === "planning"}
-                chatMode={chatMode}
-                isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
-                onChatModeChange={setChatMode}
-                onRuntimeReady={handleRightRuntimeReady}
-                onSelectQuestion={handleSelectQuestion}
-              />
-            )}
-          </div>
-        </div>
-        <div className="shrink-0 pt-3">
+    <AgentComparisonLayout
+      left={
+        compareLeftModelId != null && (
+          <SideThread
+            onSourcesPanelOpen={onSourcesPanelOpen}
+            sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
+            clearEpoch={clearEpoch}
+            agent={debugAgent}
+            modelId={compareLeftModelId}
+            enablePlan={chatMode === "planning"}
+            chatMode={chatMode}
+            isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
+            composerPortalTarget={composerPortalTarget}
+            rightRuntimeRef={rightRuntimeRef}
+            onChatModeChange={setChatMode}
+            onRuntimeReady={handleLeftRuntimeReady}
+            onSelectQuestion={handleSelectQuestion}
+          />
+        )
+      }
+      right={
+        compareRightModelId != null && (
+          <SideThread
+            onSourcesPanelOpen={onSourcesPanelOpen}
+            sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
+            clearEpoch={clearEpoch}
+            agent={debugAgent}
+            modelId={compareRightModelId}
+            enablePlan={chatMode === "planning"}
+            chatMode={chatMode}
+            isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
+            onChatModeChange={setChatMode}
+            onRuntimeReady={handleRightRuntimeReady}
+            onSelectQuestion={handleSelectQuestion}
+          />
+        )
+      }
+      footer={
+        <>
           <div
             className="grid grid-cols-2"
             data-testid="compare-model-selectors"
@@ -417,8 +407,8 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
             </div>
           </div>
           <div ref={setComposerPortalTarget} />
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    />
   );
 };

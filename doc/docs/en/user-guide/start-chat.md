@@ -2,7 +2,7 @@
 
 Use Agent Chat to complete tasks with published agents. Select an agent, send questions and attachments, inspect results and sources, and manage or share conversations.
 
-This page covers chatting with agents. To create or adjust an agent using natural language, see [Workbench](./workbench) or [Agent Configuration](./agent-development). Models, tools, knowledge bases, and available controls depend on the agent configuration, your permissions, and deployment settings.
+This page covers chatting with agents. To create or adjust an agent using natural language, see [Workbench](./workbench) or [Agent Configuration](./agent-configuration). Models, tools, knowledge bases, and available controls depend on the agent configuration, your permissions, and deployment settings.
 
 ## Start your first conversation
 

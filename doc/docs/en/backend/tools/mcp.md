@@ -90,7 +90,7 @@ Keep the server process running and note the endpoint (e.g., `http://127.0.0.1:8
 
 ### ⚙️ Step 2: Register in Nexent
 
-1. Open the **[Agent Development](../../user-guide/agent-development)** page
+1. Open the **[Agent Development](../../user-guide/agent-configuration)** page
 2. On the "Select Agent Tools" tab, click **MCP Configuration** on the right
 3. Enter the server name and server URL
    - ⚠️ **Important**:
@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
 ### 🔗 Related Guides
 
-- [Nexent Agent Development Guide](../../user-guide/agent-development)
+- [Nexent Agent Development Guide](../../user-guide/agent-configuration)
 - [MCP Tool Ecosystem Overview](../../mcp-ecosystem/overview)
 - [MCP Recommendations](../../mcp-ecosystem/mcp-recommendations)
 

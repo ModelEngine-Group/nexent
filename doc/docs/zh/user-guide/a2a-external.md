@@ -2,17 +2,6 @@
 
 Nexent 支持通过 **A2A（Agent-to-Agent）协议**接入第三方 Agent，让跨平台的智能体可以互相协作。本页介绍如何添加与管理外部 A2A Agent。
 
-## 🤝 协作 Agent 的来源
-
-在 **智能体配置** 页的「协作 Agent」区域中，您可以添加两类协作 Agent：
-
-- **内部 Agent**：平台已发布的智能体
-- **外部 A2A Agent**：通过 A2A 协议发现的第三方 Agent
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/set-collaboration.jpg" style="width: 50%; height: auto;" />
-</div>
-
 ## 🌐 添加外部 A2A Agent
 
 Nexent 提供两种发现外部 A2A Agent 的方式：**URL 发现** 和 **Nacos 发现**。
@@ -22,7 +11,7 @@ Nexent 提供两种发现外部 A2A Agent 的方式：**URL 发现** 和 **Nacos
 如果您知道目标 Agent 的 Agent Card 地址，可以使用 URL 发现方式。
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-url-discovery.jpg" style="width: 80%; height: auto;" />
+  <img src="./assets/agent-development/a2a-url-discovery.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. 在「协作 Agent」页签下点击「添加外部 Agent」
@@ -42,7 +31,7 @@ Nexent 提供两种发现外部 A2A Agent 的方式：**URL 发现** 和 **Nacos
 如果您的 Agent 注册在 Nacos 服务发现平台，可以使用 Nacos 发现方式批量接入。
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-nacos-discovery.jpg" style="width: 80%; height: auto;" />
+  <img src="./assets/agent-development/a2a-nacos-discovery.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. 在「协作 Agent」页签下点击「添加外部 Agent」
@@ -64,7 +53,7 @@ Nexent 提供两种发现外部 A2A Agent 的方式：**URL 发现** 和 **Nacos
 在「外部 A2A Agent」列表中，您可以查看和管理所有已发现的外部 Agent：
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-discovery-list.jpg" style="width: 80%; height: auto;" />
+  <img src="./assets/agent-development/a2a-discovery-list.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. **查看 Agent 详情**：点击 Agent 卡片，可以查看其完整信息，包括名称、描述、URL、能力列表等
@@ -92,7 +81,7 @@ Nexent 提供两种发现外部 A2A Agent 的方式：**URL 发现** 和 **Nacos
    > 当前 Nexent 不支持带认证的 Agent，启动 DataAgent 时请勿设置 `auth-token`
 
    <div style="display: flex; justify-content: left;">
-     <img src="../assets/agent-development/dataagent_deploy.png" style="width: 80%; height: auto;" />
+     <img src="./assets/agent-development/dataagent_deploy.png" style="width: 80%; height: auto;" />
    </div>
 
 2. 在 Nexent 中选择「URL 发现」，填写 `http://<IP>:9999/.well-known/agent-card.json`，点击「发现」

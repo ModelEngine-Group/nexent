@@ -1,23 +1,31 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
 import { useState } from "react";
-import { GitBranch, GitCompare, Rocket, X } from "lucide-react";
+import { GitCompare } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Card, Flex, Button, Tag, Empty, Spin, message } from "antd";
+import { Button, Drawer, Empty, Flex, Spin, Tag, message } from "antd";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { useAgentStore } from "@/stores/agentStore"
+import { useAgentStore } from "@/stores/agentStore";
 import { VersionCardItem } from "./versions/agent-version-card";
 import log from "@/lib/logger";
 import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
-import { compareVersions, type VersionCompareResponse } from "@/services/agentVersionService";
+import {
+  compareVersions,
+  type VersionCompareResponse,
+} from "@/services/agentVersionService";
 import type { Agent } from "@/types/agentConfig";
 
 interface AgentVersionManageProps {
-  onClose?: () => void;
+  open: boolean;
+  onClose: () => void;
   currentVersionNo?: number;
   onRefreshAgentInfo: () => Promise<Agent | null>;
 }
 
 export default function AgentVersionManage({
+  open,
   onClose,
   currentVersionNo,
   onRefreshAgentInfo,
@@ -25,18 +33,25 @@ export default function AgentVersionManage({
   const { t } = useTranslation("common");
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
 
-  const { agentVersionList, total, isLoading, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
-  
+  const { agentVersionList, total, isLoading } =
+    useAgentVersionList(currentAgentId);
+
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [compareLoading, setCompareLoading] = useState(false);
-  const [compareData, setCompareData] = useState<VersionCompareResponse | null>(null);
+  const [compareData, setCompareData] = useState<VersionCompareResponse | null>(
+    null
+  );
   const [selectedVersionA, setSelectedVersionA] = useState<number | null>(null);
   const [selectedVersionB, setSelectedVersionB] = useState<number | null>(null);
 
-
-  const loadComparison = async (agentId: number, versionNoA: number, versionNoB: number) => {
+  const loadComparison = async (
+    agentId: number,
+    versionNoA: number,
+    versionNoB: number
+  ) => {
     try {
       setCompareLoading(true);
+      setCompareData(null);
       const result = await compareVersions(agentId, versionNoA, versionNoB);
       setCompareData(result);
     } catch (error) {
@@ -58,7 +73,9 @@ export default function AgentVersionManage({
     }
 
     // Use the last two versions by version_no as default comparison
-    const sorted = [...agentVersionList].sort((a, b) => a.version_no - b.version_no);
+    const sorted = [...agentVersionList].sort(
+      (a, b) => a.version_no - b.version_no
+    );
     const defaultVersionA = sorted[sorted.length - 2]?.version_no;
     const defaultVersionB = sorted[sorted.length - 1]?.version_no;
 
@@ -97,64 +114,52 @@ export default function AgentVersionManage({
     await loadComparison(currentAgentId, selectedVersionA, value);
   };
 
-  const footer = [
-    <Flex
-      align="center"
-      justify="space-between"
-      gap={8}
-      className="pl-4"
-      key="actions"
-    >
-      <Tag color="blue">
-        {t("agent.version.totalVersions", { count: total })}
-      </Tag>
-      <Button
-        type="text"
-        icon={<GitCompare size={16} />}
-        onClick={handleOpenCompareModal}
-      >
-        {t("agent.version.compare")}
-      </Button>
-    </Flex>,
-  ];
-
   return (
-    <>
-      <div className="flex h-full min-h-0 w-full flex-col py-2">
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <Spin spinning={isLoading}>
-            {agentVersionList.length === 0 ? (
-              <Flex align="center" justify="center" className="h-full">
-                <Empty />
-              </Flex>
-            ) : (
-              <div className="flex flex-col gap-2 px-3 py-4">
-                {agentVersionList.map((version) => (
-                  <VersionCardItem
-                    key={version.version_no}
-                    version={version}
-                    agentId={currentAgentId || 0}
-                    currentVersionNo={currentVersionNo}
-                    onRefreshAgentInfo={onRefreshAgentInfo}
-                  />
-                ))}
-              </div>
-            )}
-          </Spin>
-        </div>
-        <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1">
-          <div className="flex items-center gap-2">
-            <Button
-              icon={<Rocket size={16} />}
-              onClick={handleOpenCompareModal}
-            >
-              {t("agent.version.compare")}
-            </Button>
+    <Drawer
+      title={t("agent.version.manage")}
+      open={open}
+      onClose={() => {
+        setCompareModalOpen(false);
+        onClose();
+      }}
+      placement="right"
+      size="min(560px, 100vw)"
+      closable={{ placement: "end" }}
+      destroyOnHidden
+      footer={
+        <Flex align="center" justify="space-between" gap={8}>
+          <Tag color="blue">
+            {t("agent.version.totalVersions", { count: total })}
+          </Tag>
+          <Button
+            icon={<GitCompare size={16} />}
+            disabled={isLoading || compareLoading || agentVersionList.length < 2}
+            onClick={handleOpenCompareModal}
+          >
+            {t("agent.version.compare")}
+          </Button>
+        </Flex>
+      }
+    >
+      <Spin spinning={isLoading}>
+        {agentVersionList.length ? (
+          <div className="flex flex-col gap-2">
+            {agentVersionList.map((version) => (
+              <VersionCardItem
+                key={version.version_no}
+                version={version}
+                agentId={currentAgentId ?? 0}
+                currentVersionNo={currentVersionNo}
+                onRefreshAgentInfo={onRefreshAgentInfo}
+              />
+            ))}
           </div>
-        </div>
-      </div>
+        ) : (
+          <Empty description={t("agent.version.noVersions")} />
+        )}
+      </Spin>
       <AgentVersionCompareModal
-        open={compareModalOpen}
+        open={open && compareModalOpen}
         loading={compareLoading}
         versionList={agentVersionList}
         currentVersionNo={currentVersionNo}
@@ -166,6 +171,6 @@ export default function AgentVersionManage({
         onChangeVersionA={handleChangeVersionA}
         onChangeVersionB={handleChangeVersionB}
       />
-    </>
+    </Drawer>
   );
 }

@@ -62,7 +62,7 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/run" \
 | Kubernetes deployment | Replace with `http://localhost:30013/nb/v1` |
 | Production | Replace with actual server domain name or public IP |
 
-## Method 2: A2A Publishing
+## Method 2: A2A Publishing {#publish-as-a2a}
 
 Expose a published Agent as an A2A service for external systems to discover and call via A2A 1.0 protocol.
 
@@ -200,6 +200,5 @@ See [Northbound API](./northbound-api) for complete API parameters, request/resp
 
 ## Related Resources
 
-- [Publish as A2A Agent](../../user-guide/agent-development/a2a-publish) — Full guide for publishing and calling A2A agents
 - [Northbound API](./northbound-api) — Northbound RESTful API detailed reference
-- [Agent Configuration](../../user-guide/agent-development/agent-configuration) — Agent configuration details
+- [Agent Configuration](../../user-guide/agent-configuration) — Agent configuration details

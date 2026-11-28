@@ -232,5 +232,5 @@ http://<IP>:9999/.well-known/agent-card.json
 
 ## 🔗 相关资源
 
-- [添加外部 A2A Agent](../../user-guide/agent-development/a2a-external) — 在协作 Agent 中添加外部 A2A Agent 的完整操作指南
+- [添加外部 A2A Agent](../../user-guide/a2a-external) — 在协作 Agent 中添加外部 A2A Agent 的完整操作指南
 - [A2A 协议规范](https://github.com/model-context-protocol/specification) — 官方协议文档

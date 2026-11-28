@@ -69,7 +69,7 @@ This FAQ addresses common questions and issues you may encounter while installin
     3. **Model name**: Confirm that the model identifier is correct.
     4. **Network access**: Make sure your deployment can reach the provider's servers.
 
-    For model configuration instructions, see [Model Configuration](../user-guide/agent-development/model-configuration) in the User Guide.
+    For model configuration instructions, see [Model Configuration](../user-guide/model-configuration) in the User Guide.
 
 - **Q: The model service reports an incompatible message format. How can I resolve it?**
   - A: Providers differ in how fully they support the OpenAI message format. Some text-only APIs accept only a string as `content` and do not accept an array of content blocks. First check that the model type and API endpoint are configured correctly, then consult the provider's protocol documentation. For example, a multimodal message may use:

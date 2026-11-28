@@ -31,14 +31,14 @@
           "excludes": [
             "user-guide/modelengine.md",
             "user-guide/monitor.md",
-            "user-guide/agent-development/a2a-*.md"
+            "user-guide/a2a-*.md"
           ]
         },
         {
           "title": "系统集成",
           "includes": [
             "user-guide/modelengine.md",
-            "user-guide/agent-development/a2a-*.md",
+            "user-guide/a2a-*.md",
             "integration/**",
             "mcp-ecosystem/**"
           ]
@@ -98,14 +98,14 @@
           "excludes": [
             "user-guide/modelengine.md",
             "user-guide/monitor.md",
-            "user-guide/agent-development/a2a-*.md"
+            "user-guide/a2a-*.md"
           ]
         },
         {
           "title": "System Integration",
           "includes": [
             "user-guide/modelengine.md",
-            "user-guide/agent-development/a2a-*.md",
+            "user-guide/a2a-*.md",
             "integration/**",
             "mcp-ecosystem/**"
           ]

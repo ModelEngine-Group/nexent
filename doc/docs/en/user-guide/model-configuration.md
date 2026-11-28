@@ -2,7 +2,7 @@
 
 In the Nexent sidebar, select **Agent Development → Model Configuration**. On the **Model Settings** page, use **Default Configuration** to choose the models Nexent uses when no model is explicitly configured. Use **Model Library** to add and manage models. When setting up Nexent for the first time, add a model to the library, then select it in Default Configuration.
 
-![Default Configuration and Model Library on the Model Settings page](../assets/model-management/model-settings-overview.png)
+![Default Configuration and Model Library on the Model Settings page](./assets/model-management/model-settings-overview.png)
 
 ## 🤖 Model Configuration
 
@@ -14,7 +14,7 @@ In the Nexent sidebar, select **Agent Development → Model Configuration**. On 
 4. For a large language model, Nexent tries to match a **Model profile**. Review the match and select a profile manually if needed. A profile can prefill model settings. Review the values against what your service supports before saving. For other model types, use **Advanced Settings** where available, such as to configure chunking for an embedding model.
 5. Select **Verify Connectivity** to test the connection. Review your settings, then select **Add Model**. The new model appears in Model Library.
 
-![Single model setup showing the matched LLM profile and a successful connectivity check](../assets/model-management/add-single-model.png)
+![Single model setup showing the matched LLM profile and a successful connectivity check](./assets/model-management/add-single-model.png)
 
 ### Add models in batches
 
@@ -25,7 +25,7 @@ In the Nexent sidebar, select **Agent Development → Model Configuration**. On 
 
 When the ModelEngine integration is enabled, **Sync ModelEngine Models** opens the **Batch** tab directly.
 
-![Batch model import with two models selected from the fetched list](../assets/model-management/batch-add-models.png)
+![Batch model import with two models selected from the fetched list](./assets/model-management/batch-add-models.png)
 
 ### Set default models
 
@@ -47,14 +47,14 @@ Read the confirmation prompt before changing an active embedding model. This may
 
 Accounts with view-only access cannot change defaults or manage models.
 
-![Model Library with search, filters, batch controls, and row actions](../assets/model-management/model-library.png)
+![Model Library with search, filters, batch controls, and row actions](./assets/model-management/model-library.png)
 
 ### Check model connectivity
 
 - **Check the default models**. Select **Check Model Connectivity** at the top right of **Default Configuration** to verify the selected defaults. When the check completes, a green dot next to the model name indicates a successful connection. You can view failure details and retry a failed check.
 - **Check one model**. Find the model in **Model Library** and select **Verify Connectivity** on its row. If the check fails, review the **Base URL**, model ID or name, credentials, and provider permissions, then retry.
 
-![A green dot next to the default language model after a successful connectivity check](../assets/model-management/model-connectivity.png)
+![A green dot next to the default language model after a successful connectivity check](./assets/model-management/model-connectivity.png)
 
 ### 🤖 Supported Providers
 
@@ -127,4 +127,4 @@ After closing the Model Configuration flow, continue with:
 1. **[Knowledge Base](./knowledge-configuration)** – Create and manage knowledge bases.
 2. **[Agent Configuration](./agent-configuration)** – Build and configure agents.
 
-Need help? Check the **[FAQ](../../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

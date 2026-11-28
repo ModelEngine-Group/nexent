@@ -177,11 +177,10 @@ ModelScope 提供了丰富的 MCP 服务，以下是接入 GitHub MCP 的示例�
 
 ### 分配到智能体
 
-1. 进入 **智能体开发** 页面
-2. 在「选择智能体的工具」中切换到 **MCP** 页签
-3. 找到已添加的 MCP 服务，展开查看工具列表
-4. 选择需要的工具，配置必要参数
-5. 保存智能体配置
+1. 打开要编辑的智能体，进入“智能体配置”。
+2. 在“工具管理”中点击“点击添加工具”，切换到“MCP 服务”。
+3. 展开已接入的服务并勾选需要的工具。
+4. 填写工具的必填参数，确认选择后在“工具管理”中检查结果。界面步骤见[添加 MCP 工具](../../user-guide/local-tools/index.md#configure-mcp-tools)。
 
 ### 工具测试
 
@@ -234,6 +233,6 @@ ModelScope 提供了丰富的 MCP 服务，以下是接入 GitHub MCP 的示例�
 ## 🔗 相关资源
 
 - [MCP 仓库](../../user-guide/resource-repository/mcp-repository) — 浏览、安装和管理 MCP 服务的详细指导
-- [智能体配置](../../user-guide/agent-development/agent-configuration) — 在智能体中使用 MCP 工具
+- [智能体配置](../../user-guide/agent-configuration) — 在智能体中使用 MCP 工具
 - [MCP 工具开发](../../backend/tools/mcp) — 开发自定义 MCP 服务
 - [MCP 生态系统](../../mcp-ecosystem/overview) — 了解更多 MCP 生态

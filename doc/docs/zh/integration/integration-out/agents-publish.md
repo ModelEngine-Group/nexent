@@ -62,7 +62,7 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/run" \
 | Kubernetes 部署 | 替换为 `http://localhost:30013/nb/v1` |
 | 生产环境 | 替换为实际服务器域名或公网 IP |
 
-## 🌐 方式二：发布为 A2A Agent
+## 🌐 方式二：发布为 A2A Agent {#publish-as-a2a}
 
 将已发布的 Agent 进一步暴露为 A2A 服务，供外部系统通过 A2A 1.0 协议发现并调用。
 
@@ -200,6 +200,5 @@ Authorization: Bearer {access_key}
 
 ## 🔗 相关资源
 
-- [发布为 A2A Agent](../../user-guide/agent-development/a2a-publish) — 发布和调用 A2A Agent 的完整操作指南
 - [调用 Agent 北向 API](./northbound-api) — 北向 RESTful API 详细参考
-- [智能体配置](../../user-guide/agent-development/agent-configuration) — Agent 配置详解
+- [智能体配置](../../user-guide/agent-configuration) — Agent 配置详解

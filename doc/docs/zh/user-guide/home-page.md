@@ -46,12 +46,12 @@
 
 ### 我想构建自己的智能体
 
-1. 确认可使用的模型；如需新增模型，参见 [模型配置](./agent-development/model-configuration)。
+1. 确认可使用的模型；如需新增模型，参见 [模型配置](./model-configuration)。
 2. 点击首页的 **快速配置**，或进入 **智能体配置**，创建并配置智能体；也可以先到 [智能体仓库](./resource-repository/agent-repository) 查找可复用的资源。
 3. 按任务需要配置工具、Skill、知识库和记忆。**知识库是可选能力**，仅在需要检索专属资料时准备。
 4. 调试并确认效果后发布智能体，再进入对话页面验证使用体验。
 
-详细操作参见 [智能体配置](./agent-development)。需要处理专属资料时，可参见 [知识库配置](./agent-development/knowledge-configuration)。
+详细操作参见 [智能体配置](./agent-configuration)。需要处理专属资料时，可参见 [知识库配置](./knowledge-configuration)。
 
 ### 我负责平台初始化或管理
 
@@ -71,7 +71,7 @@
 
 - [智能体对话](./start-chat)：选择智能体、发送问题并查看结果。
 - [自动任务](./auto-tasks)：管理按计划执行的任务。
-- [智能体配置](./agent-development)：创建、配置、调试与发布智能体。
+- [智能体配置](./agent-configuration)：创建、配置、调试与发布智能体。
 - [资源仓库](./resource-repository/agent-repository)：查找和复用已有智能体。
 - [常见问题](../quick-start/faq)：查找使用与部署问题的处理方法。
 

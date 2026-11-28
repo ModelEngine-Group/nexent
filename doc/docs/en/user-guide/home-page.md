@@ -46,12 +46,12 @@ If no agents are available, ask your administrator or agent developer to check p
 
 ### Build your own agent
 
-1. Confirm that a suitable model is available. To connect another model, see [Model Configuration](./agent-development/model-configuration).
+1. Confirm that a suitable model is available. To connect another model, see [Model Configuration](./model-configuration).
 2. Click **Quick Setup**, or open **Agent Configuration**, to create and configure an agent. You can also browse [Agent Space](./resource-repository/agent-repository) for reusable resources.
 3. Configure tools, skills, knowledge bases, and memory as needed. **A knowledge base is optional**: prepare one when your agent needs to retrieve information from your own materials.
 4. Debug the agent and check its results before publishing. Then verify the experience on the chat page.
 
-See [Agent Configuration](./agent-development) for detailed instructions, or [Knowledge Base Configuration](./agent-development/knowledge-configuration) to prepare your own reference materials.
+See [Agent Configuration](./agent-configuration) for detailed instructions, or [Knowledge Base Configuration](./knowledge-configuration) to prepare your own reference materials.
 
 ### Initialize or administer the platform
 
@@ -71,7 +71,7 @@ Use the entries available in your environment. You do not need to switch to an a
 
 - [Agent Chat](./start-chat): Select an agent, send questions, and view results.
 - [Auto Tasks](./auto-tasks): Manage scheduled tasks.
-- [Agent Configuration](./agent-development): Create, configure, debug, and publish agents.
+- [Agent Configuration](./agent-configuration): Create, configure, debug, and publish agents.
 - [Agent Space](./resource-repository/agent-repository): Find and reuse existing agents.
 - [FAQ](../quick-start/faq): Troubleshoot usage and deployment issues.
 

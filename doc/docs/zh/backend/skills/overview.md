@@ -145,5 +145,5 @@ tags:                      # 可选：技能标签，用于分类与检索
 ## 相关参考
 
 - [技能管理（用户指南）](../../user-guide/resource-repository/skill-repository.md)
-- [智能体开发指南](../../user-guide/agent-development)
+- [智能体开发指南](../../user-guide/agent-configuration)
 - [本地工具概览](../../user-guide/local-tools/index)

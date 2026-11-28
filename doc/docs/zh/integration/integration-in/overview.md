@@ -87,5 +87,5 @@ Nexent 支持两种 Agent 发现方式：
 ## 🔗 相关资源
 
 - [MCP 生态系统](../../mcp-ecosystem/overview) — 了解更多 MCP 生态信息
-- [智能体配置](../../user-guide/agent-development/agent-configuration) — 在智能体中使用接入的资源
+- [智能体配置](../../user-guide/agent-configuration) — 在智能体中使用接入的资源
 - [技能系统概览](../../backend/skills/overview) — 深入了解 Skill 机制

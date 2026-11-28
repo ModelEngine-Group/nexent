@@ -81,4 +81,4 @@ To extend the Word capabilities of the official `create-docx` skill, or to devel
 
 - [Skill Space](./skill-repository.md)
 - [Skills System Overview](/en/backend/skills/overview)
-- [Agent Configuration](../agent-development/agent-configuration.md)
+- [Agent Configuration](../agent-configuration.md)

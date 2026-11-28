@@ -88,7 +88,7 @@ Agent 仓库是同租户内共享、管理与审核智能体的中心。您可�
 
 「我的 Agent」页签用于管理您有权限编辑的智能体，包括自己创建的，以及从仓库复制而来的智能体。
 
-> 💡 **入口说明**：「申请上架」与「评估」入口已迁移至 **[智能体配置](../agent-development/agent-configuration)** 页面的智能体卡片右上角「...」菜单，申请信息的填写流程见该页「上架」一节；本页签负责上架状态跟踪与审核进度管理（取消申请、下架）。
+> 💡 **入口说明**：「申请上架」与「评估」入口已迁移至 **[智能体配置](../agent-configuration)** 页面的智能体卡片右上角「...」菜单，申请信息的填写流程见该页「上架」一节；本页签负责上架状态跟踪与审核进度管理（取消申请、下架）。
 
 ### 筛选与搜索
 
@@ -182,7 +182,7 @@ Agent 仓库是同租户内共享、管理与审核智能体的中心。您可�
 在 Agent 仓库中完成管理后，您可以：
 
 1. 在 **[智能体对话](../start-chat)** 中与智能体进行交互
-2. 继续 **[智能体配置](../agent-development/agent-configuration)** 创建或迭代更多智能体
-3. 配置 **[记忆配置](../agent-development/memory-configuration)** 以提升智能体的记忆能力
+2. 继续 **[智能体配置](../agent-configuration)** 创建或迭代更多智能体
+3. 配置 **[记忆配置](../memory-configuration)** 以提升智能体的记忆能力
 
 如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。

@@ -9,6 +9,9 @@
   border-radius: 8px;
   color: #191919;
   font-family: "HarmonyOS Sans SC", "Huawei Sans", sans-serif;
+}
+.agent-debug-panel,
+.agent-comparison-surface {
   background:
     radial-gradient(ellipse at 0% 100%, #66ebff1a, transparent 48%),
     radial-gradient(ellipse at 100% 100%, #7a66ff12, transparent 48%),

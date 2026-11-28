@@ -2,7 +2,7 @@
 
 "use client";
 
-import { createElement, useState } from "react";
+import { createElement, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Tooltip } from "antd";
 import { LockOpen, Send } from "lucide-react";
@@ -27,6 +27,7 @@ interface AgentConfigHeaderProps {
   onPublish: () => void;
   onManualUnlock: () => void;
   actionAreaRef?: React.Ref<HTMLDivElement>;
+  versionAction?: ReactNode;
   published?: boolean;
 }
 
@@ -43,6 +44,7 @@ export function AgentConfigHeader({
   onPublish,
   onManualUnlock,
   actionAreaRef,
+  versionAction,
   published = false,
 }: AgentConfigHeaderProps) {
   const { t } = useTranslation("common");
@@ -180,6 +182,7 @@ export function AgentConfigHeader({
             />
           </Tooltip>
         )}
+        {versionAction}
         <Button
           type="primary"
           icon={<Send size={16} />}

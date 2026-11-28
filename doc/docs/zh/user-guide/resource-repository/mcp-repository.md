@@ -229,7 +229,7 @@ MCP 仓库是同租户内共享、管理与审核 MCP（Model Context Protocol�
 
 在 MCP 仓库中完成管理后，您可以：
 
-1. 在 **[智能体配置](../agent-development/agent-configuration)** 中为智能体配置 MCP 工具
+1. 在 **[智能体配置](../agent-configuration)** 中为智能体配置 MCP 工具
 2. 在 **[智能体对话](../start-chat)** 中体验智能体调用 MCP 工具的效果
 3. 继续浏览 **[Skill 仓库](./skill-repository)** 了解技能与 MCP 的协作
 
