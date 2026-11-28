@@ -639,6 +639,7 @@ def test_binding_and_relation_validation():
 
 def test_metadata_json_boundaries():
     assert ontology_validation._validate_metadata_json({"f": "v"}) == {"f": "v"}
+    assert ontology_validation._validate_metadata_json({"f": None}) == {"f": None}
     with pytest.raises(ValueError):
         ontology_validation._validate_metadata_json({})
     with pytest.raises(ValueError):

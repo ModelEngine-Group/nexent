@@ -107,6 +107,67 @@ class TestChunkMetadataBatchEndpoints:
         assert edit_metadata.call_args.kwargs["chunk_id_list"] == [1, 2, 3]
         assert response.json() == result
 
+    def test_batch_metadata_accepts_null_deletion(self):
+        from ext_components.aidp.apps import aidp_chunk_routes
+
+        result = {
+            "kds_id": 1,
+            "od_id": 2,
+            "total_chunks": 1,
+            "updated_chunks": 1,
+            "partial_failure": False,
+        }
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "update_chunk_metadata_impl",
+                          return_value=result) as edit_metadata:
+            response = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata",
+                headers=_bearer(),
+                json={
+                    "od_id": 2,
+                    "metadata_json": {"部门": None},
+                    "chunk_id_list": [1],
+                },
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert edit_metadata.call_args.kwargs["metadata_json"] == {"部门": None}
+        assert response.json() == result
+
+    def test_batch_metadata_accepts_tag_only(self):
+        from ext_components.aidp.apps import aidp_chunk_routes
+
+        result = {
+            "kds_id": 1,
+            "od_id": 2,
+            "total_chunks": 1,
+            "updated_chunks": 1,
+            "partial_failure": False,
+        }
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_chunk_routes, "update_chunk_metadata_impl",
+                          return_value=result) as edit_metadata:
+            response = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata",
+                headers=_bearer(),
+                json={"od_id": 2, "tag": [], "chunk_id_list": [1]},
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert edit_metadata.call_args.kwargs["metadata_json"] is None
+        assert edit_metadata.call_args.kwargs["tag"] == []
+        assert response.json() == result
+
+    def test_batch_metadata_rejects_missing_payload(self):
+        with patch.object(self._perms(), "require_permission",
+                          return_value=MagicMock(permission="EDIT")):
+            response = _client().patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/chunks/batch-metadata",
+                headers=_bearer(),
+                json={"od_id": 1, "chunk_id_list": [1]},
+            )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
     def test_batch_metadata_async_accepts_large_chunk_list(self):
         from ext_components.aidp.apps import aidp_chunk_routes
 

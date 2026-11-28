@@ -88,14 +88,19 @@ MetadataKey = Annotated[
     StringConstraints(min_length=1, max_length=64),
     AfterValidator(_utf8_max_bytes(64)),
 ]
-MetadataValue = Annotated[
-    str,
-    StringConstraints(max_length=256),
-    AfterValidator(_utf8_max_bytes(256)),
-]
+MetadataValue = (
+    Annotated[
+        str,
+        StringConstraints(max_length=256),
+        AfterValidator(_utf8_max_bytes(256)),
+    ]
+    | None
+)
 
 
-def _validate_metadata_json(value: dict[str, str]) -> dict[str, str]:
+def _validate_metadata_json(
+    value: dict[str, str | None],
+) -> dict[str, str | None]:
     if not value:
         raise ValueError("metadata_json must not be empty")
     if len(value) > 20:

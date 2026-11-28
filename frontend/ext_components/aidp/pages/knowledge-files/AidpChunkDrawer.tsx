@@ -26,10 +26,12 @@ export type AidpChunkDrawerMode = "create" | "edit";
 /** Payload assembled by the drawer; the parent decides how to persist it. */
 export interface AidpChunkFormPayload {
   text: string;
-  /** True when the user changed tags or metadata; only then is AIDP called. */
-  metadataDirty: boolean;
+  /** True when a metadata value was added, changed or cleared. */
+  metadataChanged: boolean;
+  /** True when the tag set changed. */
+  tagChanged: boolean;
   tag: string[];
-  metadata_json: Record<string, string>;
+  metadata_json: Record<string, string | null>;
 }
 
 interface AidpChunkDrawerProps {
@@ -229,24 +231,29 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   const isTooLong = effectiveLength > AIDP_CHUNK_TEXT_MAX_LENGTH;
 
   const metadataJson = useMemo(() => {
-    const result: Record<string, string> = {};
+    const current: Record<string, string> = {};
     for (const row of rows) {
       const value = row.value.trim();
-      if (row.fieldName && value) result[row.fieldName] = value;
+      if (row.fieldName && value) current[row.fieldName] = value;
+    }
+    const result: Record<string, string | null> = {};
+    // A field that existed before and is now empty is an explicit deletion.
+    for (const row of initialRows) {
+      result[row.fieldName] = current[row.fieldName] ?? null;
+    }
+    for (const [fieldName, value] of Object.entries(current)) {
+      if (!(fieldName in result)) result[fieldName] = value;
     }
     return result;
-  }, [rows]);
+  }, [initialRows, rows]);
 
   const cleanedTags = useMemo(
     () => Array.from(new Set(tagRows.map((tag) => tag.trim()).filter(Boolean))),
     [tagRows]
   );
 
-  const metadataDirty = useMemo(() => {
+  const metadataChanged = useMemo(() => {
     if (!hasOntology) return false;
-    const tagsChanged =
-      cleanedTags.length !== initialTags.length ||
-      cleanedTags.some((tag) => !initialTags.includes(tag));
     const initialJson: Record<string, string> = {};
     for (const row of initialRows) {
       if (row.value.trim()) initialJson[row.fieldName] = row.value.trim();
@@ -255,17 +262,20 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
       ...Object.keys(metadataJson),
       ...Object.keys(initialJson),
     ]);
-    const valuesChanged = Array.from(keys).some(
-      (key) => (metadataJson[key] ?? "") !== (initialJson[key] ?? "")
+    return Array.from(keys).some(
+      (key) => (metadataJson[key] ?? null) !== (initialJson[key] ?? null)
     );
-    return tagsChanged || valuesChanged;
-  }, [cleanedTags, hasOntology, initialRows, initialTags, metadataJson]);
+  }, [hasOntology, initialRows, metadataJson]);
 
-  // AIDP requires a non-empty metadata_json on the batch endpoint; clearing
-  // every field while also changing tags cannot be submitted.
-  const metadataTooEmpty =
-    metadataDirty && Object.keys(metadataJson).length === 0;
-  const canSubmit = !isEmpty && !isTooLong && !submitting && !metadataTooEmpty;
+  const tagChanged = useMemo(() => {
+    if (!hasOntology) return false;
+    return (
+      cleanedTags.length !== initialTags.length ||
+      cleanedTags.some((tag) => !initialTags.includes(tag))
+    );
+  }, [cleanedTags, hasOntology, initialTags]);
+
+  const canSubmit = !isEmpty && !isTooLong && !submitting;
   // UCD values: 1px border, 4px radius, #DFDFDF default and #0067D1 focus.
   const textAreaBorderColor = isTooLong
     ? "#e02128"
@@ -288,7 +298,8 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
     try {
       await onSubmit({
         text: nextTrimmed,
-        metadataDirty,
+        metadataChanged,
+        tagChanged,
         tag: cleanedTags,
         metadata_json: metadataJson,
       });
@@ -298,11 +309,12 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   }, [
     canSubmit,
     cleanedTags,
-    metadataDirty,
+    metadataChanged,
     metadataJson,
     onSubmit,
     previewing,
     serializePreview,
+    tagChanged,
     text,
   ]);
 
@@ -457,7 +469,6 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
               rows={rows}
               onChange={setRows}
               submitting={submitting}
-              showEmptyError={metadataTooEmpty}
             />
           )}
 

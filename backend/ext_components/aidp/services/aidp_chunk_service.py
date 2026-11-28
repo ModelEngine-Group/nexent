@@ -322,22 +322,25 @@ def update_chunk_metadata_impl(
     kds_id: str,
     *,
     od_id: int,
-    metadata_json: Dict[str, Any],
+    metadata_json: Dict[str, Any] | None = None,
     tag: List[str] | None = None,
     chunk_id_list: List[int] | None = None,
     file_uuid_list: List[str] | None = None,
     async_mode: bool = False,
     tenant_id: str | None = None,
 ) -> Dict[str, Any]:
-    """Batch-apply user metadata to chunks of one knowledge base.
+    """Batch-apply user metadata or entity tags to chunks of one knowledge base.
 
-    AIDP requires a non-empty ``metadata_json`` (verified 2026-11-20) and
-    silently ignores a ``tag`` parameter, so only user metadata is forwarded.
-    The sync route caps ``chunk_id_list`` at 300 ids; ``file_uuid_list`` stays
-    capped at 100 on both variants; the async variant lifts the chunk-id cap
-    and answers with an acceptance snapshot instead of per-chunk counts.
+    Exactly one payload kind is expected from the caller: ``metadata_json``
+    carries field values (``None`` deletes the field), while ``tag`` replaces
+    the complete tag set (an empty list clears it). The sync route caps
+    ``chunk_id_list`` at 300 ids; ``file_uuid_list`` stays capped at 100 on
+    both variants; the async variant lifts the chunk-id cap and answers with
+    an acceptance snapshot instead of per-chunk counts.
     """
-    body: Dict[str, Any] = {"od_id": od_id, "metadata_json": metadata_json}
+    body: Dict[str, Any] = {"od_id": od_id}
+    if metadata_json is not None:
+        body["metadata_json"] = metadata_json
     if tag is not None:
         body["tag"] = list(tag)
     if chunk_id_list is not None:

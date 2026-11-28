@@ -13,6 +13,7 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
   useKbOntologyBinding,
+  useOntologyEntityOptions,
   useOntologyMetadataSchema,
 } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpChunkMetadata";
 import { useAidpFolderTree } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpFolderTree";
@@ -96,11 +97,19 @@ export const useAidpFilesPanelState = ({
   const [batchMetadataFiles, setBatchMetadataFiles] = useState<
     AidpDocumentItem[] | null
   >(null);
+  const [metadataDeleteFiles, setMetadataDeleteFiles] = useState<
+    AidpDocumentItem[] | null
+  >(null);
+  const [tagEditFiles, setTagEditFiles] = useState<AidpDocumentItem[] | null>(
+    null
+  );
   const [metadataSubmitting, setMetadataSubmitting] = useState(false);
   const bindingQuery = useKbOntologyBinding(knowledgeBase.kds_id);
   const odId = bindingQuery.data?.binding?.od_id ?? null;
   const metadataSchemaQuery = useOntologyMetadataSchema(odId);
   const metadataFields = metadataSchemaQuery.data ?? [];
+  const entityOptionsQuery = useOntologyEntityOptions(odId);
+  const tagOptions = entityOptionsQuery.data ?? [];
   const [moveFailures, setMoveFailures] = useState<FileMoveFailure | null>(
     null
   );
@@ -122,7 +131,9 @@ export const useAidpFilesPanelState = ({
     fileRenameTarget !== null ||
     deleteConfirmOpen ||
     metadataFile !== null ||
-    batchMetadataFiles !== null;
+    batchMetadataFiles !== null ||
+    metadataDeleteFiles !== null ||
+    tagEditFiles !== null;
 
   // Keep the knowledge-base URL in sync with the current folder so browser
   // back from a file detail returns to the same folder instead of the root.
@@ -412,12 +423,17 @@ export const useAidpFilesPanelState = ({
     setMetadataFile,
     batchMetadataFiles,
     setBatchMetadataFiles,
+    metadataDeleteFiles,
+    setMetadataDeleteFiles,
+    tagEditFiles,
+    setTagEditFiles,
     metadataSubmitting,
     setMetadataSubmitting,
     bindingQuery,
     odId,
     metadataSchemaQuery,
     metadataFields,
+    tagOptions,
     moveFailures,
     setMoveFailures,
     deleteFailures,

@@ -838,7 +838,7 @@ class AidpKnowledgeService {
     id: string,
     payload: {
       od_id: number;
-      metadata_json: Record<string, string>;
+      metadata_json?: Record<string, string | null>;
       tag?: string[];
       chunk_id_list?: number[];
       file_uuid_list?: string[];

@@ -1227,3 +1227,61 @@ def test_directory_upload_preserves_relative_path_and_file_move_rename(mock_aidp
     )
     assert renamed.status_code == 204
     assert document["file_name"] == "改名后.txt"
+
+
+def test_batch_metadata_null_deletes_and_tags_overwrite(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["14"] = {
+        "kds_id": "14",
+        "kds_name": "AIDP FAQ",
+        "state": 4,
+    }
+    chunk = {
+        "chunk_id": 1,
+        "file_uuid": "f-1",
+        "metadata_json": {"doc_type": "faq", "publish_year": "2026"},
+        "tag": ["旧标签"],
+    }
+    server._DOCUMENT_CHUNKS_BY_KB["14"] = [chunk]
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    url = (
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/14"
+        "/Chunks/BatchMetadataJson"
+    )
+
+    deleted = client.patch(
+        url,
+        headers=headers,
+        json={
+            "od_id": 1,
+            "metadata_json": {"doc_type": None},
+            "chunk_id_list": [1],
+        },
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert "doc_type" not in chunk["metadata_json"]
+    assert chunk["metadata_json"]["publish_year"] == "2026"
+
+    retagged = client.patch(
+        url,
+        headers=headers,
+        json={"od_id": 1, "tag": ["新标签"], "chunk_id_list": [1]},
+    )
+    assert retagged.status_code == 200, retagged.text
+    assert chunk["tag"] == ["新标签"]
+
+    cleared = client.patch(
+        url,
+        headers=headers,
+        json={"od_id": 1, "tag": [], "chunk_id_list": [1]},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert chunk["tag"] == []
+
+    missing_payload = client.patch(
+        url,
+        headers=headers,
+        json={"od_id": 1, "chunk_id_list": [1]},
+    )
+    assert missing_payload.status_code == 400

@@ -5,10 +5,11 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Input, Table, Tooltip } from "antd";
+import { Alert, Button, Dropdown, Input, Table, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   FolderOpenOutlined,
+  MoreOutlined,
   ReloadOutlined,
   SearchOutlined,
   TagsOutlined,
@@ -19,6 +20,8 @@ import AidpPagination from "@/ext_components/aidp/shared/components/AidpPaginati
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpFileMetadataDrawer from "@/ext_components/aidp/pages/knowledge-files/AidpFileMetadataDrawer";
 import AidpBatchMetadataDrawer from "@/ext_components/aidp/pages/knowledge-files/AidpBatchMetadataDrawer";
+import AidpBatchMetadataDeleteModal from "@/ext_components/aidp/pages/knowledge-files/AidpBatchMetadataDeleteModal";
+import AidpBatchTagModal from "@/ext_components/aidp/pages/knowledge-files/AidpBatchTagModal";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import AidpFolderTree from "@/ext_components/aidp/pages/knowledge-files/components/AidpFolderTree";
 import AidpFolderNameModal from "@/ext_components/aidp/pages/knowledge-files/components/AidpFolderNameModal";
@@ -99,10 +102,15 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = (
     setMetadataFile,
     batchMetadataFiles,
     setBatchMetadataFiles,
+    metadataDeleteFiles,
+    setMetadataDeleteFiles,
+    tagEditFiles,
+    setTagEditFiles,
     metadataSubmitting,
     setMetadataSubmitting,
     odId,
     metadataFields,
+    tagOptions,
     moveFailures,
     setMoveFailures,
     deleteFailures,
@@ -156,7 +164,66 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = (
     getBreadcrumbDropProps,
     handleSaveFileMetadata,
     handleSaveBatchFileMetadata,
+    handleDeleteBatchFileMetadata,
+    handleSaveBatchFileTags,
   } = menus;
+
+  const selectedToolbarFiles = displayedFiles.filter(
+    (file) =>
+      Boolean(file.file_uuid) &&
+      selectedFileKeys.includes(`file:${file.file_uuid}`)
+  );
+  const toolbarNoSelection = selectedFileKeys.length === 0;
+  const toolbarSelectionInvalid =
+    selectedToolbarFiles.length !== selectedFileKeys.length;
+  const toolbarOverLimit = selectedToolbarFiles.length > 100;
+  const batchMetadataMenuItems = [
+    {
+      key: "metadata-add",
+      icon: <TagsOutlined />,
+      label: t("aidpKnowledge.batchMetadataTitle"),
+      disabled:
+        toolbarNoSelection ||
+        toolbarSelectionInvalid ||
+        toolbarOverLimit ||
+        metadataFields.length === 0,
+    },
+    {
+      key: "metadata-delete",
+      icon: <TagsOutlined />,
+      label: t("aidpKnowledge.batchMetadataDeleteTitle"),
+      disabled:
+        toolbarNoSelection ||
+        toolbarSelectionInvalid ||
+        toolbarOverLimit ||
+        metadataFields.length === 0,
+    },
+    {
+      key: "metadata-tag",
+      icon: <TagsOutlined />,
+      label: t("aidpKnowledge.batchTagsTitle"),
+      disabled:
+        toolbarNoSelection ||
+        toolbarSelectionInvalid ||
+        toolbarOverLimit ||
+        tagOptions.length === 0,
+    },
+  ];
+  const handleBatchMetadataMenuClick = ({ key }: { key: string }) => {
+    if (toolbarNoSelection) return;
+    if (toolbarSelectionInvalid) {
+      message.warning(t("aidpKnowledge.batchMetadataUnavailable"));
+      return;
+    }
+    if (toolbarOverLimit) {
+      message.warning(t("aidpKnowledge.batchMetadataFileLimit", { max: 100 }));
+      return;
+    }
+    const files = selectedToolbarFiles.map(toDocumentItem);
+    if (key === "metadata-add") setBatchMetadataFiles(files);
+    if (key === "metadata-delete") setMetadataDeleteFiles(files);
+    if (key === "metadata-tag") setTagEditFiles(files);
+  };
 
   return (
     <section className="flex min-h-[420px] grow shrink-0 basis-auto flex-col bg-white">
@@ -214,32 +281,17 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = (
             </Button>
           )}
           {canEdit && odId !== null && (
-            <Button
-              icon={<TagsOutlined />}
-              disabled={selectedFileUuids.length === 0}
-              onClick={() => {
-                const selectedFiles = displayedFiles.filter(
-                  (file) =>
-                    Boolean(file.file_uuid) &&
-                    selectedFileKeys.includes(`file:${file.file_uuid}`)
-                );
-                if (selectedFiles.length !== selectedFileKeys.length) {
-                  message.warning(
-                    t("aidpKnowledge.batchMetadataUnavailable")
-                  );
-                  return;
-                }
-                if (selectedFiles.length > 100) {
-                  message.warning(
-                    t("aidpKnowledge.batchMetadataFileLimit", { max: 100 })
-                  );
-                  return;
-                }
-                setBatchMetadataFiles(selectedFiles.map(toDocumentItem));
+            <Dropdown
+              trigger={["click"]}
+              menu={{
+                items: batchMetadataMenuItems,
+                onClick: handleBatchMetadataMenuClick,
               }}
             >
-              {t("aidpKnowledge.batchMetadataTitle")}
-            </Button>
+              <Button icon={<MoreOutlined />}>
+                {t("aidpKnowledge.moreOperations")}
+              </Button>
+            </Dropdown>
           )}
           {canEdit && isAvailable && (
             <Button
@@ -613,6 +665,30 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = (
           if (!metadataSubmitting) setBatchMetadataFiles(null);
         }}
         onSave={handleSaveBatchFileMetadata}
+      />
+
+      <AidpBatchMetadataDeleteModal
+        open={metadataDeleteFiles !== null}
+        metadataFields={metadataFields}
+        count={metadataDeleteFiles?.length ?? 0}
+        mode="file"
+        submitting={metadataSubmitting}
+        onClose={() => {
+          if (!metadataSubmitting) setMetadataDeleteFiles(null);
+        }}
+        onSubmit={handleDeleteBatchFileMetadata}
+      />
+
+      <AidpBatchTagModal
+        open={tagEditFiles !== null}
+        tagOptions={tagOptions}
+        count={tagEditFiles?.length ?? 0}
+        mode="file"
+        submitting={metadataSubmitting}
+        onClose={() => {
+          if (!metadataSubmitting) setTagEditFiles(null);
+        }}
+        onSubmit={handleSaveBatchFileTags}
       />
     </section>
   );

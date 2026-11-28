@@ -271,6 +271,43 @@
   font-size: 12px;
 }
 
+.batchFieldSelectAll {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 4px;
+}
+
+.batchFieldCount {
+  color: var(--chunk-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.batchFieldList {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--chunk-border);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 4px 12px;
+}
+
+.batchFieldRow {
+  padding: 6px 0;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.batchFieldRow:last-child {
+  border-bottom: none;
+}
+
+.batchTagSelect {
+  width: 100%;
+  margin-top: 8px;
+}
+
 .fieldLabelRow {
   display: flex;
   align-items: baseline;

@@ -16,6 +16,7 @@ import {
   Skeleton,
 } from "antd";
 import {
+  DeleteOutlined,
   DownOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -37,6 +38,8 @@ import AidpChunkDrawer, {
 import AidpChunkDetailDrawer from "./AidpChunkDetailDrawer";
 import AidpChunkDeleteModal from "./AidpChunkDeleteModal";
 import AidpBatchMetadataDrawer from "./AidpBatchMetadataDrawer";
+import AidpBatchMetadataDeleteModal from "./AidpBatchMetadataDeleteModal";
+import AidpBatchTagModal from "./AidpBatchTagModal";
 import {
   useAidpChunkSearch,
   useAidpFileChunks,
@@ -90,6 +93,8 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [batchMetadataOpen, setBatchMetadataOpen] = useState(false);
+  const [batchMetadataDeleteOpen, setBatchMetadataDeleteOpen] = useState(false);
+  const [batchTagsOpen, setBatchTagsOpen] = useState(false);
   const [batchMetadataSubmitting, setBatchMetadataSubmitting] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [drawer, setDrawer] = useState<ChunkDrawerState | null>(null);
@@ -276,13 +281,15 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
 
   const saveChunkMetadata = useCallback(
     async (chunkId: number, payload: AidpChunkFormPayload) => {
-      if (!payload.metadataDirty || odId === null) {
+      if ((!payload.metadataChanged && !payload.tagChanged) || odId === null) {
         return;
       }
       await aidpKnowledgeService.batchUpdateChunkMetadata(kdsId, {
         od_id: Number(odId),
-        metadata_json: payload.metadata_json,
-        tag: payload.tag,
+        ...(payload.metadataChanged
+          ? { metadata_json: payload.metadata_json }
+          : {}),
+        ...(payload.tagChanged ? { tag: payload.tag } : {}),
         chunk_id_list: [chunkId],
       });
     },
@@ -305,7 +312,7 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
           // The create endpoint carries text only; tags/metadata follow in a
           // second call. The chunk already exists, so a metadata failure is
           // reported as a warning instead of failing the whole save.
-          if (payload.metadataDirty) {
+          if (payload.metadataChanged || payload.tagChanged) {
             try {
               await saveChunkMetadata(createdId, payload);
             } catch (metadataError) {
@@ -465,11 +472,24 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
     },
     ...(canEdit && metadataEnabled
       ? [
+          { type: "divider" as const },
           {
             key: "batch-metadata",
             label: t("aidpKnowledge.batchMetadataTitle"),
             icon: <TagsOutlined />,
-            disabled: selectedIds.length === 0,
+            disabled: selectedIds.length === 0 || metadataFields.length === 0,
+          },
+          {
+            key: "batch-metadata-delete",
+            label: t("aidpKnowledge.batchMetadataDeleteTitle"),
+            icon: <DeleteOutlined />,
+            disabled: selectedIds.length === 0 || metadataFields.length === 0,
+          },
+          {
+            key: "batch-tags",
+            label: t("aidpKnowledge.batchTagsTitle"),
+            icon: <TagsOutlined />,
+            disabled: selectedIds.length === 0 || tagOptions.length === 0,
           },
         ]
       : []),
@@ -480,6 +500,12 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
     }
     if (key === "batch-metadata") {
       setBatchMetadataOpen(true);
+    }
+    if (key === "batch-metadata-delete") {
+      setBatchMetadataDeleteOpen(true);
+    }
+    if (key === "batch-tags") {
+      setBatchTagsOpen(true);
     }
   };
   const handleSaveBatchMetadata = useCallback(
@@ -503,6 +529,63 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
             t,
             t("aidpKnowledge.chunkMetadataSaveFailed")
           )
+        );
+        throw error;
+      } finally {
+        setBatchMetadataSubmitting(false);
+      }
+    },
+    [kdsId, message, odId, refetch, selectedIds, t]
+  );
+
+  const handleDeleteBatchMetadata = useCallback(
+    async (keys: string[]) => {
+      if (odId === null || selectedIds.length === 0 || keys.length === 0)
+        return;
+      setBatchMetadataSubmitting(true);
+      try {
+        await aidpKnowledgeService.batchUpdateChunkMetadata(kdsId, {
+          od_id: Number(odId),
+          metadata_json: Object.fromEntries(keys.map((key) => [key, null])),
+          chunk_id_list: selectedIds,
+        });
+        message.success(t("aidpKnowledge.batchMetadataDeleteSaved"));
+        setBatchMetadataDeleteOpen(false);
+        setSelectedIds([]);
+        void refetch();
+      } catch (error) {
+        message.error(
+          getAidpErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.batchMetadataDeleteFailed")
+          )
+        );
+        throw error;
+      } finally {
+        setBatchMetadataSubmitting(false);
+      }
+    },
+    [kdsId, message, odId, refetch, selectedIds, t]
+  );
+
+  const handleSaveBatchTags = useCallback(
+    async (tags: string[]) => {
+      if (odId === null || selectedIds.length === 0) return;
+      setBatchMetadataSubmitting(true);
+      try {
+        await aidpKnowledgeService.batchUpdateChunkMetadata(kdsId, {
+          od_id: Number(odId),
+          tag: tags,
+          chunk_id_list: selectedIds,
+        });
+        message.success(t("aidpKnowledge.batchTagsSaved"));
+        setBatchTagsOpen(false);
+        setSelectedIds([]);
+        void refetch();
+      } catch (error) {
+        message.error(
+          getAidpErrorMessage(error, t, t("aidpKnowledge.batchTagsFailed"))
         );
         throw error;
       } finally {
@@ -681,6 +764,30 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
           if (!batchMetadataSubmitting) setBatchMetadataOpen(false);
         }}
         onSave={handleSaveBatchMetadata}
+      />
+
+      <AidpBatchMetadataDeleteModal
+        open={batchMetadataDeleteOpen}
+        metadataFields={metadataFields}
+        count={selectedIds.length}
+        mode="chunk"
+        submitting={batchMetadataSubmitting}
+        onClose={() => {
+          if (!batchMetadataSubmitting) setBatchMetadataDeleteOpen(false);
+        }}
+        onSubmit={handleDeleteBatchMetadata}
+      />
+
+      <AidpBatchTagModal
+        open={batchTagsOpen}
+        tagOptions={tagOptions}
+        count={selectedIds.length}
+        mode="chunk"
+        submitting={batchMetadataSubmitting}
+        onClose={() => {
+          if (!batchMetadataSubmitting) setBatchTagsOpen(false);
+        }}
+        onSubmit={handleSaveBatchTags}
       />
     </div>
   );

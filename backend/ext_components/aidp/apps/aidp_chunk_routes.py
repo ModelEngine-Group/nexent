@@ -108,21 +108,22 @@ AIDP_BATCH_METADATA_FILE_MAX_IDS = 100
 class BatchChunkMetadataRequest(BaseModel):
     """Body for a batch chunk-metadata edit; one id list is required.
 
-    AIDP requires a non-empty ``metadata_json`` (it rejects ``{}``) and
-    silently ignores a ``tag`` parameter, so the proxy only forwards user
-    metadata. Field limits: at most 20 fields, keys <= 64 bytes, values <=
-    256 bytes.
+    AIDP accepts either user metadata or entity tags in one request:
+    ``metadata_json`` may carry ``null`` values to delete a field, while
+    ``tag`` replaces the complete tag set (an empty list clears every tag).
+    Field limits: at most 20 fields, keys <= 64 bytes, values <= 256 bytes.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     od_id: int = Field(..., ge=0, description="Ontology domain that owns the fields")
-    metadata_json: MetadataJson = Field(
-        ..., description="At least one field/value pair"
+    metadata_json: MetadataJson | None = Field(
+        default=None,
+        description="Field/value pairs; a null value deletes the field",
     )
     tag: List[str] | None = Field(
         default=None,
-        description="Entity tags chosen from the bound ontology domain",
+        description="Complete replacement tag set; [] clears every tag",
     )
     chunk_id_list: List[Annotated[int, Field(strict=True, ge=0)]] | None = Field(
         default=None, description="Chunk ids addressed directly"
@@ -143,6 +144,8 @@ class BatchChunkMetadataRequest(BaseModel):
                 if item.strip() not in cleaned:
                     cleaned.append(item.strip())
             self.tag = cleaned
+        if self.metadata_json is None and self.tag is None:
+            raise ValueError("one of metadata_json or tag is required")
         if (self.chunk_id_list is None) == (self.file_uuid_list is None):
             raise ValueError(
                 "exactly one of chunk_id_list or file_uuid_list is required"

@@ -107,12 +107,17 @@ export const useAidpFileMenus = (
     setMetadataFile,
     batchMetadataFiles,
     setBatchMetadataFiles,
+    metadataDeleteFiles,
+    setMetadataDeleteFiles,
+    tagEditFiles,
+    setTagEditFiles,
     metadataSubmitting,
     setMetadataSubmitting,
     bindingQuery,
     odId,
     metadataSchemaQuery,
     metadataFields,
+    tagOptions,
     moveFailures,
     setMoveFailures,
     deleteFailures,
@@ -267,6 +272,29 @@ export const useAidpFileMenus = (
       if (!canEdit) return [];
       const permissions = permissionsForFile(file);
       const items: NonNullable<MenuProps["items"]> = [];
+      if (odId !== null && file.file_uuid) {
+        items.push(
+          {
+            key: "metadata-add",
+            icon: <TagsOutlined />,
+            label: t("aidpKnowledge.batchMetadataTitle"),
+            disabled: metadataFields.length === 0,
+          },
+          {
+            key: "metadata-delete",
+            icon: <TagsOutlined />,
+            label: t("aidpKnowledge.batchMetadataDeleteTitle"),
+            disabled: metadataFields.length === 0,
+          },
+          {
+            key: "metadata-tag",
+            icon: <TagsOutlined />,
+            label: t("aidpKnowledge.batchTagsTitle"),
+            disabled: tagOptions.length === 0,
+          }
+        );
+      }
+      const metadataActionCount = items.length;
       if (permissions?.canMove) {
         items.push({
           key: "move",
@@ -288,13 +316,33 @@ export const useAidpFileMenus = (
           label: t("aidpKnowledge.retryTask"),
         });
       }
+      if (metadataActionCount > 0 && items.length > metadataActionCount) {
+        items.splice(metadataActionCount, 0, { type: "divider" as const });
+      }
       return items;
     },
-    [canEdit, permissionsForFile, retryingFileUuid, t]
+    [
+      canEdit,
+      metadataFields.length,
+      odId,
+      permissionsForFile,
+      retryingFileUuid,
+      t,
+      tagOptions.length,
+    ]
   );
 
   const handleFileMenuClick = useCallback(
     (file: AidpFolderFileItem, key: string) => {
+      if (key === "metadata-add") {
+        setMetadataFile(toDocumentItem(file));
+      }
+      if (key === "metadata-delete") {
+        setMetadataDeleteFiles([toDocumentItem(file)]);
+      }
+      if (key === "metadata-tag") {
+        setTagEditFiles([toDocumentItem(file)]);
+      }
       if (key === "move" && file.file_uuid) {
         setFileMoveRequest({
           fileUuids: [file.file_uuid],
@@ -306,7 +354,15 @@ export const useAidpFileMenus = (
       if (key === "rename") setFileRenameTarget(file);
       if (key === "retry") void handleRetryFile(file);
     },
-    [handleRetryFile, t]
+    [
+      handleRetryFile,
+      setMetadataDeleteFiles,
+      setMetadataFile,
+      setTagEditFiles,
+      setFileMoveRequest,
+      setFileRenameTarget,
+      t,
+    ]
   );
 
   const baseColumns: ColumnsType<FileTableRecord> = [
@@ -445,18 +501,6 @@ export const useAidpFileMenus = (
         const menuItems = fileMenuItems(record.file);
         return (
           <div className="flex items-center gap-2 whitespace-nowrap">
-            {odId !== null && (
-              <Tooltip title={t("aidpKnowledge.fileMetadataEdit")}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<TagsOutlined />}
-                  disabled={!record.file.file_uuid}
-                  aria-label={t("aidpKnowledge.fileMetadataEdit")}
-                  onClick={() => setMetadataFile(toDocumentItem(record.file))}
-                />
-              </Tooltip>
-            )}
             <Tooltip title={t("aidpKnowledge.download")}>
               <Button
                 type="text"
@@ -598,13 +642,94 @@ export const useAidpFileMenus = (
     ]
   );
 
+  const handleDeleteBatchFileMetadata = useCallback(
+    async (keys: string[]) => {
+      const fileUuids = (metadataDeleteFiles ?? [])
+        .map((file) => file.file_uuid)
+        .filter(Boolean);
+      if (fileUuids.length === 0 || odId === null || keys.length === 0) return;
+      setMetadataSubmitting(true);
+      try {
+        await aidpKnowledgeService.batchUpdateChunkMetadata(
+          knowledgeBase.kds_id,
+          {
+            od_id: Number(odId),
+            metadata_json: Object.fromEntries(keys.map((key) => [key, null])),
+            file_uuid_list: fileUuids,
+          }
+        );
+        message.success(t("aidpKnowledge.batchMetadataDeleteSaved"));
+        setMetadataDeleteFiles(null);
+        refreshAll();
+      } catch (error) {
+        message.error(
+          getAidpErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.batchMetadataDeleteFailed")
+          )
+        );
+        throw error;
+      } finally {
+        setMetadataSubmitting(false);
+      }
+    },
+    [
+      knowledgeBase.kds_id,
+      message,
+      metadataDeleteFiles,
+      odId,
+      refreshAll,
+      setMetadataDeleteFiles,
+      t,
+    ]
+  );
+
+  const handleSaveBatchFileTags = useCallback(
+    async (tags: string[]) => {
+      const fileUuids = (tagEditFiles ?? [])
+        .map((file) => file.file_uuid)
+        .filter(Boolean);
+      if (fileUuids.length === 0 || odId === null) return;
+      setMetadataSubmitting(true);
+      try {
+        await aidpKnowledgeService.batchUpdateChunkMetadata(
+          knowledgeBase.kds_id,
+          {
+            od_id: Number(odId),
+            tag: tags,
+            file_uuid_list: fileUuids,
+          }
+        );
+        message.success(t("aidpKnowledge.batchTagsSaved"));
+        setTagEditFiles(null);
+        refreshAll();
+      } catch (error) {
+        message.error(
+          getAidpErrorMessage(error, t, t("aidpKnowledge.batchTagsFailed"))
+        );
+        throw error;
+      } finally {
+        setMetadataSubmitting(false);
+      }
+    },
+    [
+      knowledgeBase.kds_id,
+      message,
+      odId,
+      refreshAll,
+      setTagEditFiles,
+      tagEditFiles,
+      t,
+    ]
+  );
+
   const segments = folderPathSegments(currentPath);
   const folderLabel =
     segments.length > 0
       ? segments[segments.length - 1].label
       : knowledgeBase.kds_name;
   const fileRenameName = splitFileNameExtension(fileRenameTarget?.file_name);
-
 
   return {
     columns,
@@ -619,5 +744,7 @@ export const useAidpFileMenus = (
     getBreadcrumbDropProps,
     handleSaveFileMetadata,
     handleSaveBatchFileMetadata,
+    handleDeleteBatchFileMetadata,
+    handleSaveBatchFileTags,
   };
 };

@@ -3608,10 +3608,15 @@ def batch_chunk_metadata(
     if not isinstance(raw_od_id, int) or isinstance(raw_od_id, bool):
         raise HTTPException(status_code=400, detail="od_id must be an integer")
     od_id = raw_od_id
-    metadata = body.get("metadata_json") or {}
+    metadata = body.get("metadata_json")
     tag = body.get("tag")
     chunk_ids = body.get("chunk_id_list") or []
     file_uuids = {str(item) for item in (body.get("file_uuid_list") or [])}
+    if metadata is None and tag is None:
+        raise HTTPException(
+            status_code=400,
+            detail="one of metadata_json or tag is required",
+        )
     if not any(
         binding["od_id"] == od_id and binding["kds_id"] == kds_id
         for binding in _ONTOLOGY_BINDINGS
@@ -3623,16 +3628,25 @@ def batch_chunk_metadata(
     defined = {
         item["fieldName"] for item in _ONTOLOGY_METADATA.get(str(od_id), [])
     }
-    if not metadata or not set(metadata).issubset(defined):
-        raise HTTPException(
-            status_code=400,
-            detail="metadata_json contains undefined fields",
-        )
+    if metadata is not None:
+        if not isinstance(metadata, dict) or not metadata:
+            raise HTTPException(
+                status_code=400,
+                detail="metadata_json must not be empty",
+            )
+        if not set(metadata).issubset(defined):
+            raise HTTPException(
+                status_code=400,
+                detail="metadata_json contains undefined fields",
+            )
     if tag is not None and (
         not isinstance(tag, list)
-        or any(not isinstance(item, str) for item in tag)
+        or any(not isinstance(item, str) or not item.strip() for item in tag)
     ):
-        raise HTTPException(status_code=400, detail="tag must be a list of strings")
+        raise HTTPException(
+            status_code=400,
+            detail="tag must be a list of non-empty strings",
+        )
 
     id_targets = {
         item if isinstance(item, int) else int(item)
@@ -3650,9 +3664,13 @@ def batch_chunk_metadata(
         if str(chunk.get("chunk_id")) in _ONTOLOGY_METADATA_FAIL_CHUNK_IDS:
             failed += 1
             continue
-        chunk.setdefault("metadata_json", {}).update(
-            {key: str(value) for key, value in metadata.items()}
-        )
+        if metadata is not None:
+            target = chunk.setdefault("metadata_json", {})
+            for key, value in metadata.items():
+                if value is None:
+                    target.pop(key, None)
+                else:
+                    target[key] = str(value)
         if tag is not None:
             chunk["tag"] = list(tag)
         success += 1
