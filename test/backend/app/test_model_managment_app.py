@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus
 
+from contracts.errors.exceptions import ModelProviderError, TokenExpiredError
+
 # Add project root to sys.path so that the top-level `backend` package is importable
 PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "../../..")
 if PROJECT_ROOT not in sys.path:
@@ -2124,19 +2126,34 @@ class TestModelAuditEntries:
 
 
 @pytest.mark.parametrize("endpoint", ["/model/provider/create", "/model/manage/provider/create"])
-@pytest.mark.parametrize("status_code", [401, 403, 502])
-def test_provider_domain_error_preserves_upstream_http_contract(client, auth_header, mocker, endpoint, status_code):
-    """Map the model domain error to develop's unchanged HTTP status and detail."""
-    from contracts.errors.exceptions import ModelProviderError
-
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_body"),
+    [
+        (
+            ModelProviderError(401, "Provider unavailable"),
+            422,
+            {
+                "code": "MODEL_PROVIDER_AUTH_FAILED",
+                "message": "Model provider authentication failed. Check the model API key.",
+            },
+        ),
+        (ModelProviderError(403, "Provider unavailable"), 403, {"detail": "Provider unavailable"}),
+        (ModelProviderError(404, "Provider unavailable"), 404, {"detail": "Provider unavailable"}),
+        (ModelProviderError(502, "Provider unavailable"), 502, {"detail": "Provider unavailable"}),
+        (TokenExpiredError("Session expired"), 401, {"detail": "Session expired"}),
+    ],
+)
+def test_provider_discovery_distinguishes_provider_and_session_errors(
+    client, auth_header, mocker, endpoint, error, expected_status, expected_body
+):
     discover = mocker.patch(
         "management.api.model.model_managment.create_provider_models_for_tenant",
-        side_effect=ModelProviderError(status_code, "provider_error: Provider unavailable"),
+        side_effect=error,
     )
     payload = {"provider": "silicon", "model_type": "llm", "api_key": "fixture"}
     if "/manage/" in endpoint:
         payload["tenant_id"] = "test_tenant"
     response = client.post(endpoint, json=payload, headers=auth_header)
-    assert response.status_code == status_code
-    assert response.json() == {"detail": "provider_error: Provider unavailable"}
+    assert response.status_code == expected_status
+    assert response.json() == expected_body
     discover.assert_awaited_once()
